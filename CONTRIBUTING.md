@@ -1,25 +1,29 @@
 # Contributing
 
-Thanks for looking. The most useful contributions to this project are usually
-not code: a control that fires wrongly against a real Bitbucket instance, or
-remediation text that does not match what the UI actually says, is worth more
-than a refactor.
+Thanks for looking. The most useful contributions here are usually not code: a
+control that fires wrongly against a real Bitbucket instance, or remediation
+text that does not match what the UI actually says, is worth more than a
+refactor.
 
 ## Getting set up
 
 ```bash
 git clone https://github.com/scm-bench/scm-bench
 cd scm-bench
-make check        # gofmt, go vet, race-enabled tests, Rego compile + tests
-make build        # binary into bin/
+
+make check      # gofmt, vet, race-enabled tests, Rego compile + policy tests
+make policy     # just the Rego: compile, unit tests, coverage
+make build      # binary into bin/
+make vuln       # govulncheck against what this code actually reaches
+make snapshot   # full release build locally, without publishing
 ```
 
-Go 1.25+ is required; go.mod pins a patched toolchain, which Go fetches on its
-own. `opa` is needed for the policy half of `make check` — everything else is
-the Go toolchain, since the bundle is embedded and there is no code generation
-step.
+Go 1.25+; `go.mod` pins a patched toolchain, which Go fetches on its own.
+[`opa`](https://www.openpolicyagent.org/docs/latest/#running-opa) is needed for
+the policy half of `make check`. Nothing else — the bundle is embedded and there
+is no code generation step.
 
-No instance to test against? Every code path except the fetcher runs offline:
+No instance to test against? Everything except the fetcher runs offline:
 
 ```bash
 ./bin/scm-bench scan --snapshot-in examples/snapshot.json
@@ -29,80 +33,151 @@ No instance to test against? Every code path except the fetcher runs offline:
 
 **A control that cannot be evaluated reports `MANUAL`, never `PASS` or `FAIL`.**
 
-If the token lacks a permission, if an add-on is not installed, if the API
-never returned the field — the answer is "I could not tell", and the control is
-excluded from the score. A confident wrong answer is the worst thing this tool
-can do, because it teaches people to ignore its output.
+If the token lacks a permission, if an add-on is not installed, if the API never
+returned the field — the answer is "I could not tell", and the control leaves
+the score. A confident wrong answer is the worst thing this tool can do, because
+it teaches people to ignore its output. The rest of the design follows: the
+fetcher records what it could not read in `Available` and never substitutes a
+zero for missing data, and policies check availability *before* they check the
+setting.
 
-Every part of the design follows from that:
+## How the pieces fit
 
-- The fetcher records what it could not read in `Available`, and never
-  substitutes a zero value for missing data.
-- Policies check availability *before* they check the setting. The `MANUAL`
-  branch comes first for a reason.
-- Read lists through `lib.list`, never `object.get` directly — a nil Go slice
-  marshals to JSON `null`, and `object.get` will not substitute its default for
-  a key that exists with a null value.
+```
+internal/
+  scm/                  normalized snapshot types (the fetcher/policy contract)
+    bitbucketdc/        REST client, fetcher, ref-matcher resolution
+  checks/policies/      one directory per control: check.rego, check_test.rego,
+                        metadata.json
+  engine/               compiles the bundle once, evaluates, scores
+  report/               table, json, sarif
+  diff/                 compares two evaluations; backs `scm-bench diff`
+  config/               thresholds handed to Rego as input.config
+  cli/                  flags, exit codes, the scan trace
+  console/              the table renderer both reports draw with, plus the
+                        tagged lines the tool writes about itself on stderr
+```
 
-## Adding or changing a control
+Glob semantics, Bitbucket's branch model and group expansion are resolved in Go
+rather than Rego. They are fiddly, version-dependent, and are not policy. The
+fetcher hands Rego a boolean: a rule asks *"is the default branch protected?"*,
+not *"does `release/**` match `refs/heads/main`?"*
+
+## Adding a control
 
 Create a directory under `internal/checks/policies/bitbucketdc/`. No Go changes
-are needed; the bundle is discovered at load time.
+— the bundle is embedded and discovered at load time. Three files:
 
-Each control is three files:
+**`check.rego`** returns a single `result` document.
 
-- `check.rego` — returns a single `result` document with `status`, `details`
-  and optional `evidence`.
-- `check_test.rego` — the control's PASS, FAIL and MANUAL branches. CI holds the
-  bundle at 100% coverage, so this is not optional. Run them with `make policy`.
-- `metadata.json` — ID, severity, scope, and the remediation text. All of it in
-  English: the tool has one output language, so there is nothing to translate
-  and no translation to review.
+```rego
+package scmbench.rules.cis_1_1_4
 
-**Remediation is the part people act on.** It must name a concrete place: a
-settings path (`Repository settings -> Branch permissions -> Add restriction`),
-a file to add, or an explicit statement that nothing applies. A test enforces
-this. Vague remediation is worse than none, because it wastes the reader's time
-before they discover it does not help.
+import rego.v1
+import data.scmbench.lib
 
-Write it twice, at two lengths:
+result := {"status": "MANUAL", "details": "Merge checks could not be read."} if {
+	not lib.available("pullRequestSettings")
+} else := {"status": "PASS", "details": "Approvals are dismissed on update."} if {
+	lib.pr_setting("unapproveOnUpdate", false) == true
+} else := {
+	"status": "FAIL",
+	"details": "Approvals survive updates, so unreviewed code can be merged.",
+	"evidence": ["unapproveOnUpdate = false"],
+}
+```
 
-- `remediation` — the full paragraph. The settings path, the project-level
-  variant that covers every repository at once, the exemptions worth granting,
-  and the config key that changes what the control counts.
-- `fixSummary` — the first move in one imperative line, under 100 characters,
-  still naming the place: `Enable "Prevent deletion" at Repository settings ->
-  Branch permissions.` This is what the findings list prints beside the verdict,
-  so it has to be actionable on its own; the paragraph waits in its own section
-  at the end of the report.
+The `MANUAL` branch comes first on purpose: deciding what the data says is only
+sound once you have established that you have the data.
 
-Both are checked by `TestRemediationSaysWhereToAct`.
+**Read every list through `lib.list`**, never `object.get`. A nil Go slice
+marshals to JSON `null`, and `object.get` only substitutes its default for an
+*absent* key — a key present with a null value comes back null, and passing that
+to `concat` or `sort` makes the rule undefined, so the control reports nothing
+at all. `TestZeroValuedSnapshotProducesAVerdictForEveryControl` guards this.
+
+**`check_test.rego`** is not optional. Every PASS, FAIL and MANUAL branch is
+covered and CI holds the bundle at 100% — an uncovered branch is a verdict
+nobody has ever seen the rule produce. Run them with `make policy`.
+
+**`metadata.json`** carries the ID, severity, scope and remediation, all in
+English: the tool has one output language, so there is nothing to translate.
+Remediation is written twice, at two lengths:
+
+- `remediation` — the full paragraph: the settings path, the project-level
+  variant covering every repository at once, the exemptions worth granting, and
+  the config key that changes what the control counts.
+- `fixSummary` — the first move in one imperative line, under 100 characters:
+  `Enable "Prevent deletion" at Repository settings -> Branch permissions.`
+  This is what each finding's table cell prints, so it must stand alone.
+
+Both must name a concrete place — a settings path, a file to add, or an explicit
+statement that nothing applies. `TestRemediationSaysWhereToAct` enforces it.
+Vague remediation is worse than none: it wastes the reader's time before they
+discover it does not help.
 
 Then add the control to the coverage table in both READMEs.
 
 ## Testing
 
-The suite runs every control against hardened, misconfigured, unreadable and
-zero-valued fixtures. If you add a control, add its expected status to each.
+Two suites, because the project is written in two languages and `go test -cover`
+cannot see Rego. Go covers the fetcher, engine, reporters and CLI; Rego covers
+the controls, held at 100%.
 
-The zero-valued case is not optional. It catches the class of bug where a rule
-silently produces no verdict at all, which looks like a passing test run.
+The Go suite runs every control against hardened, misconfigured, unreadable and
+zero-valued fixtures, asserting each produces a verdict in every case. Add your
+control's expected status to each. **The zero-valued case is not optional** — it
+catches the bug where a rule silently produces no verdict, which looks exactly
+like a passing test run.
 
-The fetcher is tested against a stand-in Bitbucket. That verifies the code is
-self-consistent — it does **not** verify that Bitbucket behaves the way the
-stand-in does. If you have access to a real instance, running against it and
-reporting what differed is the single most valuable thing you can do here.
+The fetcher is tested against a stand-in Bitbucket covering pagination, renamed
+endpoints, permission denials, and the cross-version shapes where a merge check
+is a number in one release and an object in another. That proves the code is
+self-consistent; it does **not** prove Bitbucket behaves like the stand-in. If
+you have a real instance, running against it and reporting what differed is the
+single most valuable thing you can do here.
+
+## Releasing
+
+Push a tag, or run the **Release** workflow from the Actions tab and give it the
+tag to create. The workflow does the rest.
+
+```bash
+git tag -a v0.1.0 -m "scm-bench v0.1.0" && git push origin v0.1.0
+```
+
+Three things that have each gone wrong once:
+
+- **All three components, and the `v`** — `v0.1.0`, never `v0.1`. Go accepts
+  `v0.1` as a semver string but not a canonical one, so the module system
+  ignores the tag and `go install ...@latest` will not find it. goreleaser
+  builds it happily and produces artifacts nobody can install.
+- **Publish the draft goreleaser made.** Never start a new release from the
+  Releases page: it gets the notes and none of the files, which is how
+  `v0.1.0-rc.1` ended up existing twice, once with nothing to download.
+- **Use `-rc.N` while something is unverified.** Go's `@latest` resolves to the
+  newest *release* version, so a prerelease reaches only those who ask for it by
+  name, and you can iterate without spending `v0.1.0`.
+
+Notes are written by hand in the draft; goreleaser fills in the parts carrying a
+version number. Signing needs nothing from you — cosign works keylessly from the
+workflow's OIDC token. Before publishing, check `checksums.txt.bundle` and the
+SBOMs are attached: a release whose signing step was skipped looks complete
+otherwise.
 
 ## Pull requests
 
 - One change per pull request.
-- Label it — `bug`, `enhancement`, `policy`, `documentation`, `ci`. Release
-  notes are grouped by label, so an unlabelled pull request lands under
-  "Other changes".
+- **Label it.** Release notes are grouped by label and an unlabelled pull
+  request lands under "Other changes". The labels are in
+  [`.github/labels.json`](.github/labels.json); the mapping to release note
+  sections is in [`.github/release.yml`](.github/release.yml).
 - Explain what you verified, and say plainly what you could not.
 
-Commit messages are plain imperative sentences, not Conventional Commits.
-Explain *why* the change is right; the diff already shows what it does.
+Commit messages take a Conventional Commits prefix — `feat:`, `fix:`, `docs:`,
+`test:`, `build:`, with `!` for a breaking change — and a body explaining *why*
+the change is right. The diff shows what it does; the body is for the reasoning,
+what was tried and rejected, and what is still not covered.
 
 ## Reporting a problem
 
