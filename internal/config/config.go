@@ -52,6 +52,9 @@ type Thresholds struct {
 	MinRepositoryAdmins int `yaml:"minRepositoryAdmins" json:"minRepositoryAdmins"`
 	// MinOrgAdmins / MaxOrgAdmins bracket the instance administrator count:
 	// too few is a bus-factor risk, too many is an oversized blast radius.
+	// Zero means "no bound on this side": the only other reading of
+	// maxOrgAdmins: 0 is "no administrators at all", which is not a policy
+	// anybody wants and used to fail every instance that had any.
 	MinOrgAdmins int `yaml:"minOrgAdmins" json:"minOrgAdmins"`
 	MaxOrgAdmins int `yaml:"maxOrgAdmins" json:"maxOrgAdmins"`
 	// StaleBranchDays is how long a branch may sit untouched before it counts

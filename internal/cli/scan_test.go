@@ -19,6 +19,13 @@ import (
 // so the CLI has something with a known verdict to report on.
 func writeSnapshotFixture(t *testing.T) string {
 	t.Helper()
+	return writeSnapshotWith(t, nil)
+}
+
+// writeSnapshotWith writes the fixture with an optional mutation applied, so a test
+// that needs one field different does not have to restate the whole instance.
+func writeSnapshotWith(t *testing.T, mutate func(*scm.Snapshot)) string {
+	t.Helper()
 
 	snapshot := scm.Snapshot{
 		SchemaVersion: scm.SchemaVersion,
@@ -60,6 +67,10 @@ func writeSnapshotFixture(t *testing.T) string {
 				},
 			}},
 		}},
+	}
+
+	if mutate != nil {
+		mutate(&snapshot)
 	}
 
 	raw, err := json.Marshal(snapshot)
@@ -393,5 +404,97 @@ func TestStderrWriterHonoursNoColor(t *testing.T) {
 	// which is the other half of the rule and the case CI runs in.
 	if StderrWriter().P.Enabled {
 		t.Error("colour enabled while stderr is not a terminal")
+	}
+}
+
+// MANUAL is excluded from both sides of the score, which is right control by
+// control — an instance should not be marked down for a question its API
+// cannot answer — and perverse in aggregate, because it shrinks the
+// denominator. The fixture below makes the point: with nothing readable, three
+// controls stay decidable, all three pass, and a scan that saw almost nothing
+// reports a perfect 100 and exits 0.
+//
+// Note which threshold catches it. --fail-under cannot: the score is 100.
+// Only --max-manual asks the question that matters here, which is not "is the
+// score good" but "did the scan see enough for the score to mean anything".
+func TestScanThresholds(t *testing.T) {
+	normal := writeSnapshotFixture(t)
+	blind := writeSnapshotWith(t, func(s *scm.Snapshot) {
+		s.Organization.Available = map[string]bool{}
+		for i := range s.Projects {
+			for j := range s.Projects[i].Repositories {
+				s.Projects[i].Repositories[j].Available = map[string]bool{}
+			}
+		}
+	})
+
+	// Stated rather than assumed, because every expectation below rests on it.
+	if got := scoreOf(t, blind); got != 100 {
+		t.Fatalf("blind fixture scores %d, want 100; the rest of this test assumes it", got)
+	}
+	if got := scoreOf(t, normal); got != 30 {
+		t.Fatalf("readable fixture scores %d, want 30", got)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"failures trip fail-on", []string{"scan", "--snapshot-in", normal}, ExitFindings},
+		{"fail-on none clears them", []string{"scan", "--snapshot-in", normal, "--fail-on", "none"}, ExitOK},
+		{"score below fail-under", []string{"scan", "--snapshot-in", normal, "--fail-on", "none", "--fail-under", "50"}, ExitFindings},
+		{"score above fail-under", []string{"scan", "--snapshot-in", normal, "--fail-on", "none", "--fail-under", "20"}, ExitOK},
+
+		// The pathology, and the only thing that catches it.
+		{"blind scan passes by default", []string{"scan", "--snapshot-in", blind}, ExitOK},
+		{"fail-under cannot catch a blind scan", []string{"scan", "--snapshot-in", blind, "--fail-under", "100"}, ExitOK},
+		{"max-manual catches it", []string{"scan", "--snapshot-in", blind, "--max-manual", "50"}, ExitFindings},
+		{"max-manual generous enough", []string{"scan", "--snapshot-in", blind, "--max-manual", "90"}, ExitOK},
+
+		{"fail-under out of range", []string{"scan", "--snapshot-in", normal, "--fail-under", "101"}, ExitError},
+		{"max-manual out of range", []string{"scan", "--snapshot-in", normal, "--max-manual", "-2"}, ExitError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, code := run(t, tc.args...); code != tc.want {
+				t.Errorf("exit code = %d, want %d", code, tc.want)
+			}
+		})
+	}
+}
+
+func scoreOf(t *testing.T, snapshotPath string) int {
+	t.Helper()
+	out, _, _ := run(t, "scan", "--snapshot-in", snapshotPath, "-o", "json", "--fail-on", "none")
+	var rep struct {
+		Score struct {
+			Value int `json:"value"`
+		} `json:"score"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	return rep.Score.Value
+}
+
+// A policy that could not run is a broken tool, not a finding about the
+// instance. It degrades to MANUAL so the rest of the report survives, but
+// MANUAL leaves the score's denominator — so a bundle that failed to evaluate
+// raises the score and used to exit 0. A green pipeline is the one thing that
+// must not come out of a scan that did not work.
+func TestPolicyErrorsFailTheScan(t *testing.T) {
+	rep := &engine.Report{
+		Score:  engine.Score{Value: 100, Passed: 1},
+		Errors: []string{"CIS-1.1.15 on PRJ/app: policy produced no result"},
+	}
+	err := exitStatus(rep, &scanOptions{failOn: "high", maxManual: -1})
+	if err == nil {
+		t.Fatal("exitStatus returned nil for a report carrying policy errors")
+	}
+	if code := ExitCode(err); code != ExitError {
+		t.Errorf("exit code = %d, want %d", code, ExitError)
+	}
+	if !strings.Contains(err.Error(), "policy produced no result") {
+		t.Errorf("error does not carry the reason: %v", err)
 	}
 }

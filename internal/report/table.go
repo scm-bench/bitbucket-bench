@@ -113,6 +113,27 @@ func writeSummary(t console.Writer, rep *engine.Report, p painter) {
 		s.EarnedWeight, s.TotalWeight,
 	)))
 
+	// How much of the instance the score is actually based on.
+	//
+	// Excluding WARN from both sides of the fraction is right control by
+	// control — an instance should not be marked down for a question its API
+	// cannot answer — and misleading in aggregate, because it shrinks the
+	// denominator. A token that could read a tenth of an instance scored 78
+	// where a working one scored 53. The arithmetic was never wrong; the
+	// summary simply had no line that said the sample was small. This is that
+	// line, and it turns yellow when most of the instance went unseen.
+	if scored := s.Passed + s.Failed; s.Manual > 0 {
+		decidable := scored + s.Manual
+		coverage := scored * 100 / decidable
+		text := fmt.Sprintf("      scored %d of %d controls (%d%%); %d could not be evaluated",
+			scored, decidable, coverage, s.Manual)
+		colour := ansiDim
+		if coverage < 50 {
+			colour = ansiYellow
+		}
+		t.Info("%s", p.paint(colour, text))
+	}
+
 	var parts []string
 	for _, sev := range []string{checks.SeverityHigh, checks.SeverityMedium, checks.SeverityLow} {
 		c := s.BySeverity[sev]

@@ -583,3 +583,29 @@ func TestSARIFResultsIsAnArrayWhenThereIsNothingToReport(t *testing.T) {
 		t.Error("tool.driver.rules is null, want []")
 	}
 }
+
+// The score excludes MANUAL from both sides, so a scan that could see very
+// little scores high off a tiny denominator — 100/100 is reachable from three
+// decided controls. The arithmetic is right; what was missing was any line
+// saying how small the sample was.
+func TestSummaryStatesHowMuchWasActuallyScored(t *testing.T) {
+	out := render(t, Options{Format: FormatTable, ToolVersion: "1.2.3"})
+	if !strings.Contains(out, "could not be evaluated") {
+		t.Errorf("summary does not report evaluation coverage:\n%s", out)
+	}
+
+	// With nothing unevaluated there is nothing to caveat, so the line is
+	// absent rather than reading "0 could not be evaluated".
+	rep := &engine.Report{
+		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "t", Severity: "HIGH",
+			Status: engine.StatusPass, Resource: "PRJ/app", ResourceType: engine.ResourceRepository,
+			Details: "fine",
+		}},
+	}
+	rep.Score = engine.Compute(rep.Findings)
+	if got := renderReport(t, rep, Options{Format: FormatTable}); strings.Contains(got, "could not be evaluated") {
+		t.Errorf("coverage line shown when everything was evaluated:\n%s", got)
+	}
+}

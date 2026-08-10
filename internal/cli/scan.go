@@ -69,6 +69,8 @@ type scanOptions struct {
 	showPassed     bool
 	maxResources   int
 	failOn         string
+	failUnder      int
+	maxManual      int
 	noColor        bool
 	verbose        bool
 	insecure       bool
@@ -103,7 +105,17 @@ dormant accounts); without it those report MANUAL instead of failing.
 Credentials may be supplied by flag or environment:
   BITBUCKET_URL, BITBUCKET_TOKEN, BITBUCKET_USERNAME, BITBUCKET_PASSWORD
 
-Exit codes: 0 clean, 1 findings at or above --fail-on, 2 the scan failed.`,
+Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
+
+Three thresholds drive exit 1, and they answer different questions:
+  --fail-on      are there failures this severe?
+  --fail-under   is the score acceptable?
+  --max-manual   did the scan see enough to have an opinion at all?
+
+The last one matters because controls that could not be evaluated are excluded
+from the score rather than counted against it: a token that can read very
+little produces a high score from a small sample, and nothing else would say
+so.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runScan(cmd, opts)
@@ -126,6 +138,12 @@ Exit codes: 0 clean, 1 findings at or above --fail-on, 2 the scan failed.`,
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
 	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "table output: resource names to list per finding before summarising; 0 lists all")
 	f.StringVar(&opts.failOn, "fail-on", "high", "exit 1 when a failure at or above this severity exists: high, medium, low, none")
+	f.IntVar(&opts.failUnder, "fail-under", 0, "exit 1 when the score is below this; 0 disables")
+	// Defaults to off, because how much of an instance a token can read is a
+	// property of the deployment, and a guess here would fail scans that are
+	// working as well as they can. -1 rather than 0 is the off switch, since 0
+	// is the strictest setting a user could reasonably want.
+	f.IntVar(&opts.maxManual, "max-manual", -1, "exit 1 when more than this percent of controls need manual review; -1 disables")
 	f.BoolVar(&opts.noColor, "no-color", false, "disable ANSI colour")
 	f.BoolVarP(&opts.verbose, "verbose", "v", false, "log fetch progress to stderr")
 	f.BoolVar(&opts.insecure, "insecure", false, "skip TLS certificate verification (for private CAs)")
@@ -242,7 +260,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return err
 	}
 
-	return exitStatus(rep, opts.failOn)
+	return exitStatus(rep, opts)
 }
 
 func validateScanOptions(opts *scanOptions) error {
@@ -263,6 +281,12 @@ func validateScanOptions(opts *scanOptions) error {
 	}
 	if opts.concurrency < 1 {
 		return fmt.Errorf("--concurrency must be at least 1")
+	}
+	if opts.failUnder < 0 || opts.failUnder > 100 {
+		return fmt.Errorf("--fail-under must be between 0 and 100, got %d", opts.failUnder)
+	}
+	if opts.maxManual < -1 || opts.maxManual > 100 {
+		return fmt.Errorf("--max-manual must be between 0 and 100, or -1 to disable, got %d", opts.maxManual)
 	}
 	// Checked here as well as in the fetcher so it costs nothing to find out.
 	// The fetcher only reaches its own check after the preflight and the
@@ -421,14 +445,61 @@ func useColor(opts *scanOptions, out io.Writer) bool {
 // hasNoColorEnv honours the NO_COLOR convention, which every command respects.
 func hasNoColorEnv() bool { return os.Getenv("NO_COLOR") != "" }
 
-func exitStatus(rep *engine.Report, failOn string) error {
-	if strings.EqualFold(failOn, "none") {
-		return nil
+// exitStatus turns a report into the process's exit code.
+//
+// The three conditions answer three different questions, and a scan can pass
+// the first while failing the others:
+//
+//   - --fail-on: are there failures this bad?
+//   - --fail-under: is the score acceptable?
+//   - --max-manual: did the scan actually see enough to have an opinion?
+//
+// The last one exists because MANUAL is excluded from both sides of the score,
+// which is right in itself and perverse in aggregate: the fewer settings a
+// token can read, the smaller the denominator, and the higher the score. A
+// credential that could read a tenth of the instance scored 78 where a working
+// one scored 53, and exited 0 while doing it. Nothing in the report was untrue;
+// there was simply no way to say "this scan did not see enough to be believed".
+func exitStatus(rep *engine.Report, opts *scanOptions) error {
+	// A policy that could not run is a broken tool, not a finding about the
+	// instance. It already degrades to MANUAL so the rest of the report
+	// survives — but MANUAL leaves the score's denominator, so a bundle that
+	// failed to evaluate raises the score and exits 0. That is the one outcome
+	// a scan must never produce.
+	if len(rep.Errors) > 0 {
+		return &exitCodeError{
+			code: ExitError,
+			msg: fmt.Sprintf("%s could not be evaluated; the report is incomplete and its score is not comparable\n%s",
+				pluralize(len(rep.Errors), "control"), strings.Join(rep.Errors, "\n")),
+		}
 	}
-	if rep.HasFailureAtOrAbove(failOn) {
+
+	if opts.maxManual >= 0 {
+		decidable := rep.Score.Passed + rep.Score.Failed + rep.Score.Manual
+		if decidable > 0 {
+			percent := rep.Score.Manual * 100 / decidable
+			if percent > opts.maxManual {
+				return &exitCodeError{
+					code: ExitFindings,
+					msg: fmt.Sprintf("%d%% of controls need manual review (--max-manual %d%%); the scan could not see enough to judge this instance\n"+
+						"grant the token more read access, or raise --max-manual if this is expected",
+						percent, opts.maxManual),
+				}
+			}
+		}
+	}
+
+	if opts.failUnder > 0 && rep.Score.Value < opts.failUnder {
 		return &exitCodeError{
 			code: ExitFindings,
-			msg:  failureSummary(rep, failOn),
+			msg:  fmt.Sprintf("score %d is below --fail-under %d", rep.Score.Value, opts.failUnder),
+		}
+	}
+
+	if !strings.EqualFold(opts.failOn, "none") && rep.HasFailureAtOrAbove(opts.failOn) {
+		return &exitCodeError{
+			code: ExitFindings,
+			msg:  failureSummary(rep, opts.failOn),
 		}
 	}
 	return nil

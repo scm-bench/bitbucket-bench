@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -537,5 +538,58 @@ func TestBlankSignatureHookKeyDoesNotMatchEveryHook(t *testing.T) {
 	}
 	if !seen {
 		t.Fatal("CIS-1.1.12 produced no finding")
+	}
+}
+
+// config.Validate has always read a zero bound as "not set" — it skips the
+// min/max ordering check when either is zero. The rule did not, so
+// `maxOrgAdmins: 0` meant "at most zero administrators" and failed every
+// instance that had any. Of the two readings only one is ever useful.
+func TestZeroMaxOrgAdminsMeansNoUpperLimit(t *testing.T) {
+	ctx := context.Background()
+
+	snapshot := &scm.Snapshot{
+		SchemaVersion: scm.SchemaVersion,
+		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
+		Organization: scm.Organization{
+			EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"a", "b", "c"}, Count: 3, Complete: true},
+			Available:       map[string]bool{"adminUsers": true, "adminGroups": true},
+		},
+	}
+
+	for _, tc := range []struct {
+		name string
+		max  int
+		want engine.Status
+	}{
+		{"no upper limit", 0, engine.StatusPass},
+		{"under the limit", 5, engine.StatusPass},
+		{"over the limit", 2, engine.StatusFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Thresholds.MinOrgAdmins = 2
+			cfg.Thresholds.MaxOrgAdmins = tc.max
+
+			eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+			if err != nil {
+				t.Fatalf("build engine: %v", err)
+			}
+			rep, err := eng.Evaluate(ctx, snapshot)
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			for _, f := range rep.Findings {
+				if f.CheckID != "CIS-1.3.3" {
+					continue
+				}
+				if f.Status != tc.want {
+					t.Errorf("CIS-1.3.3 = %s (%s), want %s", f.Status, f.Details, tc.want)
+				}
+				if tc.max == 0 && strings.Contains(f.Details, "range of 2 to 0") {
+					t.Errorf("details state a nonsense range: %s", f.Details)
+				}
+			}
+		})
 	}
 }
