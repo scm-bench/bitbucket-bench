@@ -106,22 +106,74 @@ docker_signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# `use: github` is goreleaser's own changelog renderer, not GitHub's native
-# generator (that is `use: github-native`, a different value despite the
-# similar name). This produces a flat, ascending list of
-# "<sha>: <subject> (<author> <email>)" — no PR links, no @handles, no
-# grouping. That is an intentional, explicit choice for this project, not an
-# oversight: kept as-is rather than switched to github-native.
+# This is goreleaser's own changelog renderer. `use: github-native` — a
+# different value despite the similar name — hands the job to GitHub's
+# generate-notes API, which lists *merged pull requests* and categorises them
+# by the labels in .github/release.yml. Everything here lands on main by direct
+# push, so that API has nothing to list, and it would also disable groups,
+# sort, filters, abbrev and format in exchange. Hence: not that.
 #
-# .github/release.yml (label-based categories) has no effect on this output —
-# `groups`/`filters` under `use: github` only match a commit-message regexp,
-# never a label. That file still governs GitHub's own "Generate release
-# notes" feature if invoked separately (the button in the release UI, or the
-# generate_release_notes API flag), which is unrelated to what goreleaser
-# writes into the draft release body.
+# .github/release.yml therefore has no effect on this body. It still governs
+# GitHub's own "Generate release notes" button if somebody presses it.
 changelog:
-  sort: asc
-  use: github
+  # git, not github. With no previous tag — which is every first release — the
+  # github changeloger falls back to git to read the commits, but the default
+  # `format` is still chosen from the *configured* `use`. That mismatch is what
+  # printed a maintainer's email address into v0.1.0-rc.1 eleven times: the
+  # github default format ends in
+  # `{{ with .Author.Username }}@{{ . }}{{ else }}{{ .Author.Name }} <{{ .Author.Email }}>{{ end }}`,
+  # and a git commit carries no GitHub username to take the first branch.
+  use: git
+
+  # Written out rather than left to the default, because the default is where
+  # the email came from. Seven characters is enough to `git show`, and nothing
+  # else belongs on the line: the heading above it already says what kind of
+  # change this is, and git already knows who wrote it.
+  format: "{{ .SHA }} {{ .Message }}"
+  abbrev: 7
+
+  # Not `asc`. goreleaser sorts by comparing the commit *message* as a string,
+  # so `sort: asc` produced build, docs, feat, first commit, fix, fix, …, test:
+  # the alphabet, presented as though it were history. Empty keeps git's own
+  # order, which is what the groups below then partition.
+  sort: ""
+
+  filters:
+    exclude:
+      - "^first commit$"
+      - "^Merge "
+
+  # Regexps are matched against the commit subject, so conventional-commit
+  # prefixes are the whole mechanism. Two things about the ordering:
+  #
+  #   - Groups consume in the order written here, not in `order` order, so
+  #     breaking changes must come first or `feat!:` is swallowed by Features.
+  #   - The catch-all — the one with no regexp — must come last for the same
+  #     reason, or it would swallow everything.
+  #
+  # A group that matches nothing is dropped rather than rendered as an empty
+  # heading.
+  groups:
+    - title: "⚠️ Breaking changes"
+      regexp: '^.*?[a-z]+(\([[:word:]]+\))??!:.+$'
+      order: 0
+    - title: "✨ Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "🐛 Bug fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "📝 Documentation"
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: "🧪 Testing"
+      regexp: '^.*?test(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: "🔨 Build & CI"
+      regexp: '^.*?(build|ci|chore)(\([[:word:]]+\))??!?:.+$'
+      order: 5
+    - title: "Other changes"
+      order: 999
 
 # goreleaser reports `dockers`/`docker_manifests` as being phased out in favour
 # of `dockers_v2`. The migration is deferred rather than done blind: dockers_v2
@@ -197,46 +249,40 @@ release:
   # automatically. This matters beyond labelling: Go's @latest resolves to the
   # newest *release* version, so a prerelease has to be asked for by name.
   prerelease: auto
+  # The two fastest ways in, pinned to this exact version. `:latest` is
+  # deliberately absent: a prerelease never becomes it (skip_push: auto below),
+  # so naming it here would hand someone the wrong image.
+  header: |
+    `scm-bench` audits a source control platform against the Source Code section
+    of the CIS Software Supply Chain Security Guide.
+
+    ```bash
+    go install github.com/scm-bench/scm-bench/cmd/scm-bench@{{ .Tag }}
+    docker pull ghcr.io/scm-bench/scm-bench:{{ .Version }}
+    ```
   footer: |
     ## Verifying
 
-    Check the digests:
+    ```bash
+    # 1. the archives match the checksum file.
+    #    --ignore-missing because checksums.txt lists every platform and you
+    #    downloaded one. On macOS: shasum -a 256 --ignore-missing -c checksums.txt
+    sha256sum --ignore-missing -c checksums.txt
 
-    ```
-    sha256sum -c checksums.txt
-    ```
-
-    That only proves the archive matches the checksum file. To establish that
-    the checksum file itself came from this repository's release workflow:
-
-    ```
-    cosign verify-blob checksums.txt \
-      --bundle checksums.txt.bundle \
+    # 2. the checksum file came from this repository's release workflow
+    cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
       --certificate-identity-regexp '^https://github\.com/scm-bench/scm-bench/\.github/workflows/release\.yml@' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
-    ```
 
-    Download `checksums.txt.bundle` alongside `checksums.txt`. The bundle
-    carries the signature, the signing certificate and the transparency-log
-    entry in one file; older releases published `.sig` and `.pem` separately,
-    which is what cosign 2 produced.
-
-    The two identity flags are the point of the command. Without them cosign
-    confirms that *somebody* signed the file, which is not a claim worth
-    anything.
-
-    Container images are signed the same way:
-
-    ```
+    # 3. the container image, same signing identity
     cosign verify ghcr.io/scm-bench/scm-bench:{{ .Version }} \
       --certificate-identity-regexp '^https://github\.com/scm-bench/scm-bench/\.github/workflows/release\.yml@' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+    # 4. what commit and workflow built an archive
+    gh attestation verify scm-bench_{{ .Version }}_linux_amd64.tar.gz --repo scm-bench/scm-bench
     ```
 
-    Archives additionally carry a SLSA build provenance attestation, which
-    records how and from what commit they were built:
-
-    ```
-    gh attestation verify scm-bench_{{ .Version }}_linux_amd64.tar.gz \
-      --repo scm-bench/scm-bench
-    ```
+    The two `--certificate-*` flags are the point of the cosign commands: without
+    them cosign confirms only that *somebody* signed the file. Each archive also
+    ships an SPDX SBOM (`*.sbom.json`), covered by the same checksum file.
