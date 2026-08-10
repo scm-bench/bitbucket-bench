@@ -114,7 +114,12 @@ type sarifNotification struct {
 
 func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 	rules := map[string]sarifRule{}
-	var results []sarifResult
+	// Not `var results []sarifResult`: a nil slice marshals to null, and
+	// run.results is typed `array` in the SARIF schema. Strict validators and
+	// GitHub's SARIF upload reject the file outright — and they would do it on
+	// the one run where nothing failed, which is precisely the run an operator
+	// least expects to be told their report is malformed.
+	results := []sarifResult{}
 
 	for _, f := range rep.Findings {
 		// NA findings are noise in a CI report: the control does not apply.

@@ -534,3 +534,52 @@ func TestSummaryReportsAllFourStates(t *testing.T) {
 		}
 	}
 }
+
+// SARIF types run.results as an array, and a nil Go slice marshals to null.
+// The case that reaches it is the good one — an instance where nothing failed
+// and nothing needed a human — so the failure mode was that a clean scan
+// produced a file GitHub's SARIF upload rejects, while every dirty scan worked.
+func TestSARIFResultsIsAnArrayWhenThereIsNothingToReport(t *testing.T) {
+	rep := &engine.Report{
+		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.3.9", CISID: "1.3.9", Title: "Ensure the organization is verified",
+			Severity: "LOW", Status: engine.StatusNA,
+			Resource: engine.InstanceResourceName, ResourceType: engine.ResourceOrganization,
+			Details: "Not applicable.",
+		}},
+	}
+	out := renderReport(t, rep, Options{Format: FormatSARIF, ToolVersion: "1.2.3"})
+
+	if strings.Contains(out, `"results": null`) {
+		t.Fatalf("run.results serialised as null, which is not a SARIF array:\n%s", out)
+	}
+
+	// Asserted through the raw JSON rather than a typed struct, because
+	// unmarshalling turns both null and [] into the same nil slice and would
+	// pass either way.
+	var log struct {
+		Runs []struct {
+			Results *[]json.RawMessage `json:"results"`
+			Tool    struct {
+				Driver struct {
+					Rules *[]json.RawMessage `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &log); err != nil {
+		t.Fatalf("unmarshal SARIF: %v", err)
+	}
+	if len(log.Runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(log.Runs))
+	}
+	if log.Runs[0].Results == nil {
+		t.Error("run.results is null, want []")
+	} else if len(*log.Runs[0].Results) != 0 {
+		t.Errorf("run.results has %d entries, want 0", len(*log.Runs[0].Results))
+	}
+	if log.Runs[0].Tool.Driver.Rules == nil {
+		t.Error("tool.driver.rules is null, want []")
+	}
+}

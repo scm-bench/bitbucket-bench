@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -148,5 +150,76 @@ func TestSelectsHonoursIncludeAndExclude(t *testing.T) {
 	cfg.Exclude = []string{"CIS-1.1.15"}
 	if cfg.Selects("CIS-1.1.15") {
 		t.Error("exclude should take precedence over include")
+	}
+}
+
+// A blank entry is matched by every string, so it does not narrow a list — it
+// disables the check the list drives. signatureHookKeys is the dangerous one:
+// `contains(haystack, "")` is true for any hook, so one stray blank turns
+// CIS-1.1.12 into a PASS that verified nothing.
+func TestBlankListEntriesAreRejected(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"signature hook key", "signatureHookKeys:\n  - \"\"\n  - gpg\n", "signatureHookKeys[0]"},
+		{"whitespace only", "signatureHookKeys:\n  - gpg\n  - \"   \"\n", "signatureHookKeys[1]"},
+		{"merge strategy", "nonLinearMergeStrategies:\n  - \"\"\n", "nonLinearMergeStrategies[0]"},
+		{"security policy path", "securityPolicyPaths:\n  - SECURITY.md\n  - \"\"\n", "securityPolicyPaths[1]"},
+		{"exclude", "exclude:\n  - \"\"\n", "exclude[0]"},
+		{"include", "include:\n  - \"\"\n", "include[0]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.yaml))
+			if err == nil {
+				t.Fatalf("Load accepted a blank entry in %s", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not name %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// A negative threshold does not produce an odd number, it inverts the control.
+// `minRepositoryAdmins: -1` made `count >= minimum` true for a repository with
+// no administrators at all, so CIS-1.3.7 reported PASS — and said "0
+// administrator(s) can manage this repository" while doing it. Every threshold
+// is covered, so a field added later is not left out by omission.
+func TestNegativeThresholdsAreRejected(t *testing.T) {
+	for _, field := range []string{
+		"minApprovers",
+		"minRepositoryAdmins",
+		"minOrgAdmins",
+		"maxOrgAdmins",
+		"staleBranchDays",
+		"maxStaleBranches",
+		"inactiveUserDays",
+	} {
+		t.Run(field, func(t *testing.T) {
+			_, err := Load(writeConfig(t, "thresholds:\n  "+field+": -1\n"))
+			if err == nil {
+				t.Fatalf("Load accepted thresholds.%s = -1", field)
+			}
+			if !strings.Contains(err.Error(), field) {
+				t.Errorf("error %q does not name the field", err)
+			}
+		})
+	}
+}
+
+// Every threshold in the struct must appear in the check above; a new one that
+// nobody adds is exactly how the first four came to be missing.
+func TestEveryThresholdIsValidated(t *testing.T) {
+	fields := reflect.VisibleFields(reflect.TypeOf(Thresholds{}))
+	for _, f := range fields {
+		if f.Type.Kind() != reflect.Int {
+			continue
+		}
+		name := strings.Split(f.Tag.Get("yaml"), ",")[0]
+		if name == "" {
+			t.Errorf("Thresholds.%s has no yaml tag", f.Name)
+			continue
+		}
+		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": -1\n")); err == nil {
+			t.Errorf("thresholds.%s accepts -1; add it to Config.Validate", name)
+		}
 	}
 }

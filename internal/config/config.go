@@ -153,22 +153,65 @@ func Load(path string) (Config, error) {
 
 // Validate rejects thresholds that would make a policy meaningless.
 func (c Config) Validate() error {
+	// Every threshold is checked, not just the ones that looked risky.
+	//
+	// A negative threshold does not merely produce an odd number: it silently
+	// inverts the control it feeds. `minRepositoryAdmins: -1` makes
+	// `count >= minimum` true for a repository with zero administrators, so
+	// CIS-1.3.7 reports PASS and says "0 administrator(s) can manage this
+	// repository" while doing it. `maxStaleBranches: -3` fails every
+	// repository instead. Either way a single typo reconfigures a control into
+	// something that is not a control any more, and nothing in the report says
+	// so — which is why this is a startup error rather than a warning.
 	t := c.Thresholds
-	if t.MinApprovers < 0 {
-		return fmt.Errorf("thresholds.minApprovers must be >= 0")
+	for _, f := range []struct {
+		name  string
+		value int
+	}{
+		{"minApprovers", t.MinApprovers},
+		{"minRepositoryAdmins", t.MinRepositoryAdmins},
+		{"minOrgAdmins", t.MinOrgAdmins},
+		{"maxOrgAdmins", t.MaxOrgAdmins},
+		{"staleBranchDays", t.StaleBranchDays},
+		{"maxStaleBranches", t.MaxStaleBranches},
+		{"inactiveUserDays", t.InactiveUserDays},
+	} {
+		if f.value < 0 {
+			return fmt.Errorf("thresholds.%s must be >= 0, got %d", f.name, f.value)
+		}
 	}
 	if t.MinOrgAdmins > 0 && t.MaxOrgAdmins > 0 && t.MinOrgAdmins > t.MaxOrgAdmins {
 		return fmt.Errorf("thresholds.minOrgAdmins (%d) must not exceed maxOrgAdmins (%d)", t.MinOrgAdmins, t.MaxOrgAdmins)
 	}
-	if t.StaleBranchDays < 0 {
-		return fmt.Errorf("thresholds.staleBranchDays must be >= 0")
-	}
-	if t.InactiveUserDays < 0 {
-		return fmt.Errorf("thresholds.inactiveUserDays must be >= 0")
-	}
 	if c.MaxDefaultPermission != "" {
 		if _, ok := c.PermissionRank[c.MaxDefaultPermission]; !ok {
 			return fmt.Errorf("maxDefaultPermission %q has no entry in permissionRank", c.MaxDefaultPermission)
+		}
+	}
+
+	// A blank entry in any of these lists is matched by everything.
+	//
+	// signatureHookKeys is the one that bites: the rule asks whether a hook's
+	// key or name contains any configured substring, and every string contains
+	// "". One stray `- ""` in a YAML file turns CIS-1.1.12 into a control that
+	// reports "signature verification is enforced by <whatever hook exists>" —
+	// a confident PASS for a setting nobody verified, which is the single
+	// failure mode this project is built to avoid. The others are less
+	// dramatic but wrong in the same way, so they are checked together.
+	for _, list := range []struct {
+		field string
+		items []string
+	}{
+		{"signatureHookKeys", c.SignatureHookKeys},
+		{"nonLinearMergeStrategies", c.NonLinearMergeStrategies},
+		{"securityPolicyPaths", c.SecurityPolicyPaths},
+		{"exclude", c.Exclude},
+		{"include", c.Include},
+	} {
+		for i, item := range list.items {
+			if strings.TrimSpace(item) == "" {
+				return fmt.Errorf("%s[%d] is empty; remove the entry rather than leaving it blank", list.field, i)
+			}
 		}
 	}
 	return nil

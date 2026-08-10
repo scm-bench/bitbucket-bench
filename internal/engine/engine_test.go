@@ -495,3 +495,47 @@ func TestEveryBundledCheckIsExercised(t *testing.T) {
 		t.Errorf("bundle has %d checks but %d produced findings", len(bundle.Checks), len(got))
 	}
 }
+
+// config.Validate rejects a blank signature hook key, but a caller building a
+// Config in Go never goes through it. The rule carries its own guard, because
+// the consequence is not a crash or a missing verdict — it is CIS-1.1.12
+// announcing that signature verification is enforced by whatever unrelated
+// hook happens to be enabled.
+func TestBlankSignatureHookKeyDoesNotMatchEveryHook(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := config.Default()
+	cfg.SignatureHookKeys = []string{"", "gpg"}
+
+	eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+	if err != nil {
+		t.Fatalf("build engine: %v", err)
+	}
+	rep, err := eng.Evaluate(ctx, &scm.Snapshot{
+		SchemaVersion: scm.SchemaVersion,
+		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
+		Projects: []scm.Project{{Key: "PRJ", Repositories: []scm.Repository{{
+			FullName:  "PRJ/app",
+			Available: map[string]bool{"hooks": true},
+			// Nothing to do with signatures.
+			Hooks: []scm.Hook{{Key: "com.example.jira-issue-check", Name: "Jira issue check", Enabled: true}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+
+	var seen bool
+	for _, f := range rep.Findings {
+		if f.CheckID != "CIS-1.1.12" {
+			continue
+		}
+		seen = true
+		if f.Status != engine.StatusFail {
+			t.Errorf("CIS-1.1.12 = %s (%s), want FAIL: no hook here verifies signatures", f.Status, f.Details)
+		}
+	}
+	if !seen {
+		t.Fatal("CIS-1.1.12 produced no finding")
+	}
+}

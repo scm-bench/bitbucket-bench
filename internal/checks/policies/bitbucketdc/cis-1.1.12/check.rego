@@ -9,6 +9,13 @@ import data.scmbench.lib
 # configurable key list rather than a hard-coded vendor name.
 hook_matches(h) if {
 	some pattern in object.get(lib.cfg, "signatureHookKeys", [])
+
+	# Every string contains "", so a blank pattern would report the first
+	# enabled hook — any hook — as a signature verifier. config.Validate
+	# rejects one, and this is the second lock on the same door: a caller
+	# building a Config in Go never passes through that check, and a PASS
+	# nobody verified is the worst output this tool can produce.
+	trim_space(pattern) != ""
 	haystack := lower(concat(" ", [
 		object.get(h, "key", ""),
 		object.get(h, "name", ""),

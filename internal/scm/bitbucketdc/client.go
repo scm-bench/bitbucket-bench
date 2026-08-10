@@ -141,11 +141,31 @@ func NewClient(opts Options) (*Client, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid base URL %q: %w", opts.BaseURL, err)
+		// url.Error embeds the URL it failed on, credentials and all, so the
+		// inner cause is unwrapped and the URL is redacted separately.
+		reason := err
+		var parseErr *url.Error
+		if errors.As(err, &parseErr) {
+			reason = parseErr.Err
+		}
+		return nil, fmt.Errorf("invalid base URL %q: %w", redactURL(opts.BaseURL), reason)
 	}
 	if u.Host == "" {
-		return nil, fmt.Errorf("invalid base URL %q: no host", opts.BaseURL)
+		return nil, fmt.Errorf("invalid base URL %q: no host", redactURL(opts.BaseURL))
 	}
+
+	// Credentials embedded in the URL are stripped here, at the one place a URL
+	// enters the client, rather than at each of the places it leaves.
+	//
+	// They are never used for authentication — that is what --token and
+	// --username/--password are for — but url.URL.String() writes userinfo back
+	// out verbatim (only Redacted() does not), and this URL is stamped into the
+	// snapshot file, the report header and the SARIF uploaded to a code
+	// scanning service. A password reaching any of those is the exact failure
+	// SECURITY.md names first, so it is removed before it can be stored.
+	urlHadCredentials := u.User != nil
+	u.User = nil
+
 	// Tolerate a URL that already points at /rest so both forms work.
 	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/rest")
 
@@ -177,6 +197,14 @@ func NewClient(opts Options) (*Client, error) {
 		warnings = append(warnings, fmt.Sprintf(
 			"credentials were sent in cleartext over http:// to %s (--allow-plaintext)", u.Host))
 	}
+	if urlHadCredentials {
+		// Said out loud rather than dropped in silence: someone who put a
+		// credential in the URL expected it to authenticate them, and needs to
+		// know it did not — otherwise the eventual 401 sends them looking at
+		// the password they just typed.
+		warnings = append(warnings, "credentials embedded in the base URL were ignored and removed; "+
+			"authentication uses --token or --username/--password")
+	}
 
 	return &Client{
 		baseURL:           u,
@@ -206,8 +234,37 @@ func checkTransport(u *url.URL, allowPlaintext bool) error {
 	if u.Scheme != "http" || isLoopback(u) || allowPlaintext {
 		return nil
 	}
+	// Redacted() rather than the URL itself: NewClient strips userinfo before
+	// calling this, but an error message about protecting a credential is the
+	// last place that should depend on someone upstream having remembered to.
 	return fmt.Errorf("refusing to send credentials in cleartext to %s\n"+
-		"use https://, or pass --allow-plaintext if this network is genuinely trusted", u)
+		"use https://, or pass --allow-plaintext if this network is genuinely trusted", u.Redacted())
+}
+
+// redactURL renders a URL for an error message with any password removed.
+//
+// It takes a string rather than a *url.URL because the callers that need it
+// most are on the path where parsing has already failed, and an unparseable
+// URL is exactly as capable of carrying a password as a valid one.
+func redactURL(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Redacted()
+	}
+	// Unparseable, so locate the userinfo by hand: it can only sit between the
+	// scheme separator and the "@" that ends the authority's credential part.
+	start := 0
+	if scheme := strings.Index(raw, "://"); scheme >= 0 {
+		start = scheme + 3
+	}
+	authority := raw[start:]
+	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+		authority = authority[:end]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return raw
+	}
+	return raw[:start] + "xxxxx@" + raw[start+at+1:]
 }
 
 // isLoopback reports whether the host resolves to this machine by name or by
