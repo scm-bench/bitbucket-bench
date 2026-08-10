@@ -1,0 +1,27 @@
+README.md
+  s_233f66a6b3226d::t_c0284f4845ae71 679-681
+README.zh-CN.md
+  s_233f66a6b3226d::t_af36711c4277b9 591-592
+CONTRIBUTING.md
+  s_233f66a6b3226d::t_231aad4c116e02 132
+  s_233f66a6b3226d::t_fa8033b4b3b36d 43
+  s_233f66a6b3226d::t_42b4a4a7736d0d 139
+  s_233f66a6b3226d::t_73f12bd1227a5a 13-18,36,44,46-59,66,72-78,80,82-88,90-91,110-111,113-115,123,126-127,133,140,142-147,149-150,157
+  s_233f66a6b3226d::t_509120370ab1b3 3-6,21-24,26,37-42,61-64,69,71,79,81,93-97,99-101,103-105,107-109,112,116-117,124-125,128-131,134-138,151-156,158-166,171-174,177-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0651beb92bd82bed497efbeb88ce9900ba716ce8",
+  "prompts": {},
+  "sessions": {
+    "s_233f66a6b3226d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9dc0b0d9-6203-4bb7-bb80-5b54be68a9f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
