@@ -609,3 +609,87 @@ func TestSummaryStatesHowMuchWasActuallyScored(t *testing.T) {
 		t.Errorf("coverage line shown when everything was evaluated:\n%s", got)
 	}
 }
+
+// GitHub takes an alert's displayed severity from the rule's security-severity,
+// not from the result's level. A control that can only ever report MANUAL —
+// CIS-1.3.5, where multi-factor authentication is enforced somewhere Bitbucket
+// cannot be asked about it — therefore arrived in the Security panel as an 8.0
+// High alert asserting a setting was broken, while `--fail-on high` locally did
+// not fail on it at all. Two severities for one finding, and the louder one was
+// the wrong one.
+func TestSARIFRuleSeverityFollowsWhetherAnythingActuallyFailed(t *testing.T) {
+	manualOnly := engine.Finding{
+		CheckID: "CIS-1.3.5", CISID: "1.3.5", Title: "MFA", Severity: "HIGH",
+		Status: engine.StatusManual, Resource: engine.InstanceResourceName,
+		ResourceType: engine.ResourceOrganization, Details: "ask your IdP",
+	}
+	failing := engine.Finding{
+		CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "Restrict pushes", Severity: "HIGH",
+		Status: engine.StatusFail, Resource: "PRJ/app",
+		ResourceType: engine.ResourceRepository, Details: "anyone can push",
+	}
+	// Same control, MANUAL first: the escalation must not depend on ordering.
+	mixedManualFirst := engine.Finding{
+		CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "Restrict pushes", Severity: "HIGH",
+		Status: engine.StatusManual, Resource: "PRJ/other",
+		ResourceType: engine.ResourceRepository, Details: "cannot read",
+	}
+
+	for _, tc := range []struct {
+		name             string
+		findings         []engine.Finding
+		rule             string
+		wantLevel        string
+		wantSecuritySeve string
+	}{
+		{"manual only stays a note", []engine.Finding{manualOnly}, "CIS-1.3.5", "note", "3.0"},
+		{"a real failure keeps its severity", []engine.Finding{failing}, "CIS-1.1.15", "error", "8.0"},
+		{"mixed escalates regardless of order", []engine.Finding{mixedManualFirst, failing}, "CIS-1.1.15", "error", "8.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := &engine.Report{
+				Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+				Findings: tc.findings,
+			}
+			out := renderReport(t, rep, Options{Format: FormatSARIF, ToolVersion: "1.2.3"})
+
+			var log struct {
+				Runs []struct {
+					Tool struct {
+						Driver struct {
+							Rules []struct {
+								ID                   string `json:"id"`
+								DefaultConfiguration struct {
+									Level string `json:"level"`
+								} `json:"defaultConfiguration"`
+								Properties struct {
+									SecuritySeverity string `json:"security-severity"`
+								} `json:"properties"`
+							} `json:"rules"`
+						} `json:"driver"`
+					} `json:"tool"`
+				} `json:"runs"`
+			}
+			if err := json.Unmarshal([]byte(out), &log); err != nil {
+				t.Fatalf("unmarshal SARIF: %v", err)
+			}
+
+			var found bool
+			for _, r := range log.Runs[0].Tool.Driver.Rules {
+				if r.ID != tc.rule {
+					continue
+				}
+				found = true
+				if r.DefaultConfiguration.Level != tc.wantLevel {
+					t.Errorf("level = %q, want %q", r.DefaultConfiguration.Level, tc.wantLevel)
+				}
+				if r.Properties.SecuritySeverity != tc.wantSecuritySeve {
+					t.Errorf("security-severity = %q, want %q", r.Properties.SecuritySeverity, tc.wantSecuritySeve)
+				}
+			}
+			if !found {
+				t.Fatalf("rule %s absent from the SARIF", tc.rule)
+			}
+		})
+	}
+}

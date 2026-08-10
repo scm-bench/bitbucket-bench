@@ -12,6 +12,21 @@ granted := object.get(lib.resource, ["permissions", "defaultPermission"], "")
 
 granted_rank := object.get(ranks, [granted], 0)
 
+# A permission the rank table does not know cannot be compared to the ceiling.
+#
+# Defaulting an unrecognised grant to rank 0 ranked it below everything, so the
+# rule answered PASS and said "grants no default permission above REPO_READ" —
+# about a permission it had never heard of. Anything that introduces a name not
+# in permissionRank reaches this: a newer Bitbucket, a snapshot from another
+# producer, or a user who overrode permissionRank and left an entry out.
+granted_known if {
+	granted == ""
+}
+
+granted_known if {
+	object.get(ranks, [granted], -1) >= 0
+}
+
 ceiling_rank := object.get(ranks, [ceiling], 0)
 
 public := object.get(lib.resource, "public", false)
@@ -44,6 +59,12 @@ result := {
 	"details": "The project's default permission could not be read, so it is unknown whether every licensed user is granted access by default.",
 } if {
 	not default_known
+} else := {
+	"status": "MANUAL",
+	"details": sprintf("The project grants %q by default, which is not listed in permissionRank, so it cannot be compared against the %q ceiling. Add it to permissionRank in scm-bench's config.", [granted, ceiling]),
+	"evidence": [sprintf("unknown permission %q", [granted])],
+} if {
+	not granted_known
 } else := {
 	"status": "PASS",
 	"details": sprintf("The repository is not anonymously readable and grants no default permission above %s.", [ceiling]),

@@ -73,12 +73,30 @@ exemptions(rs) := sort({e |
 	)
 })
 
+# exempt_access_keys totals the SSH keys allowed to bypass the restrictions.
+#
+# They are counted rather than named because the API returns keys, not people,
+# and a key's label says nothing useful in a report. Counting them at all is
+# the point: an access key that can push past a branch restriction is a bypass
+# exactly like an exempt user is, and leaving it out of the note described a
+# protection as tighter than it was.
+exempt_access_keys(rs) := sum([n |
+	some r in rs
+	n := object.get(r, "exemptAccessKeys", 0)
+	is_number(n)
+])
+
 # exemption_note renders a trailing clause naming any bypass principals.
-exemption_note(rs) := note if {
-	ex := exemptions(rs)
-	count(ex) > 0
-	note := sprintf(" (bypass allowed for: %s)", [concat(", ", ex)])
+exemption_note(rs) := sprintf(" (bypass allowed for: %s; %s)", [concat(", ", exemptions(rs)), keys_clause(rs)]) if {
+	count(exemptions(rs)) > 0
+	exempt_access_keys(rs) > 0
+} else := sprintf(" (bypass allowed for: %s)", [concat(", ", exemptions(rs))]) if {
+	count(exemptions(rs)) > 0
+} else := sprintf(" (%s can bypass it)", [keys_clause(rs)]) if {
+	exempt_access_keys(rs) > 0
 } else := ""
+
+keys_clause(rs) := sprintf("%d access key(s)", [exempt_access_keys(rs)])
 
 # merge_strategies is the configured merge strategy list.
 merge_strategies := list(["pullRequestSettings", "mergeStrategies"])

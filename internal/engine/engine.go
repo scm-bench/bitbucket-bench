@@ -204,6 +204,14 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 			return nil, fmt.Errorf("encode project %s: %w", project.Key, encErr)
 		}
 		for _, repo := range project.Repositories {
+			// Applied here as well as in the fetcher, so the setting means the
+			// same thing whichever way a repository arrived. It was only ever
+			// honoured while capturing, which left `scan --snapshot-in` and
+			// `diff` scoring archived repositories against a configuration that
+			// said not to — the same file, the same config, two answers.
+			if e.cfg.SkipArchivedRepositories && repo.Archived {
+				continue
+			}
 			repoValue, repoErr := toJSONValue(repo)
 			if repoErr != nil {
 				return nil, fmt.Errorf("encode repository %s: %w", repo.FullName, repoErr)

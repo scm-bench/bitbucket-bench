@@ -593,3 +593,119 @@ func TestZeroMaxOrgAdminsMeansNoUpperLimit(t *testing.T) {
 		})
 	}
 }
+
+// Two rules that answered a question about data they did not have.
+//
+// Both were unreachable through a snapshot this tool captured — the fetcher
+// marks the data unavailable first — and reachable through any other producer
+// of one, which is a distinction a rule should not depend on. "Unreachable
+// today because of what the caller happens to do" is not the same as correct.
+func TestUnknownDataDoesNotBecomeAPass(t *testing.T) {
+	ctx := context.Background()
+	eng, err := engine.New(ctx, config.Default(), scm.PlatformBitbucketDC)
+	if err != nil {
+		t.Fatalf("build engine: %v", err)
+	}
+
+	available := map[string]bool{
+		"branches": true, "branchAges": true, "permissions": true, "admins": true,
+	}
+
+	snapshot := &scm.Snapshot{
+		SchemaVersion: scm.SchemaVersion,
+		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
+		Projects: []scm.Project{{Key: "PRJ", Repositories: []scm.Repository{{
+			FullName:             "PRJ/app",
+			DefaultBranch:        "refs/heads/main",
+			DefaultBranchDisplay: "main",
+			// AgeDays -1 is "the commit date could not be read", not "committed
+			// today". Comparing it against the threshold answered "not stale".
+			Branches: []scm.Branch{
+				{ID: "refs/heads/main", DisplayID: "main", IsDefault: true, AgeDays: 0},
+				{ID: "refs/heads/old", DisplayID: "old", AgeDays: -1},
+			},
+			Permissions: scm.Permissions{
+				// A permission name that permissionRank has never heard of. It
+				// used to default to rank 0 — below everything — so the rule
+				// passed and announced that nothing above REPO_READ was granted.
+				DefaultPermission:      "REPO_CREATE",
+				DefaultPermissionKnown: true,
+			},
+			Available: available,
+		}}}},
+	}
+
+	rep, err := eng.Evaluate(ctx, snapshot)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+
+	want := map[string]engine.Status{
+		"CIS-1.1.8": engine.StatusManual,
+		"CIS-1.3.8": engine.StatusManual,
+	}
+	seen := map[string]bool{}
+	for _, f := range rep.Findings {
+		if expected, ok := want[f.CheckID]; ok {
+			seen[f.CheckID] = true
+			if f.Status != expected {
+				t.Errorf("%s = %s (%s), want %s", f.CheckID, f.Status, f.Details, expected)
+			}
+		}
+	}
+	for id := range want {
+		if !seen[id] {
+			t.Errorf("%s produced no finding", id)
+		}
+	}
+}
+
+// An SSH key allowed to push past a branch restriction is a bypass exactly as
+// an exempt user is. exemptAccessKeys was carried in the snapshot and read by
+// nothing, so a restriction that several deploy keys could walk straight
+// through was described as though nobody could.
+func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
+	ctx := context.Background()
+	eng, err := engine.New(ctx, config.Default(), scm.PlatformBitbucketDC)
+	if err != nil {
+		t.Fatalf("build engine: %v", err)
+	}
+
+	snapshot := &scm.Snapshot{
+		SchemaVersion: scm.SchemaVersion,
+		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
+		Projects: []scm.Project{{Key: "PRJ", Repositories: []scm.Repository{{
+			FullName:             "PRJ/app",
+			DefaultBranch:        "refs/heads/main",
+			DefaultBranchDisplay: "main",
+			BranchRestrictions: []scm.BranchRestriction{{
+				Type:                 "pull-request-only",
+				MatchesDefaultBranch: true,
+				ExemptAccessKeys:     2,
+			}},
+			Available: map[string]bool{"branchRestrictions": true, "defaultBranch": true},
+		}}}},
+	}
+
+	rep, err := eng.Evaluate(ctx, snapshot)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+
+	var seen bool
+	for _, f := range rep.Findings {
+		if f.CheckID != "CIS-1.1.15" {
+			continue
+		}
+		seen = true
+		if f.Status != engine.StatusPass {
+			t.Fatalf("CIS-1.1.15 = %s, want PASS: the restriction is configured", f.Status)
+		}
+		if !strings.Contains(f.Details, "access key") {
+			t.Errorf("details do not mention the bypass: %s", f.Details)
+		}
+	}
+	if !seen {
+		t.Fatal("CIS-1.1.15 produced no finding")
+	}
+}

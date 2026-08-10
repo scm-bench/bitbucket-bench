@@ -131,6 +131,14 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 		if _, ok := rules[f.CheckID]; !ok {
 			rules[f.CheckID] = buildRule(f, opts.Lang)
 		}
+		// A rule that turns out to have a real failure is escalated back to its
+		// own severity. See demoteToNote for why it starts below it.
+		if f.Status == engine.StatusFail {
+			rule := rules[f.CheckID]
+			rule.DefaultConfiguration.Level = sarifLevel(f.Severity)
+			rule.Properties.SecuritySeverity = securitySeverity(f.Severity)
+			rules[f.CheckID] = rule
+		}
 		results = append(results, buildResult(f, opts.Lang))
 	}
 
@@ -196,6 +204,20 @@ func buildRule(f engine.Finding, lang string) sarifRule {
 		full = title(f, lang)
 	}
 
+	// The rule starts at note and is raised to its real severity by the caller
+	// the first time an actual failure lands on it.
+	//
+	// GitHub takes an alert's displayed severity from the rule's
+	// security-severity, not from the result's level — so a control that can
+	// only ever report MANUAL, like CIS-1.3.5 for multi-factor authentication,
+	// arrived in the Security panel as an 8.0 High alert saying a setting was
+	// broken, while `--fail-on high` locally did not fail on it at all. Two
+	// severities for the same finding, and the louder one was wrong.
+	level, severity := "note", securitySeverity(checks.SeverityLow)
+	if f.Status == engine.StatusFail {
+		level, severity = sarifLevel(f.Severity), securitySeverity(f.Severity)
+	}
+
 	return sarifRule{
 		ID:                   f.CheckID,
 		Name:                 strings.ReplaceAll(f.CheckID, "-", ""),
@@ -203,10 +225,10 @@ func buildRule(f engine.Finding, lang string) sarifRule {
 		FullDescription:      sarifText{Text: full},
 		Help:                 sarifText{Text: remediation(f, lang)},
 		HelpURI:              helpURI,
-		DefaultConfiguration: sarifRuleConfig{Level: sarifLevel(f.Severity)},
+		DefaultConfiguration: sarifRuleConfig{Level: level},
 		Properties: sarifRuleProperty{
 			Tags:             []string{"security", "supply-chain", "cis", "source-code"},
-			SecuritySeverity: securitySeverity(f.Severity),
+			SecuritySeverity: severity,
 			Severity:         strings.ToUpper(f.Severity),
 			CISID:            f.CISID,
 			Automated:        f.Automated,
