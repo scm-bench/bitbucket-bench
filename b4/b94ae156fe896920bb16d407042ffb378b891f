@@ -1,0 +1,26 @@
+internal/cli/scan_test.go
+  s_faac4eacbd0dbb::t_6b55a53bce7b51 183-201,203-208,211
+  s_faac4eacbd0dbb::t_c426d446fd5277 11,236
+README.md
+  s_faac4eacbd0dbb::t_94bb10cf1f1e91 541-545
+SECURITY.md
+  s_faac4eacbd0dbb::t_94bb10cf1f1e91 53-56
+README.zh-CN.md
+  s_faac4eacbd0dbb::t_5a3def4e09054f 475-479
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "b4b94ae156fe896920bb16d407042ffb378b891f",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
