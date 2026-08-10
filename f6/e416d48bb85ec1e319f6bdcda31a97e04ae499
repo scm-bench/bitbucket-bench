@@ -1,0 +1,44 @@
+internal/cli/scan.go
+  s_faac4eacbd0dbb::t_77dc587e4afe9a 267-276
+  s_faac4eacbd0dbb::t_421bb1d7232a28 280-291
+internal/scm/bitbucketdc/fetcher.go
+  s_faac4eacbd0dbb::t_dfef9df1949253 432,1178-1225,1227-1243,1245-1246,1248-1249,1251,1254,1257-1265,1267,1269
+  s_faac4eacbd0dbb::t_d1f0411bfd2483 460,463
+  s_faac4eacbd0dbb::t_9873160168719e 408-410,422-431,562,589,625,628-629,948-952,983
+  s_faac4eacbd0dbb::t_11c0e91fe7d486 476,482,487
+  s_faac4eacbd0dbb::t_734b3ff4ca438e 153-155
+  s_faac4eacbd0dbb::t_b41b520f7c00e2 377-380,383-384,412,525,534
+  s_faac4eacbd0dbb::t_6586840167ba2a 987-1003,1005
+  s_faac4eacbd0dbb::t_04853dedffdfe2 436-444,446
+  s_faac4eacbd0dbb::t_0bc8e78fbaff91 511-517
+  s_faac4eacbd0dbb::t_43967f31b7d73d 1047-1060
+  s_faac4eacbd0dbb::t_bf5fb7fe8ba01a 42-52
+  s_faac4eacbd0dbb::t_0c3b7adf1705e2 1115-1127
+  s_faac4eacbd0dbb::t_7f70bc7f387f13 433
+internal/scm/bitbucketdc/fetcher_test.go
+  s_faac4eacbd0dbb::t_64e4562bd76979 901-902,1013-1085
+  s_faac4eacbd0dbb::t_53cc4317b767c3 238-248
+  s_faac4eacbd0dbb::t_b40adc22cba8d2 983-1012
+  s_faac4eacbd0dbb::t_62951f1111c512 903-936
+  s_faac4eacbd0dbb::t_7d3bc7be6fec48 937-945,950,953-982
+  s_faac4eacbd0dbb::t_64991b3c0c82f2 9,849-900
+  s_faac4eacbd0dbb::t_1ade4b0e978e30 946-949,951-952
+internal/cli/scan_test.go
+  s_faac4eacbd0dbb::t_a6cccbeb1f8424 220-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "f6e416d48bb85ec1e319f6bdcda31a97e04ae499",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
