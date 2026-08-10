@@ -1,0 +1,50 @@
+README.zh-CN.md
+  s_223a8922d2562c::t_d1b3449c6e75e8 8-10
+  s_233f66a6b3226d::t_ffbddef9829eeb 258-259
+  s_233f66a6b3226d::t_0703b11ec3a09f 287-288,292-293
+  s_233f66a6b3226d::t_c7b4b6668cd70a 340
+  s_233f66a6b3226d::t_d4c1b36142df9d 345-348
+  s_233f66a6b3226d::t_4b517fcbc26e99 270-271,274-285,289-290,294-300,302,306-309,311-313,315-319,321-322,324-328,330-331
+  s_233f66a6b3226d::t_ebbdc5583785e9 635-638
+README.md
+  s_233f66a6b3226d::t_b613272e8dca9b 320-321,325-326
+  s_233f66a6b3226d::t_0e98c951dd2497 302-304,307-318,322-323,327-333,335,339-341,344-371
+  s_223a8922d2562c::t_6b42edde3b6301 10-12
+  s_233f66a6b3226d::t_603b5b8f066fdb 287-289
+  s_faac4eacbd0dbb::t_03fa8240621d3b 795-806
+  s_233f66a6b3226d::t_a441afb3adaf01 736-741
+  s_233f66a6b3226d::t_815a29fdeeb191 387-392
+  s_233f66a6b3226d::t_2093af76818ec2 380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "88a03ef3bc2f2ea01a226ce3fd951514e24a48fd",
+  "prompts": {},
+  "sessions": {
+    "s_223a8922d2562c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "169bf608-8129-4523-9428-738d473802c9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    },
+    "s_233f66a6b3226d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9dc0b0d9-6203-4bb7-bb80-5b54be68a9f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    },
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
