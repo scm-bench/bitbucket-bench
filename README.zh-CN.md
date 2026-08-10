@@ -5,9 +5,9 @@
 -->
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-light.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-light.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
@@ -255,7 +255,8 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 其中 `HIGH = 3`、`MEDIUM = 2`、`LOW = 1`。`MANUAL` 与 `NA` 不进入分子也不进入分母。
 
-表格输出会打印算式（`weighted 29/55`），让这个数字可核对，而不是只能选择相信。
+表格输出会打印算式（`weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)`），
+让这个数字可核对，而不是只能选择相信。
 
 一个刻意设计的边界情况：当**什么都无法判定**时，分数是 `0` 而不是 `100`。
 0 除以 0 不应该被读成「一切健康」。
@@ -266,46 +267,68 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 ## 输出格式
 
-**`table`**（默认）—— 按规则**并按判定结论**分组，因此「同一处配置问题散布在五十个仓库」
-读起来是一个问题，而不是五十个：
+**`table`**（默认）—— 分数在最前，然后是这次扫描没看到的东西，再是按规则**并按判定结论**
+分组的发现，因此「同一处配置问题散布在五十个仓库」读起来是一个问题，而不是五十个：
 
 ```
-[INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3  HIGH    Ensure any change to code receives approval of two strongly authenticated users
-[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent approvals are needed.
-[INFO]       · requiredApprovers = 0
+[INFO] scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-[INFO] == Needs manual review (19) ==
+[INFO] SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
+[INFO]       failures by severity: HIGH 4 · MEDIUM 5 · LOW 4
+[INFO]       most affected: PLAT/legacy-billing (12 failures)
+
+[INFO] == Scan warnings ==
+[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You
+[INFO]   are not permitted to access this resource); administrator counts are lower bounds
+
+[INFO] == Failed (13) ==
+[FAIL] CIS-1.1.3   HIGH    Ensure any change to code receives approval of two strongly authenticated
+[INFO]                     users
+[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent
+[INFO]                          approvals are needed.
+[INFO]       · requiredApprovers = 0
+[INFO]       fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests ->
+[INFO]            Merge checks.
+
+[INFO] == Not evaluated (13) ==
+[INFO]     No verdict was reached for these. The scan could not read what the control asks about —
+[INFO]     widen the token's access, check the scan warnings above, and run again.
+[WARN] PLAT/vendor-mirror  13 controls could not be evaluated
+[INFO]     CIS-1.1.3 CIS-1.1.4 CIS-1.1.8 CIS-1.1.9 CIS-1.1.11 CIS-1.1.12 CIS-1.1.13 CIS-1.1.15
+[INFO]     CIS-1.1.16 CIS-1.1.17 CIS-1.2.1 CIS-1.3.7 CIS-1.3.8
+
+[INFO] == Needs manual review (6) ==
 [WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
 [INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
 
-[INFO] == Remediations (18) ==
-[INFO] CIS-1.1.3  Repository settings -> Pull requests -> Merge checks: ...
-[INFO] CIS-1.3.5  Enforce MFA at the identity provider that fronts Bitbucket: ...
-
-[INFO] == Scan warnings ==
-[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 ...); administrator counts are lower bounds
-
-[INFO] == Summary ==
-[INFO] 15 findings PASS
-[INFO] 13 findings FAIL
-[INFO] 19 findings WARN
-[INFO] 1 finding INFO
-
-[INFO] SCORE 53/100
-[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; WARN and INFO excluded)
-[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
-[INFO]       failures by severity: HIGH 4  MEDIUM 5  LOW 4
+[INFO] == Remediations (17) ==
+[INFO] CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: ...
+[INFO] CIS-1.3.5   Enforce MFA at the identity provider that fronts Bitbucket: ...
 ```
 
-上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 的真实输出，
-只在标了 `...` 的地方做了省略。计数的单位是 finding —— 一条规则对一个资源，
+上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
+下的真实输出，只在标了 `...` 的地方做了省略。计数的单位是 finding —— 一条规则对一个资源，
 所以它们加起来会多于 `list-checks` 报出的 20 条规则。
 
-`scored N of M` 这一行值得在看分数之前先读。无法判定的规则不进入分数的分子，
-也不进入分母 —— 单看每一条规则这是对的，合起来却有误导性：分母被缩小了，
-于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的分数。
-`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
+汇总放在最前，因为终端是从上往下读的。`scored N of M` 这一行值得在看分数之前先读：
+无法判定的规则不进入分数的分子，也不进入分母 —— 单看每一条规则这是对的，合起来却有
+误导性，因为分母被缩小了，于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的
+分数。`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
+`most affected` 是逐规则分组看不出来的那份统计 —— 它指出该由谁去动手。
+
+扫描告警排在发现之前而不是之后，因为它决定了这份报告有多少可信：一个让扫描丢掉整个仓库的
+403，正是下面那一串「无法判定」的原因。
+
+**`Not evaluated` 与 `Needs manual review` 都是 `MANUAL`，按成因拆开。** 前者是**这次运行**
+读不到的东西 —— 一个读不到的仓库过去会产出一条规则一个条目，用十三种说法讲同一个 403 ——
+所以按资源折叠成一条，并列全它牵连的规则。后者是**任何 API 都答不了**的规则
+（metadata 里 `automated: false`），无论 token 多好都需要人来判断。只有后者会给出修复建议：
+一条扫描根本没看到的规则，并不能说它配错了，印出「怎么改设置」等于在说反话。
+
+行宽跟随 `COLUMNS`，夹在 60–100 之间，未导出时默认 80。折行的续行保留标签列，
+并悬挂缩进对齐到首行内容。
 
 每一行都以等宽的标签开头，在终端里带颜色：
 
@@ -314,13 +337,15 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 | `[PASS]` | 已判定，配置正确 |
 | `[FAIL]` | 已判定，配置有问题 |
 | `[WARN]` | 需要人介入：工具无法判定的规则（`MANUAL`），或扫描读不到的东西 |
-| `[INFO]` | 结构、证据、修复建议，以及不适用的规则——本身从不是判定结论 |
+| `[INFO]` | 结构、证据、修复建议、折行的续行，以及不适用的规则——本身从不是判定结论 |
 
 四个标签，与 kube-bench 用的是同一组。`MANUAL` 故意归到 `[WARN]` 而不是 `[INFO]`：
 「这一条没人验证过」是这个工具最不肯让它消失的信息，它不该和章节标题共用一列。
 
-修复建议独立成段，而不是挂在每条规则下面——这才是让发现列表可以快速扫读的关键。
-`--no-remediations` 可以整段去掉。
+每条发现带一行 `fix:` —— 第一步动作，以及在哪里做；完整的修复段落独立成节放在末尾。
+这个拆分才是让发现列表可以快速扫读的关键：那些段落写的是设置路径、项目级的等价做法和
+配置项名称，把它印在每条规则下面，会让一次二十仓库的扫描变成一堵必须读完才能找到下一条
+判定的散文墙。`--no-remediations` 可以整段去掉；一行的 `fix:` 仍然保留。
 
 真正承载信息的是标签，颜色只是强化它。所以输出被管道、重定向，或设置了 `NO_COLOR`
 时，什么都不会丢。这也让最自然的用法直接可用：
@@ -607,8 +632,10 @@ Go 的 nil 切片会被序列化成 JSON `null`，而 `object.get` 只在键**�
 最终该规则什么结论都产不出。回归测试
 `TestZeroValuedSnapshotProducesAVerdictForEveryControl` 专门守住这一点。
 
-`metadata.json` 承载 ID、严重度、作用域，以及最重要的修复文案。有一条测试强制要求每条修复
-文案指向一个具体位置：设置路径、需要新增的文件，或明确说明「无需处理」。含糊的修复建议
+`metadata.json` 承载 ID、严重度、作用域，以及最重要的修复文案 —— 分两种长度写。
+`remediation` 是完整段落；`fixSummary` 是它的第一步动作，一行祈使句，也就是发现列表里
+印在每条判定旁边的那句。有一条测试强制要求两者都指向一个具体位置：设置路径、需要新增的
+文件，或明确说明「无需处理」，并要求 `fixSummary` 不超过 100 个字符。含糊的修复建议
 比没有更糟。
 
 ---

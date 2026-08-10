@@ -7,9 +7,9 @@
 -->
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-light.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/png/banner-light.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
@@ -284,8 +284,9 @@ score = Σ weight(passed) / Σ weight(passed + failed) × 100
 
 with `HIGH = 3`, `MEDIUM = 2`, `LOW = 1`. `MANUAL` and `NA` are in neither sum.
 
-The table output prints the arithmetic (`weighted 29/55`) so the number is
-checkable rather than something you have to trust.
+The table output prints the arithmetic (`weighted 29/55 (HIGH=3, MEDIUM=2,
+LOW=1; manual and n/a excluded)`) so the number is checkable rather than
+something you have to trust.
 
 One deliberate edge case: when **nothing** was decidable, the score is `0`, not
 `100`. An empty numerator over an empty denominator should not read as a clean
@@ -298,49 +299,76 @@ decide whether a result is acceptable.
 
 ## Output formats
 
-**`table`** (default) — findings grouped by control **and by verdict**, so one
-misconfiguration repeated across fifty repositories reads as one problem rather
-than fifty:
+**`table`** (default) — the score first, then what the scan could not see, then
+the findings grouped by control **and by verdict**, so one misconfiguration
+repeated across fifty repositories reads as one problem rather than fifty:
 
 ```
-[INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3  HIGH    Ensure any change to code receives approval of two strongly authenticated users
-[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent approvals are needed.
-[INFO]       · requiredApprovers = 0
+[INFO] scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-[INFO] == Needs manual review (19) ==
+[INFO] SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
+[INFO]       failures by severity: HIGH 4 · MEDIUM 5 · LOW 4
+[INFO]       most affected: PLAT/legacy-billing (12 failures)
+
+[INFO] == Scan warnings ==
+[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You
+[INFO]   are not permitted to access this resource); administrator counts are lower bounds
+
+[INFO] == Failed (13) ==
+[FAIL] CIS-1.1.3   HIGH    Ensure any change to code receives approval of two strongly authenticated
+[INFO]                     users
+[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent
+[INFO]                          approvals are needed.
+[INFO]       · requiredApprovers = 0
+[INFO]       fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests ->
+[INFO]            Merge checks.
+
+[INFO] == Not evaluated (13) ==
+[INFO]     No verdict was reached for these. The scan could not read what the control asks about —
+[INFO]     widen the token's access, check the scan warnings above, and run again.
+[WARN] PLAT/vendor-mirror  13 controls could not be evaluated
+[INFO]     CIS-1.1.3 CIS-1.1.4 CIS-1.1.8 CIS-1.1.9 CIS-1.1.11 CIS-1.1.12 CIS-1.1.13 CIS-1.1.15
+[INFO]     CIS-1.1.16 CIS-1.1.17 CIS-1.2.1 CIS-1.3.7 CIS-1.3.8
+
+[INFO] == Needs manual review (6) ==
 [WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
 [INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
 
-[INFO] == Remediations (18) ==
-[INFO] CIS-1.1.3  Repository settings -> Pull requests -> Merge checks: ...
-[INFO] CIS-1.3.5  Enforce MFA at the identity provider that fronts Bitbucket: ...
-
-[INFO] == Scan warnings ==
-[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 ...); administrator counts are lower bounds
-
-[INFO] == Summary ==
-[INFO] 15 findings PASS
-[INFO] 13 findings FAIL
-[INFO] 19 findings WARN
-[INFO] 1 finding INFO
-
-[INFO] SCORE 53/100
-[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; WARN and INFO excluded)
-[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
-[INFO]       failures by severity: HIGH 4  MEDIUM 5  LOW 4
+[INFO] == Remediations (17) ==
+[INFO] CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: ...
+[INFO] CIS-1.3.5   Enforce MFA at the identity provider that fronts Bitbucket: ...
 ```
 
-That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`,
-abbreviated only where a line is marked `...`. The counts are of findings — one
-control against one resource — which is why they add up to more than the twenty
-controls `list-checks` reports.
+That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
+at `COLUMNS=100`, abbreviated only where a line is marked `...`. The counts are of
+findings — one control against one resource — which is why they add up to more
+than the twenty controls `list-checks` reports.
 
-The `scored N of M` line is worth reading before the score above it. Controls
-that could not be evaluated are excluded from both sides of the fraction, which
-is right for any single control and misleading in aggregate: a token that can
-read very little produces a high score from a small sample. `--max-manual`
-turns that into a failed run rather than a good-looking one.
+The summary leads because a terminal is read from its top. The `scored N of M`
+line is worth reading before the score above it: controls that could not be
+evaluated are excluded from both sides of the fraction, which is right for any
+single control and misleading in aggregate, since a token that can read very
+little produces a high score from a small sample. `--max-manual` turns that into
+a failed run rather than a good-looking one. `most affected` is the tally the
+control-by-control grouping cannot show — it names who has to do the work.
+
+Scan warnings come before the findings rather than after them, because they are
+what decides how much of the report to believe: a 403 that cost the scan a whole
+repository explains a run of unevaluated controls further down.
+
+**`Not evaluated` and `Needs manual review` are both `MANUAL`, split by cause.**
+The first is what *this run* could not read — one unreadable repository used to
+produce one entry per control, thirteen ways of saying the same 403 — so it is
+collapsed to one entry per resource, listing every control it cost. The second is
+the controls *no API can answer* (`automated: false` in their metadata), which
+need a person no matter how good your token is. Only the second gets remediation
+text: a control the scan never saw is not known to be misconfigured, and printing
+how to change its settings would say otherwise.
+
+Lines wrap to `COLUMNS`, clamped to 60–100 and defaulting to 80 when it is not
+exported. Continuations keep the tag column and hang under their first line.
 
 Every line begins with a fixed-width tag, coloured on a terminal:
 
@@ -349,16 +377,19 @@ Every line begins with a fixed-width tag, coloured on a terminal:
 | `[PASS]` | evaluated, and the setting is right |
 | `[FAIL]` | evaluated, and the setting is wrong |
 | `[WARN]` | needs a person: a control the tool could not decide (`MANUAL`), or something the scan could not read |
-| `[INFO]` | structure, evidence, remediation, and controls that do not apply — never a verdict |
+| `[INFO]` | structure, evidence, remediation, wrapped continuations, and controls that do not apply — never a verdict |
 
 Four tags, the same four kube-bench uses. `MANUAL` is deliberately `[WARN]`
 rather than `[INFO]`: "nobody has checked this" is the one thing this tool
 refuses to let disappear, and it does not belong in the same column as a
 section header.
 
-Remediation is a section of its own rather than a paragraph under every
-control, which is what keeps the findings list scannable. `--no-remediations`
-drops it entirely.
+Each finding carries a one-line `fix:` — the first move, and where — while the
+full remediation paragraph lives in a section of its own at the end. That split
+is what keeps the findings list scannable: the paragraphs name settings paths,
+project-wide variants and config keys, and printing one under every control
+turned a twenty-repository scan into prose you had to read to find the next
+verdict. `--no-remediations` drops the section entirely; the one-line fixes stay.
 
 The tag is the signal and the colour only reinforces it, so nothing is lost when
 output is piped, redirected, or run with `NO_COLOR` set. That also makes the
@@ -702,9 +733,12 @@ uncovered branch is a verdict nobody has ever seen the rule produce. Run them
 with `make policy`.
 
 `metadata.json` carries the ID, severity, scope, and — most importantly — the
-remediation text. A test enforces that every remediation names a concrete
-location: a settings path, a file to add, or an explicit statement that nothing
-applies. Vague remediation is worse than none.
+remediation text, in two forms. `remediation` is the full paragraph; `fixSummary`
+is its first move in one imperative line, which is what the findings list prints
+beside each verdict. A test enforces that both name a concrete location — a
+settings path, a file to add, or an explicit statement that nothing applies — and
+that `fixSummary` stays under 100 characters. Vague remediation is worse than
+none.
 
 ---
 
@@ -758,12 +792,18 @@ create. The manual path needs no local checkout, and it validates the tag before
 creating it — a non-canonical version is rejected rather than silently producing
 a release nobody can install. Either way the workflow does the rest.
 
-Release notes are a plain, ascending list of the commits since the previous
-tag — goreleaser's own renderer, not GitHub's. [`.github/release.yml`](.github/release.yml)
-defines label-based categories, but nothing currently reads them for the
-release body; it stays in place for GitHub's own "Generate release notes"
-feature if that is ever used separately, and pull requests are still labelled
-so that path stays correct if the renderer changes later.
+**Publish the draft goreleaser made. Never start a new release from the
+Releases page.** goreleaser creates the draft and uploads every artifact into
+it; a release created separately gets the notes and none of the files, which is
+how `v0.1.0-rc.1` ended up existing twice, once with nothing to download.
+
+Release notes are written by hand in that draft. goreleaser fills in the parts
+that carry a version number — the install commands and the verification block —
+and leaves the narrative to a person, which is the half worth writing.
+Pressing **Generate release notes** adds GitHub's own list on top, categorised
+by the labels in [`.github/release.yml`](.github/release.yml). That list covers
+merged pull requests; commits pushed straight to `main` are not pull requests
+and will not appear in it.
 
 **Tags must have all three version components** — `v0.1.0`, never `v0.1`. Go
 accepts `v0.1` as a semver *string* but does not treat it as canonical, so the
