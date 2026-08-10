@@ -10,7 +10,7 @@ than a refactor.
 ```bash
 git clone https://github.com/scm-bench/scm-bench
 cd scm-bench
-make check        # gofmt, go vet, race-enabled tests — everything CI runs
+make check        # gofmt, go vet, race-enabled tests, Rego compile + tests
 make build        # binary into bin/
 ```
 

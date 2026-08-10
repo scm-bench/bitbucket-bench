@@ -50,12 +50,33 @@ fmt-check: ## Fail if sources are not formatted
 	if [ -n "$$unformatted" ]; then \
 		echo "these files need gofmt -s -w:"; echo "$$unformatted"; exit 1; \
 	fi
+	@# Rego is half the project and CI checks its formatting too. Leaving it
+	@# out here is how `make check` came to pass locally on a change CI then
+	@# rejected, which teaches people to stop trusting the local target.
+	@if command -v opa >/dev/null 2>&1; then \
+		opa fmt --list --fail internal/checks/policies; \
+	else \
+		echo "opa not installed; skipping Rego format check (CI still runs it)"; \
+	fi
+
+.PHONY: policy
+policy: ## Check the Rego bundle compiles and its unit tests pass
+	@if command -v opa >/dev/null 2>&1; then \
+		opa check --strict internal/checks/policies && \
+		opa test internal/checks/policies -v; \
+	else \
+		echo "opa not installed; install it from https://www.openpolicyagent.org/docs/latest/#running-opa"; exit 1; \
+	fi
+
+.PHONY: vuln
+vuln: ## Report known vulnerabilities reachable from this code
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 .PHONY: lint
 lint: fmt-check vet ## Run formatting and vet checks
 
 .PHONY: check
-check: lint test ## Run everything CI runs
+check: lint test policy ## Run everything CI runs
 
 .PHONY: snapshot
 snapshot: ## Build a local release with goreleaser, without publishing

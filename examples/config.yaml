@@ -61,6 +61,18 @@ securityPolicyPaths:
 maxDefaultPermission: REPO_READ
 allowPublicRepositories: false
 
+# How Bitbucket's permission names compare to one another. maxDefaultPermission
+# above is checked against this table, so a value with no entry here is
+# rejected at startup — and a permission the table has never heard of makes
+# CIS-1.3.8 report MANUAL rather than guessing where it ranks.
+#
+# Unlike the sequences above, a map is merged rather than replaced: naming one
+# permission adjusts that entry and leaves the rest alone. You only need this
+# if your Bitbucket version reports a permission not listed here.
+#
+# permissionRank:
+#   REPO_CREATE: 25
+
 # Archived repositories are read-only by definition, so their branch
 # protections say little. Set to false to scan them anyway.
 skipArchivedRepositories: true

@@ -157,3 +157,22 @@ func TestLessCISID(t *testing.T) {
 		}
 	}
 }
+
+// The Rego unit tests live beside the rules they test, which is where a
+// maintainer expects them and where `opa test` looks. They must not reach the
+// bundle: compiling them into the engine would put assertion rules in the same
+// namespace as verdicts, and every released binary would carry them.
+func TestBundleContainsNoTestModules(t *testing.T) {
+	bundle, err := Load()
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	for _, m := range bundle.Modules {
+		if strings.HasSuffix(m.Path, "_test.rego") {
+			t.Errorf("bundle carries the test module %s", m.Path)
+		}
+		if strings.Contains(m.Source, "scmbench.testdata") {
+			t.Errorf("module %s references the test fixtures", m.Path)
+		}
+	}
+}

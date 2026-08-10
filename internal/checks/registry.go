@@ -13,7 +13,22 @@ import (
 	"strings"
 )
 
-//go:embed all:policies
+// Only the files the bundle is made of, named explicitly.
+//
+// `all:policies` would sweep in the *_test.rego files that sit beside each
+// rule. The loader skips them, so nothing would misbehave — but they would
+// still be compiled into every released binary, and a tool whose argument is
+// that its output should be checkable ought not to ship a binary containing
+// rules named test_fails_when_nothing_restricts_the_default_branch for someone
+// to find and wonder about.
+//
+// A new platform directory is picked up by the wildcards. A new file under
+// lib/ is not, and has to be added here — which announces itself immediately,
+// because any rule importing it fails to compile the moment Load runs.
+//
+//go:embed policies/lib/common.rego
+//go:embed policies/*/*/check.rego
+//go:embed policies/*/*/metadata.json
 var policiesFS embed.FS
 
 // Severity levels, ordered by the weight they carry in the score.
@@ -104,6 +119,15 @@ func Load() (*Bundle, error) {
 		}
 		switch path.Ext(p) {
 		case ".rego":
+			// Rego unit tests live beside the rules they test, the same way Go
+			// tests do and the way `opa test` expects to find them, so adding a
+			// control still means adding one directory. They are not part of
+			// the bundle: compiling them into the engine would put assertion
+			// rules in the same namespace as verdicts, and `opa test` is what
+			// runs them.
+			if strings.HasSuffix(d.Name(), "_test.rego") {
+				return nil
+			}
 			src, readErr := policiesFS.ReadFile(p)
 			if readErr != nil {
 				return fmt.Errorf("read %s: %w", p, readErr)
