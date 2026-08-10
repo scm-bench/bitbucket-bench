@@ -33,7 +33,7 @@ jobs:
     name: Reference URLs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Collect the URLs the tool hands to users
         run: |
