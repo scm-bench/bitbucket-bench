@@ -1,0 +1,49 @@
+internal/checks/policies/lib/common.rego
+  s_8b0297469e56a2::t_b5bf59e45f35f4 1-114
+internal/checks/registry.go
+  s_8b0297469e56a2::t_38c6334a7c01f0 1-225
+internal/checks/registry_test.go
+  s_8b0297469e56a2::t_f6c7887ae31aef 1-159
+internal/cli/buildinfo.go
+  s_8b0297469e56a2::t_691ecf1302451c 1-98
+internal/cli/buildinfo_test.go
+  s_8b0297469e56a2::t_45ee9d242af216 1-130
+internal/cli/diff.go
+  s_8b0297469e56a2::t_5cb19d5d4d67f7 1-160
+internal/cli/diff_test.go
+  s_8b0297469e56a2::t_018de95b52e4c9 1-207
+internal/cli/progress.go
+  s_8b0297469e56a2::t_078962b886405f 1-90
+internal/cli/progress_test.go
+  s_8b0297469e56a2::t_d9310f4e90c41a 1-128
+internal/cli/root.go
+  s_8b0297469e56a2::t_ddbf0afe8e87a4 1-41
+internal/config/config.go
+  s_8b0297469e56a2::t_06f1c88c734fcf 1-193
+internal/config/config_test.go
+  s_8b0297469e56a2::t_973b379f3fee86 1-152
+internal/diff/diff.go
+  s_8b0297469e56a2::t_5e2fa088b8c755 1-186
+internal/engine/engine.go
+  s_8b0297469e56a2::t_cedc816aad5a28 1-378
+internal/engine/engine_test.go
+  s_8b0297469e56a2::t_a358221dbe0b0c 1-497
+internal/engine/score_test.go
+  s_8b0297469e56a2::t_e91f47d0c1cea5 1-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "31acdd67eeb8aee7ac18108170be464441739fe0",
+  "prompts": {},
+  "sessions": {
+    "s_8b0297469e56a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd9d14d1-2fa4-41ba-8ffd-ae2f3059a1ec",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
