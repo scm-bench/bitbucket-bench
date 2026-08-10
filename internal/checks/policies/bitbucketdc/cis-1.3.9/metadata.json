@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": false,
   "title": "Ensure the organization is verified",
-  "titleZh": "组织 Verified 徽章",
   "description": "Not applicable to Bitbucket Data Center: domain verification badges exist on hosted platforms to prove ownership of a public organization identity, which a self-hosted instance does not have. Carried as an explicit NA so the mapping is documented rather than missing.",
   "remediation": "No action applies to a self-hosted instance. The nearest equivalent is proving the identity of the server itself: serve Bitbucket over TLS with a certificate issued to your own verified domain.",
-  "remediationZh": "自建实例无需处理。最接近的等价动作是证明服务端身份：为 Bitbucket 配置属于自有域名的 TLS 证书并全程 HTTPS 访问。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

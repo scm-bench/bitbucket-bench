@@ -49,11 +49,15 @@ Every part of the design follows from that:
 Create a directory under `internal/checks/policies/bitbucketdc/`. No Go changes
 are needed; the bundle is discovered at load time.
 
-Each control is two files:
+Each control is three files:
 
 - `check.rego` — returns a single `result` document with `status`, `details`
   and optional `evidence`.
-- `metadata.json` — ID, severity, scope, and the remediation text.
+- `check_test.rego` — the control's PASS, FAIL and MANUAL branches. CI holds the
+  bundle at 100% coverage, so this is not optional. Run them with `make policy`.
+- `metadata.json` — ID, severity, scope, and the remediation text. All of it in
+  English: the tool has one output language, so there is nothing to translate
+  and no translation to review.
 
 **Remediation is the part people act on.** It must name a concrete place: a
 settings path (`Repository settings -> Branch permissions -> Add restriction`),

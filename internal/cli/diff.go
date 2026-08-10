@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,7 +20,6 @@ type diffOptions struct {
 	configPath         string
 	format             string
 	outputPath         string
-	lang               string
 	noColor            bool
 	failOnRegression   bool
 	allowOtherInstance bool
@@ -57,7 +55,6 @@ Exit codes: 0 no regression, 1 at least one PASS -> FAIL, 2 the comparison faile
 	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file; applied to both snapshots")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: table, json")
 	f.StringVar(&opts.outputPath, "output-file", "", "write the comparison to this file instead of stdout")
-	f.StringVar(&opts.lang, "lang", report.LangEnglish, "report language: en, zh")
 	f.BoolVar(&opts.noColor, "no-color", false, "disable ANSI colour")
 	f.BoolVar(&opts.failOnRegression, "fail-on-regression", true, "exit 1 when a control fell from PASS to FAIL")
 	f.BoolVar(&opts.allowOtherInstance, "allow-other-instance", false, "compare snapshots taken from different base URLs")
@@ -69,12 +66,6 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
-	}
-
-	switch strings.ToLower(opts.lang) {
-	case report.LangEnglish, report.LangChinese:
-	default:
-		return fmt.Errorf("unknown --lang %q; want en or zh", opts.lang)
 	}
 
 	cfg, err := config.Load(opts.configPath)
@@ -120,7 +111,6 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 	var buf bytes.Buffer
 	if err := diff.Write(&buf, result, diff.Options{
 		Format: opts.format,
-		Lang:   opts.lang,
 		Color:  useDiffColor(opts, out),
 	}); err != nil {
 		closeOut()

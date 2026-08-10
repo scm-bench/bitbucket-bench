@@ -129,7 +129,7 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 			continue
 		}
 		if _, ok := rules[f.CheckID]; !ok {
-			rules[f.CheckID] = buildRule(f, opts.Lang)
+			rules[f.CheckID] = buildRule(f)
 		}
 		// A rule that turns out to have a real failure is escalated back to its
 		// own severity. See demoteToNote for why it starts below it.
@@ -139,7 +139,7 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 			rule.Properties.SecuritySeverity = securitySeverity(f.Severity)
 			rules[f.CheckID] = rule
 		}
-		results = append(results, buildResult(f, opts.Lang))
+		results = append(results, buildResult(f))
 	}
 
 	ruleList := make([]sarifRule, 0, len(rules))
@@ -188,7 +188,7 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 	return enc.Encode(log)
 }
 
-func buildRule(f engine.Finding, lang string) sarifRule {
+func buildRule(f engine.Finding) sarifRule {
 	helpURI := ""
 	if len(f.References) > 0 {
 		helpURI = f.References[0]
@@ -197,11 +197,9 @@ func buildRule(f engine.Finding, lang string) sarifRule {
 	// in a list, fullDescription is what it shows when the reader wants to know
 	// what the rule is about. Repeating the title in both, as this did before
 	// the control's description was carried on the finding, wasted the field.
-	// The description is only authored in English, so it stays English even
-	// under --lang zh, the same way policy-generated details do.
 	full := f.Description
 	if strings.TrimSpace(full) == "" {
-		full = title(f, lang)
+		full = f.Title
 	}
 
 	// The rule starts at note and is raised to its real severity by the caller
@@ -221,9 +219,9 @@ func buildRule(f engine.Finding, lang string) sarifRule {
 	return sarifRule{
 		ID:                   f.CheckID,
 		Name:                 strings.ReplaceAll(f.CheckID, "-", ""),
-		ShortDescription:     sarifText{Text: title(f, lang)},
+		ShortDescription:     sarifText{Text: f.Title},
 		FullDescription:      sarifText{Text: full},
-		Help:                 sarifText{Text: remediation(f, lang)},
+		Help:                 sarifText{Text: f.Remediation},
 		HelpURI:              helpURI,
 		DefaultConfiguration: sarifRuleConfig{Level: level},
 		Properties: sarifRuleProperty{
@@ -236,7 +234,7 @@ func buildRule(f engine.Finding, lang string) sarifRule {
 	}
 }
 
-func buildResult(f engine.Finding, lang string) sarifResult {
+func buildResult(f engine.Finding) sarifResult {
 	level := sarifLevel(f.Severity)
 	if f.Status == engine.StatusManual {
 		// A control nobody could evaluate is not an assertion that something
@@ -248,7 +246,7 @@ func buildResult(f engine.Finding, lang string) sarifResult {
 	if f.Status == engine.StatusManual {
 		message = "Manual review required: " + message
 	}
-	if fix := remediation(f, lang); fix != "" {
+	if fix := f.Remediation; fix != "" {
 		message += "\n\nRemediation: " + fix
 	}
 

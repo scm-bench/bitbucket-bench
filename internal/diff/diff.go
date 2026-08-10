@@ -23,7 +23,6 @@ type Change struct {
 	CheckID      string        `json:"checkId"`
 	CISID        string        `json:"cisId"`
 	Title        string        `json:"title"`
-	TitleZh      string        `json:"titleZh,omitempty"`
 	Severity     string        `json:"severity"`
 	Resource     string        `json:"resource"`
 	ResourceType string        `json:"resourceType"`
@@ -33,9 +32,6 @@ type Change struct {
 	// what someone acting on the change needs.
 	Details     string `json:"details"`
 	Remediation string `json:"remediation,omitempty"`
-	// RemediationZh mirrors the finding so the diff can be rendered in Chinese
-	// without reaching back into the bundle.
-	RemediationZh string `json:"remediationZh,omitempty"`
 }
 
 // Result is the full comparison.
@@ -218,17 +214,15 @@ func index(findings []engine.Finding) map[findingKey]engine.Finding {
 
 func changeOf(f engine.Finding) Change {
 	return Change{
-		CheckID:       f.CheckID,
-		CISID:         f.CISID,
-		Title:         f.Title,
-		TitleZh:       f.TitleZh,
-		Severity:      f.Severity,
-		Resource:      f.Resource,
-		ResourceType:  f.ResourceType,
-		To:            f.Status,
-		Details:       f.Details,
-		Remediation:   f.Remediation,
-		RemediationZh: f.RemediationZh,
+		CheckID:      f.CheckID,
+		CISID:        f.CISID,
+		Title:        f.Title,
+		Severity:     f.Severity,
+		Resource:     f.Resource,
+		ResourceType: f.ResourceType,
+		To:           f.Status,
+		Details:      f.Details,
+		Remediation:  f.Remediation,
 	}
 }
 

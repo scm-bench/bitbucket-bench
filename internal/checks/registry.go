@@ -78,13 +78,11 @@ type Metadata struct {
 	Automated bool `json:"automated"`
 
 	Title       string `json:"title"`
-	TitleZh     string `json:"titleZh,omitempty"`
 	Description string `json:"description"`
 	// Remediation names the exact UI path an operator has to walk. This is the
 	// part of a finding that actually gets acted on, so it stays concrete.
-	Remediation   string   `json:"remediation"`
-	RemediationZh string   `json:"remediationZh,omitempty"`
-	References    []string `json:"references,omitempty"`
+	Remediation string   `json:"remediation"`
+	References  []string `json:"references,omitempty"`
 }
 
 // Check couples metadata with the directory it was loaded from.

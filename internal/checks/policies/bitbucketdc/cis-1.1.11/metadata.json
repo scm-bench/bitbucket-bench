@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure all open comments are resolved before merging",
-  "titleZh": "合并前所有评论/任务须解决",
   "description": "Reviewer objections raised as tasks should not be mergeable away. Enforcing task completion turns review comments into something that has to be answered rather than outlived.",
   "remediation": "Repository settings -> Pull requests -> Merge checks: enable \"All tasks resolved\". Set it at Project settings -> Pull requests -> Merge checks to apply it project-wide.",
-  "remediationZh": "仓库设置 -> Pull requests -> Merge checks：启用「All tasks resolved」。在 项目设置 -> Pull requests -> Merge checks 配置可覆盖整个项目。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

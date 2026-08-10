@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure default repository access is restricted",
-  "titleZh": "仓库默认权限收紧",
   "description": "Blanket grants are the quietest way for access to spread: nobody requests them, nobody reviews them, and they apply to accounts created long after the decision was made. Access should be granted deliberately, to named people or groups.",
   "remediation": "Project settings -> Project permissions: clear the default permission granted to all licensed users, or reduce it to Read, and grant Write/Admin to specific groups instead. To remove anonymous access, uncheck \"Public access\" at Repository settings -> Repository details and at Project settings -> Project details. For instances that intentionally publish code, set allowPublicRepositories: true in scm-bench's config.",
-  "remediationZh": "项目设置 -> Project permissions：取消面向所有已授权用户的默认权限，或降至 Read，改为按组授予 Write/Admin。取消匿名访问：在 仓库设置 -> Repository details 与 项目设置 -> Project details 中关闭「Public access」。若实例有意公开代码，可在 scm-bench 配置中设置 allowPublicRepositories: true。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-project-permissions-776639801.html"

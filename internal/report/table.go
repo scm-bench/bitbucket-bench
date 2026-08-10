@@ -192,7 +192,7 @@ func writeFindings(t console.Writer, rep *engine.Report, p painter, opts Options
 			t.Line(statusTag(g.status), "%s  %s  %s",
 				p.paint(ansiCyan+ansiBold, first.CheckID),
 				severityLabel(p, first.Severity),
-				p.paint(ansiBold, title(first, opts.Lang)),
+				p.paint(ansiBold, first.Title),
 			)
 
 			for _, verdict := range groupByMessage(group) {
@@ -226,7 +226,7 @@ func writeRemediations(t console.Writer, rep *engine.Report, p painter, opts Opt
 
 	section(t, p, fmt.Sprintf("Remediations (%d)", len(ordered)))
 	for _, f := range ordered {
-		t.Info("%s  %s", p.paint(ansiCyan+ansiBold, f.CheckID), remediation(f, opts.Lang))
+		t.Info("%s  %s", p.paint(ansiCyan+ansiBold, f.CheckID), f.Remediation)
 	}
 }
 

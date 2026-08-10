@@ -16,15 +16,14 @@ func sampleReport() *engine.Report {
 	findings := []engine.Finding{
 		{
 			CheckID: "CIS-1.1.15", CISID: "1.1.15", Severity: "HIGH", Status: engine.StatusFail,
-			Title: "Ensure pushing is restricted", TitleZh: "限制直接 push",
+			Title:    "Ensure pushing is restricted",
 			Resource: "PRJ/app", ResourceType: engine.ResourceRepository,
-			Description:   "Direct pushes bypass review entirely.",
-			Details:       "Anyone with write access can push directly to main.",
-			Evidence:      []string{"no restriction covers main"},
-			Remediation:   "Repository settings -> Branch permissions -> Add restriction",
-			RemediationZh: "仓库设置 -> Branch permissions -> Add restriction",
-			References:    []string{"https://example.invalid/cis"},
-			Automated:     true,
+			Description: "Direct pushes bypass review entirely.",
+			Details:     "Anyone with write access can push directly to main.",
+			Evidence:    []string{"no restriction covers main"},
+			Remediation: "Repository settings -> Branch permissions -> Add restriction",
+			References:  []string{"https://example.invalid/cis"},
+			Automated:   true,
 		},
 		{
 			CheckID: "CIS-1.3.5", CISID: "1.3.5", Severity: "HIGH", Status: engine.StatusManual,
@@ -92,7 +91,7 @@ func reportWithRepeatedFinding(t *testing.T, n int) *engine.Report {
 }
 
 func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish})
+	out := render(t, Options{Format: FormatTable})
 
 	for _, want := range []string{
 		"CIS-1.1.15",
@@ -118,7 +117,7 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 }
 
 func TestTableShowPassedIncludesPassingControls(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish, ShowPassed: true})
+	out := render(t, Options{Format: FormatTable, ShowPassed: true})
 	if !strings.Contains(out, "Ensure two approvals") {
 		t.Error("--show-passed should list passing controls")
 	}
@@ -166,7 +165,7 @@ func TestTableKeepsDistinctVerdictsApart(t *testing.T) {
 // A single resource stays on one line with its verdict: that is the common
 // case on a small instance and splitting it over two lines reads worse.
 func TestTableKeepsSingleResourceInline(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish})
+	out := render(t, Options{Format: FormatTable})
 	if !strings.Contains(out, "PRJ/app  Anyone with write access can push directly to main.") {
 		t.Errorf("a lone resource should share the line with its verdict\n---\n%s", out)
 	}
@@ -187,94 +186,6 @@ func TestMaxResourcesZeroListsEveryResource(t *testing.T) {
 	}
 }
 
-// --lang has to mean the same thing in every format. It used to be honoured by
-// table and sarif while json emitted both languages and left the consumer to
-// work out which field to read.
-func TestJSONResolvesToOneLanguage(t *testing.T) {
-	for _, tc := range []struct {
-		lang       string
-		wantTitle  string
-		wantRemedy string
-	}{
-		{LangEnglish, "Ensure pushing is restricted", "Repository settings -> Branch permissions -> Add restriction"},
-		{LangChinese, "限制直接 push", "仓库设置 -> Branch permissions -> Add restriction"},
-	} {
-		t.Run(tc.lang, func(t *testing.T) {
-			out := render(t, Options{Format: FormatJSON, Lang: tc.lang})
-
-			var doc struct {
-				Findings []map[string]any `json:"findings"`
-			}
-			if err := json.Unmarshal([]byte(out), &doc); err != nil {
-				t.Fatalf("json does not parse: %v", err)
-			}
-			first := doc.Findings[0]
-
-			if first["title"] != tc.wantTitle {
-				t.Errorf("title = %v, want %q", first["title"], tc.wantTitle)
-			}
-			if first["remediation"] != tc.wantRemedy {
-				t.Errorf("remediation = %v, want %q", first["remediation"], tc.wantRemedy)
-			}
-			// The per-language variants must be gone, not merely unused: a
-			// consumer should not have to know which field holds its language.
-			for _, gone := range []string{"titleZh", "remediationZh"} {
-				if _, present := first[gone]; present {
-					t.Errorf("%s is still in the output", gone)
-				}
-			}
-		})
-	}
-}
-
-// A control with no translation falls back rather than rendering blank.
-func TestJSONFallsBackWhenUntranslated(t *testing.T) {
-	out := render(t, Options{Format: FormatJSON, Lang: LangChinese})
-
-	var doc struct {
-		Findings []struct {
-			CheckID string `json:"checkId"`
-			Title   string `json:"title"`
-		} `json:"findings"`
-	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil {
-		t.Fatalf("json does not parse: %v", err)
-	}
-	for _, f := range doc.Findings {
-		if f.CheckID == "CIS-1.3.5" && f.Title != "Ensure MFA is enforced" {
-			t.Errorf("untranslated title = %q, want the English fallback", f.Title)
-		}
-	}
-}
-
-// Rendering must not consume the report: the caller owns it, and a second
-// render has to see the same thing the first one did.
-func TestLocalizeDoesNotMutateTheReport(t *testing.T) {
-	rep := sampleReport()
-	before := rep.Findings[0].TitleZh
-
-	renderReport(t, rep, Options{Format: FormatJSON, Lang: LangChinese})
-
-	if rep.Findings[0].TitleZh != before {
-		t.Errorf("TitleZh = %q after rendering, want %q — the report was mutated",
-			rep.Findings[0].TitleZh, before)
-	}
-	if rep.Findings[0].Title != "Ensure pushing is restricted" {
-		t.Errorf("Title = %q after rendering, want it unchanged", rep.Findings[0].Title)
-	}
-}
-
-func TestChineseLanguageSelectsTranslatedFields(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangChinese})
-	if !strings.Contains(out, "限制直接 push") {
-		t.Error("zh output should use the translated title")
-	}
-	// A control with no translation must fall back rather than render blank.
-	if !strings.Contains(out, "Ensure MFA is enforced") {
-		t.Error("an untranslated title should fall back to English")
-	}
-}
-
 func TestTableIsPlainWithoutColor(t *testing.T) {
 	out := render(t, Options{Format: FormatTable, Color: false})
 	if strings.Contains(out, "\033[") {
@@ -286,7 +197,7 @@ func TestTableIsPlainWithoutColor(t *testing.T) {
 // '^\[FAIL\]'` is the obvious thing to reach for, so every line has to carry a
 // tag and every tag has to be the same width.
 func TestEveryTableLineStartsWithAFixedWidthTag(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish, ShowPassed: true})
+	out := render(t, Options{Format: FormatTable, ShowPassed: true})
 
 	// Four tags, the same four kube-bench uses. Adding a fifth is a decision,
 	// not an accident, so this list is where it has to be made.
@@ -309,7 +220,7 @@ func TestEveryTableLineStartsWithAFixedWidthTag(t *testing.T) {
 // to tell them apart — which fails the moment output is piped or NO_COLOR is
 // set. MANUAL appears as NOTE, the word docker-bench uses for the same idea.
 func TestVerdictsAppearInTheTagColumn(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish, ShowPassed: true})
+	out := render(t, Options{Format: FormatTable, ShowPassed: true})
 
 	for tag, want := range map[string]string{
 		"[FAIL]": "CIS-1.1.15",
@@ -484,7 +395,7 @@ func TestUnknownFormatIsRejected(t *testing.T) {
 // control it turned the findings list into prose you had to read past to reach
 // the next verdict, so it moved to its own section — kube-bench's arrangement.
 func TestRemediationLivesInItsOwnSection(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish})
+	out := render(t, Options{Format: FormatTable})
 
 	remedy := "Repository settings -> Branch permissions -> Add restriction"
 	findings, remediations, ok := strings.Cut(out, "== Remediations")
@@ -513,7 +424,7 @@ func TestRemediationIsListedOncePerControl(t *testing.T) {
 }
 
 func TestNoRemediationsDropsTheSection(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish, NoRemediations: true})
+	out := render(t, Options{Format: FormatTable, NoRemediations: true})
 
 	if strings.Contains(out, "== Remediations") {
 		t.Errorf("--no-remediations left the section in\n---\n%s", out)
@@ -531,7 +442,7 @@ func TestNoRemediationsDropsTheSection(t *testing.T) {
 // controls" was being asked to reconcile that with a summary whose four lines
 // added up to forty-eight.
 func TestSummaryReportsAllFourStates(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, Lang: LangEnglish})
+	out := render(t, Options{Format: FormatTable})
 
 	for _, want := range []string{"1 finding PASS", "1 finding FAIL", "1 finding WARN", "0 findings INFO"} {
 		if !strings.Contains(out, want) {

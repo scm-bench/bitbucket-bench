@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure inactive users are reviewed and removed periodically",
-  "titleZh": "定期清理闲置用户",
   "description": "An account nobody uses is an account nobody notices being used. Dormant credentials with repository access are a standing invitation, and they also consume licences.",
   "remediation": "Administration -> Users: for each listed account, either deactivate it or remove the grants that give it repository access. Where accounts come from an external directory, disable them there — Bitbucket will follow. Adjust the window with thresholds.inactiveUserDays in scm-bench's config.",
-  "remediationZh": "管理后台 -> Users：对列出的账号，或停用，或移除其仓库访问授权。若账号来自外部目录（LDAP/AD/Crowd），应在目录侧停用，Bitbucket 会同步。判定窗口可通过 scm-bench 配置项 thresholds.inactiveUserDays 调整。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

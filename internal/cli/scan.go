@@ -65,7 +65,6 @@ type scanOptions struct {
 	configPath     string
 	format         string
 	outputPath     string
-	lang           string
 	showPassed     bool
 	maxResources   int
 	failOn         string
@@ -134,7 +133,6 @@ so.`,
 	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file overriding the default thresholds")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
-	f.StringVar(&opts.lang, "lang", report.LangEnglish, "report language: en, zh")
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
 	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "table output: resource names to list per finding before summarising; 0 lists all")
 	f.StringVar(&opts.failOn, "fail-on", "high", "exit 1 when a failure at or above this severity exists: high, medium, low, none")
@@ -244,7 +242,6 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	var buf bytes.Buffer
 	if err := report.Write(&buf, rep, report.Options{
 		Format:         opts.format,
-		Lang:           opts.lang,
 		Color:          useColor(opts, out),
 		ShowPassed:     opts.showPassed,
 		MaxResources:   opts.maxResources,
@@ -290,11 +287,6 @@ func resolveCredentials(cmd *cobra.Command, opts *scanOptions) {
 }
 
 func validateScanOptions(opts *scanOptions) error {
-	switch strings.ToLower(opts.lang) {
-	case report.LangEnglish, report.LangChinese:
-	default:
-		return fmt.Errorf("unknown --lang %q; want en or zh", opts.lang)
-	}
 	switch strings.ToLower(opts.failOn) {
 	case "high", "medium", "low", "none":
 	default:

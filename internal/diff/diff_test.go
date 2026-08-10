@@ -2,12 +2,10 @@ package diff
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/report"
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
 
@@ -164,55 +162,6 @@ func TestRegressionsAreOrderedBySeverityThenBenchmarkNumber(t *testing.T) {
 			t.Fatalf("order = %v, want %v",
 				[]string{r.Regressed[0].CheckID, r.Regressed[1].CheckID, r.Regressed[2].CheckID}, want)
 		}
-	}
-}
-
-// The rule has to be the same as the scan report's: nobody should have to learn
-// a different one per subcommand.
-func TestJSONResolvesToOneLanguage(t *testing.T) {
-	before := reportOf(finding("CIS-1.1.15", "PRJ/app", engine.StatusPass, "HIGH"))
-	after := reportOf(finding("CIS-1.1.15", "PRJ/app", engine.StatusFail, "HIGH"))
-
-	r := Compare(before, after)
-	r.Regressed[0].TitleZh = "限制直接 push"
-	r.Regressed[0].RemediationZh = "仓库设置 -> Branch permissions"
-
-	var buf bytes.Buffer
-	if err := Write(&buf, r, Options{Format: report.FormatJSON, Lang: report.LangChinese}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	var doc struct {
-		Regressed []map[string]any `json:"regressed"`
-	}
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("json does not parse: %v", err)
-	}
-	first := doc.Regressed[0]
-
-	if first["title"] != "限制直接 push" {
-		t.Errorf("title = %v, want the translation", first["title"])
-	}
-	for _, gone := range []string{"titleZh", "remediationZh"} {
-		if _, present := first[gone]; present {
-			t.Errorf("%s is still in the output", gone)
-		}
-	}
-}
-
-func TestLocalizeDoesNotMutateTheResult(t *testing.T) {
-	before := reportOf(finding("CIS-1.1.15", "PRJ/app", engine.StatusPass, "HIGH"))
-	after := reportOf(finding("CIS-1.1.15", "PRJ/app", engine.StatusFail, "HIGH"))
-
-	r := Compare(before, after)
-	r.Regressed[0].TitleZh = "限制直接 push"
-
-	var buf bytes.Buffer
-	if err := Write(&buf, r, Options{Format: report.FormatJSON, Lang: report.LangChinese}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if r.Regressed[0].TitleZh != "限制直接 push" {
-		t.Error("the result was mutated by rendering it")
 	}
 }
 

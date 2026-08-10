@@ -198,8 +198,8 @@ func TestDiffRejectsBadArguments(t *testing.T) {
 	if _, _, code := run(t, "diff", before); code != ExitError {
 		t.Error("diff with one argument should be rejected")
 	}
-	if _, _, code := run(t, "diff", before, after, "--lang", "fr"); code != ExitError {
-		t.Error("an unknown --lang should be rejected")
+	if _, _, code := run(t, "diff", before, after, "-o", "yaml"); code != ExitError {
+		t.Error("an unknown --output format should be rejected")
 	}
 	if _, _, code := run(t, "diff", "/nonexistent.json", after); code != ExitError {
 		t.Error("a missing snapshot should be an error")

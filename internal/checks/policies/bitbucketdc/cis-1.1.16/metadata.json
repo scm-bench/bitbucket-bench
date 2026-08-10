@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure force pushing code to branches is denied",
-  "titleZh": "禁止 force push（改写历史）",
   "description": "A force push can erase the commits that reviewers approved and replace them with different code under the same branch. It destroys the audit trail that every other source control check depends on.",
   "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent rewriting history\". Configure it at Project settings -> Branch permissions to cover every repository in the project.",
-  "remediationZh": "仓库设置 -> Branch permissions -> Add restriction：选中默认分支，启用「Prevent rewriting history」。在 项目设置 -> Branch permissions 配置可覆盖整个项目。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

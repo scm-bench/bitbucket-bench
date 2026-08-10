@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure inactive branches are periodically reviewed and removed",
-  "titleZh": "定期清理闲置分支",
   "description": "Abandoned branches hold unreviewed code and stale dependencies while still being reachable and mergeable. They also hide genuinely active work in a long branch list.",
   "remediation": "Review the listed branches and delete the ones that are finished or abandoned: Repository -> Branches -> (branch) -> Delete, or push a deletion with `git push origin --delete <branch>`. To keep this from recurring, enable Repository settings -> Pull requests -> \"Delete source branch after merging\". Adjust the window with thresholds.staleBranchDays in scm-bench's config.",
-  "remediationZh": "检查列出的分支并删除已完成或废弃的：仓库 -> Branches -> 对应分支 -> Delete，或执行 `git push origin --delete <branch>`。为避免再次堆积，可在 仓库设置 -> Pull requests 启用「Delete source branch after merging」。判定窗口可通过 scm-bench 配置项 thresholds.staleBranchDays 调整。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

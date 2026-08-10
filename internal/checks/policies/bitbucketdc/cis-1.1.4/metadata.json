@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure previous approvals are dismissed when new changes are pushed",
-  "titleZh": "源分支更新后重置已有审批",
   "description": "Without this, an author can collect approvals on a harmless diff and then push anything they like to the same branch before merging. The approval no longer refers to the code that ships.",
   "remediation": "Repository settings -> Pull requests: enable \"Unapprove automatically on new changes\" (labelled \"Reset approvals when the source branch is modified\" on some versions). Set it at Project settings -> Pull requests to apply it project-wide.",
-  "remediationZh": "仓库设置 -> Pull requests：启用「Unapprove automatically on new changes」（部分版本显示为「源分支变更时重置审批」）。在 项目设置 -> Pull requests 配置可覆盖整个项目。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

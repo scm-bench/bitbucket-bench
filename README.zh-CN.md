@@ -102,19 +102,16 @@ scm-bench scan --repository PLAT/payments-api
 # 机器可读输出
 scm-bench scan -o json  --output-file report.json
 scm-bench scan -o sarif --output-file report.sarif
-
-# 中文报告（规则标题与修复建议为中文）
-scm-bench scan --lang zh
 ```
 
-> `--lang zh` 会把**规则标题**与**修复建议**切换为中文，缺少译文时回退到英文。
-> 具体发现描述（details）与证据由策略本身生成，目前仍是英文——要翻译它们，
-> 就得在每条规则里把消息拼装逻辑复制一份。
+> 工具输出只有英文。文档是双语的，维护者也并非都以英语为母语，所以这是一个决定而非疏漏：
+> 每条规则的判定文字是规则自己生成的，换一种语言不是加一张字符串表，而是在二十条规则里
+> 各复制一份消息拼装逻辑。半套翻译——标题是一种语言、发现描述是另一种——比不翻译更难读。
 
 手边没有实例？内置样例快照可以直接跑通所有输出格式：
 
 ```bash
-scm-bench scan --snapshot-in examples/snapshot.json --lang zh
+scm-bench scan --snapshot-in examples/snapshot.json
 ```
 
 仓库是并发抓取的——`--concurrency`（默认 8）限制同时抓取的数量，实例负载高时把它调低是
@@ -349,9 +346,7 @@ scm-bench scan 2>&1 | grep '^\[WARN\]'   # 这次扫描没看到什么
 只有 stdout 是终端时才上色，并遵守 `NO_COLOR`。
 
 **`json`** —— 完整报告：每条发现、证据、该规则为何存在、修复建议与评分明细。
-`title` 与 `remediation` 直接是 `--lang` 指定的语言，消费方读一个固定字段即可，
-不需要在多个变体之间做选择。报告文件按
-`0600` 写入，和 snapshot 一样——渲染出来的报告同样是一份实例弱点地图。
+报告文件按 `0600` 写入，和 snapshot 一样——渲染出来的报告同样是一份实例弱点地图。
 
 **`sarif`** —— SARIF 2.1.0，供 CI 消费。只输出失败与需人工复核项；通过与 N/A 因不需要行动
 而省略。这些发现是「配置事实」而非源码行，所以每条结果携带指向仓库的 `logicalLocation`，
@@ -511,7 +506,7 @@ scm-bench diff last-week.json today.json
 `GONE` 是每个资源一条，而不是每条规则一条：删掉一个仓库是关于这个仓库的一个事实，
 把它报二十遍只会把这条命令本该凸显的回退埋掉。
 
-它接受和 `scan` 相同的输出 flag —— `-o table|json`、`--output-file`、`--lang`、
+它接受和 `scan` 相同的输出 flag —— `-o table|json`、`--output-file`、
 `--no-color` —— 外加 `--fail-on-regression`（默认开启）与 `--allow-other-instance`。
 不提供 SARIF：一次比较不是一组发现。
 

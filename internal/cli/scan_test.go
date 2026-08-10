@@ -245,7 +245,6 @@ func TestScanRejectsBadArguments(t *testing.T) {
 	}{
 		{"no url and no snapshot", []string{"scan"}},
 		{"unknown format", []string{"scan", "--snapshot-in", fixture, "-o", "yaml"}},
-		{"unknown language", []string{"scan", "--snapshot-in", fixture, "--lang", "fr"}},
 		{"unknown fail-on", []string{"scan", "--snapshot-in", fixture, "--fail-on", "critical"}},
 		{"zero concurrency", []string{"scan", "--snapshot-in", fixture, "--concurrency", "0"}},
 		{"missing snapshot file", []string{"scan", "--snapshot-in", "/nonexistent/snapshot.json"}},

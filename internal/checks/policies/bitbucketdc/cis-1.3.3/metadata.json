@@ -7,10 +7,8 @@
   "platforms": ["bitbucket-dc"],
   "automated": true,
   "title": "Ensure a minimum number of administrators are set for the organization",
-  "titleZh": "组织管理员数量最小化",
   "description": "Instance administrators can change any permission, bypass any branch restriction, and read any repository. Too few is a lockout risk; too many multiplies the number of accounts whose compromise ends the discussion.",
   "remediation": "Administration -> Global permissions: review everyone holding \"System Admin\" or \"Admin\" and downgrade those who no longer need it. Keep at least two so no single lost account locks out the instance. Prefer granting project-level administration over global rights. Adjust the range with thresholds.minOrgAdmins and thresholds.maxOrgAdmins in scm-bench's config.",
-  "remediationZh": "管理后台 -> Global permissions：检查持有「System Admin」或「Admin」的账号，回收不再需要的权限；保留至少 2 名以避免单点锁死。优先用项目级管理员替代全局管理员。判定区间可通过 scm-bench 配置项 thresholds.minOrgAdmins / maxOrgAdmins 调整。",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/global-permissions-776640369.html"

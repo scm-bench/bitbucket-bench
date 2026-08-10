@@ -80,20 +80,11 @@ func TestRemediationSaysWhereToAct(t *testing.T) {
 		if !namesALocation(c.Remediation) {
 			t.Errorf("%s: remediation does not say where to act: %q", c.ID, c.Remediation)
 		}
-		if !namesALocation(c.RemediationZh) {
-			t.Errorf("%s: Chinese remediation does not say where to act: %q", c.ID, c.RemediationZh)
-		}
 		if c.Description == "" {
 			t.Errorf("%s: description is empty", c.ID)
 		}
 		if len(c.References) == 0 {
 			t.Errorf("%s: no references", c.ID)
-		}
-		if c.TitleZh == "" {
-			t.Errorf("%s: missing Chinese title", c.ID)
-		}
-		if c.RemediationZh == "" {
-			t.Errorf("%s: missing Chinese remediation", c.ID)
 		}
 	}
 }

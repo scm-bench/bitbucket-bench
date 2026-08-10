@@ -48,7 +48,6 @@ type Finding struct {
 	CheckID      string `json:"checkId"`
 	CISID        string `json:"cisId"`
 	Title        string `json:"title"`
-	TitleZh      string `json:"titleZh,omitempty"`
 	Severity     string `json:"severity"`
 	Status       Status `json:"status"`
 	Resource     string `json:"resource"`
@@ -57,12 +56,11 @@ type Finding struct {
 	// explains the finding to someone who is not already convinced the control
 	// matters — Details says what this resource does, Remediation says what to
 	// change, and neither answers "why should I care".
-	Description   string   `json:"description,omitempty"`
-	Details       string   `json:"details"`
-	Evidence      []string `json:"evidence,omitempty"`
-	Remediation   string   `json:"remediation"`
-	RemediationZh string   `json:"remediationZh,omitempty"`
-	References    []string `json:"references,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Details     string   `json:"details"`
+	Evidence    []string `json:"evidence,omitempty"`
+	Remediation string   `json:"remediation"`
+	References  []string `json:"references,omitempty"`
 	// Automated is false for controls that are documented as unanswerable by
 	// the API and always report MANUAL.
 	Automated bool `json:"automated"`
@@ -256,18 +254,16 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 // broken rule is visible in the report instead of silently missing.
 func (e *Engine) evaluateOne(ctx context.Context, pq rego.PreparedEvalQuery, check checks.Check, resource, resourceType string, input map[string]any, report *Report) Finding {
 	finding := Finding{
-		CheckID:       check.ID,
-		CISID:         check.CISID,
-		Title:         check.Title,
-		TitleZh:       check.TitleZh,
-		Severity:      strings.ToUpper(check.Severity),
-		Resource:      resource,
-		ResourceType:  resourceType,
-		Description:   check.Description,
-		Remediation:   check.Remediation,
-		RemediationZh: check.RemediationZh,
-		References:    check.References,
-		Automated:     check.Automated,
+		CheckID:      check.ID,
+		CISID:        check.CISID,
+		Title:        check.Title,
+		Severity:     strings.ToUpper(check.Severity),
+		Resource:     resource,
+		ResourceType: resourceType,
+		Description:  check.Description,
+		Remediation:  check.Remediation,
+		References:   check.References,
+		Automated:    check.Automated,
 	}
 
 	rs, err := pq.Eval(ctx, rego.EvalInput(input))

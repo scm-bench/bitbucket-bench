@@ -14,7 +14,6 @@ import (
 // Options controls how a comparison is rendered.
 type Options struct {
 	Format string
-	Lang   string
 	Color  bool
 }
 
@@ -36,7 +35,6 @@ func Write(w io.Writer, r *Result, opts Options) error {
 	case "", report.FormatTable:
 		return writeTable(w, r, opts)
 	case report.FormatJSON:
-		r = localize(r, opts.Lang)
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
@@ -115,7 +113,7 @@ func writeTable(w io.Writer, r *Result, opts Options) error {
 				if ch.CheckID != id {
 					continue
 				}
-				t.Info("  %s  %s", paint(c, ansiBold, ch.CheckID), remediation(ch, opts.Lang))
+				t.Info("  %s  %s", paint(c, ansiBold, ch.CheckID), ch.Remediation)
 				break
 			}
 		}
@@ -215,44 +213,4 @@ func distinctChecks(changes []Change) []string {
 		out = append(out, ch.CheckID)
 	}
 	return out
-}
-
-// localize resolves each change's text to one language and clears the
-// per-language variants, so a consumer reads one field rather than choosing
-// between them. Same reasoning as the scan report, and the two must agree:
-// nobody should have to learn a different rule per subcommand.
-//
-// Copied rather than edited, since the result belongs to the caller.
-func localize(r *Result, lang string) *Result {
-	out := *r
-	for _, set := range []*[]Change{
-		&out.Regressed, &out.Fixed, &out.NewFailures, &out.Changed, &out.Departed,
-	} {
-		localized := make([]Change, len(*set))
-		for i, ch := range *set {
-			ch.Title = title(ch, lang)
-			ch.Remediation = remediation(ch, lang)
-			ch.TitleZh = ""
-			ch.RemediationZh = ""
-			localized[i] = ch
-		}
-		*set = localized
-	}
-	return &out
-}
-
-// title picks the localised title, falling back to English so a control with no
-// translation never renders blank.
-func title(ch Change, lang string) string {
-	if lang == report.LangChinese && ch.TitleZh != "" {
-		return ch.TitleZh
-	}
-	return ch.Title
-}
-
-func remediation(ch Change, lang string) string {
-	if lang == report.LangChinese && ch.RemediationZh != "" {
-		return ch.RemediationZh
-	}
-	return ch.Remediation
 }
