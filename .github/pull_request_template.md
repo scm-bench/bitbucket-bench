@@ -1,6 +1,7 @@
 <!--
 Label this pull request so it lands in the right release-notes section:
-bug · enhancement · policy · documentation · ci · dependencies · breaking
+bug · enhancement · policy · documentation · test · ci · dependencies ·
+breaking-change · deprecated
 An unlabelled pull request still appears, under "Other changes".
 -->
 

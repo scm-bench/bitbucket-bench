@@ -106,74 +106,23 @@ docker_signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# This is goreleaser's own changelog renderer. `use: github-native` — a
-# different value despite the similar name — hands the job to GitHub's
-# generate-notes API, which lists *merged pull requests* and categorises them
-# by the labels in .github/release.yml. Everything here lands on main by direct
-# push, so that API has nothing to list, and it would also disable groups,
-# sort, filters, abbrev and format in exchange. Hence: not that.
+# Release notes are written by hand on the release page. goreleaser builds,
+# signs and uploads; it does not narrate.
 #
-# .github/release.yml therefore has no effect on this body. It still governs
-# GitHub's own "Generate release notes" button if somebody presses it.
+# Grouping commits here contradicted two things the project had already
+# committed to in writing. CONTRIBUTING tells contributors that release notes
+# are grouped by label and that an unlabelled pull request lands under "Other
+# changes" — which was false while this file rendered the body from commit
+# subjects. It also tells them commit messages are plain imperative sentences
+# rather than Conventional Commits, while the grouping regexps depended on
+# exactly those prefixes. Handing the job to .github/release.yml makes both
+# sentences true again.
+#
+# The cost is worth stating: GitHub's generator lists *merged pull requests*,
+# and everything currently lands on main by direct push, so it has nothing to
+# list until that changes. The narrative is the part a person writes anyway.
 changelog:
-  # git, not github. With no previous tag — which is every first release — the
-  # github changeloger falls back to git to read the commits, but the default
-  # `format` is still chosen from the *configured* `use`. That mismatch is what
-  # printed a maintainer's email address into v0.1.0-rc.1 eleven times: the
-  # github default format ends in
-  # `{{ with .Author.Username }}@{{ . }}{{ else }}{{ .Author.Name }} <{{ .Author.Email }}>{{ end }}`,
-  # and a git commit carries no GitHub username to take the first branch.
-  use: git
-
-  # Written out rather than left to the default, because the default is where
-  # the email came from. Seven characters is enough to `git show`, and nothing
-  # else belongs on the line: the heading above it already says what kind of
-  # change this is, and git already knows who wrote it.
-  format: "{{ .SHA }} {{ .Message }}"
-  abbrev: 7
-
-  # Not `asc`. goreleaser sorts by comparing the commit *message* as a string,
-  # so `sort: asc` produced build, docs, feat, first commit, fix, fix, …, test:
-  # the alphabet, presented as though it were history. Empty keeps git's own
-  # order, which is what the groups below then partition.
-  sort: ""
-
-  filters:
-    exclude:
-      - "^first commit$"
-      - "^Merge "
-
-  # Regexps are matched against the commit subject, so conventional-commit
-  # prefixes are the whole mechanism. Two things about the ordering:
-  #
-  #   - Groups consume in the order written here, not in `order` order, so
-  #     breaking changes must come first or `feat!:` is swallowed by Features.
-  #   - The catch-all — the one with no regexp — must come last for the same
-  #     reason, or it would swallow everything.
-  #
-  # A group that matches nothing is dropped rather than rendered as an empty
-  # heading.
-  groups:
-    - title: "⚠️ Breaking changes"
-      regexp: '^.*?[a-z]+(\([[:word:]]+\))??!:.+$'
-      order: 0
-    - title: "✨ Features"
-      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
-      order: 1
-    - title: "🐛 Bug fixes"
-      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
-      order: 2
-    - title: "📝 Documentation"
-      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
-      order: 3
-    - title: "🧪 Testing"
-      regexp: '^.*?test(\([[:word:]]+\))??!?:.+$'
-      order: 4
-    - title: "🔨 Build & CI"
-      regexp: '^.*?(build|ci|chore)(\([[:word:]]+\))??!?:.+$'
-      order: 5
-    - title: "Other changes"
-      order: 999
+  disable: true
 
 # goreleaser reports `dockers`/`docker_manifests` as being phased out in favour
 # of `dockers_v2`. The migration is deferred rather than done blind: dockers_v2

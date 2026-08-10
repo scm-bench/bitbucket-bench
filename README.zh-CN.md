@@ -667,10 +667,14 @@ git tag -a v0.1.0 -m "scm-bench v0.1.0" && git push origin v0.1.0
 而且会在创建前校验 tag——非 canonical 的版本会被直接拒绝，而不是安静地产出一个没人装得上的
 release。两种方式后续流程相同。
 
-Release notes 是自上一个 tag 以来提交记录的纯列表（升序）——由 goreleaser 自己的渲染器生成，
-不是 GitHub 原生的。[`.github/release.yml`](.github/release.yml) 定义了按标签分类的规则，
-但目前没有任何环节读取它来生成 release body；保留它是为了在单独使用 GitHub 的「Generate
-release notes」功能时仍然生效，PR 也照常打标签，这样以后若切换渲染器，分类可以直接生效。
+**发布 goreleaser 建好的那个 draft，不要在 Releases 页面另建 release。** goreleaser
+会创建 draft 并把全部产物传进去；另建的 release 只有 notes、没有任何文件——`v0.1.0-rc.1`
+就是这样变成了两个 release 对象，其中一个什么都下载不到。
+
+Release notes 在那个 draft 里手写。goreleaser 只填带版本号的部分（安装命令与校验区块），
+叙述留给人写——那才是值得写的一半。点 **Generate release notes** 会在其上追加 GitHub
+自己生成的列表，按 [`.github/release.yml`](.github/release.yml) 的标签分类。那个列表覆盖的是
+**已合并的 Pull Request**；直推到 `main` 的提交不是 PR，不会出现在里面。
 
 **tag 必须是完整三段式** —— `v0.1.0`，不能是 `v0.1`。Go 认为 `v0.1` 是合法的 semver
 *字符串*，但它不是 canonical 形式，模块系统会忽略这样的 tag，`go install ...@latest`
