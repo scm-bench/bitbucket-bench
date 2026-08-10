@@ -26,10 +26,15 @@ type Options struct {
 	// ShowPassed includes passing controls in the table's detail section.
 	// The summary always counts them.
 	ShowPassed bool
-	// MaxResources caps how many resource names the table prints per distinct
-	// verdict before summarising the rest as "and N more". Zero means print
-	// every one. It affects only the table: json and sarif always carry the
-	// full set, because something is consuming those rather than reading them.
+	// MaxResources caps how many resources get a table of their own. Zero, the
+	// default, gives every one of them a table.
+	//
+	// It used to mean something else — how many names one verdict listed before
+	// summarising the rest — which was the right knob while the report grouped
+	// by control. Grouping by resource made each resource's table the report's
+	// main product, so this is now the cap on how many of those to draw. It
+	// affects only the table: json and sarif always carry the full set, because
+	// something is consuming those rather than reading them.
 	MaxResources int
 	// NoRemediations drops the remediation section. The fixes are the longest
 	// part of the output by far, so a reader who only wants to know what is
@@ -39,11 +44,11 @@ type Options struct {
 	ToolVersion string
 }
 
-// DefaultMaxResources is how many resource names a table verdict lists before
-// summarising. Enough to recognise a pattern — one repository is an incident,
-// a handful is a policy that was never applied — without the list becoming the
-// report.
-const DefaultMaxResources = 5
+// DefaultMaxResources is how many resources get a table. Zero means all of
+// them, and that is the default because each table is now a resource's whole
+// verdict rather than a list that could be trimmed: capping it by default would
+// mean the report silently omitted repositories that had findings.
+const DefaultMaxResources = 0
 
 // Formats lists the supported output formats, for flag help and validation.
 func Formats() []string { return []string{FormatTable, FormatJSON, FormatSARIF} }

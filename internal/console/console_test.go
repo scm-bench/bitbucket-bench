@@ -2,16 +2,17 @@ package console
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
 
-// The tag column is a contract: `scm-bench scan 2>&1 | grep '^\[FAIL\]'` is the
-// obvious thing to reach for, and it only works if every tag is the same width
-// and the brackets are literal.
+// The tag column is still a contract, on stderr: `scm-bench scan 2>&1 | grep
+// '^\[WARN\]'` answers "what did this scan fail to see", and it only works if
+// every tag is the same width and the brackets are literal.
 func TestEveryTagIsFourCharactersWide(t *testing.T) {
-	for _, tag := range []Tag{Pass, Fail, Warn, Info} {
+	for _, tag := range Tags() {
 		if len(tag.Text) != 4 {
 			t.Errorf("tag %q is %d characters, want 4 so the column never shifts", tag.Text, len(tag.Text))
 		}
@@ -21,11 +22,11 @@ func TestEveryTagIsFourCharactersWide(t *testing.T) {
 	}
 }
 
-// Four is the whole vocabulary, matching kube-bench. A fifth should be a
-// decision someone makes on purpose, not something that accumulates.
+// Four is the whole vocabulary. A fifth should be a decision someone makes on
+// purpose, not something that accumulates.
 func TestTheVocabularyIsExactlyFour(t *testing.T) {
 	seen := map[string]bool{}
-	for _, tag := range []Tag{Pass, Fail, Warn, Info} {
+	for _, tag := range Tags() {
 		if seen[tag.Text] {
 			t.Errorf("duplicate tag %q", tag.Text)
 		}
@@ -129,31 +130,212 @@ func TestWidthIsClampedAndDefaultsToEighty(t *testing.T) {
 	}
 }
 
-// A continuation is still a line of the report. `grep '^\['` must not have
-// holes in it, and the text has to keep a straight left edge under the prefix.
-func TestWrappedTagsAndIndentsContinuations(t *testing.T) {
+// A border that is not straight stops reading as a border, so nothing a table
+// draws may exceed the width it was given — at any width, with or without
+// colour, however long the words in a cell are.
+func TestTableNeverExceedsItsWidth(t *testing.T) {
+	cols := []Column{
+		{Header: "Control", Align: AlignLeft},
+		{Header: "Severity", Align: AlignLeft, Colour: func(s string) string { return Red + s + Reset }},
+		{Header: "Title", Align: AlignLeft, Flex: true},
+		{Header: "Finding", Align: AlignLeft, Flex: true},
+	}
+	rows := [][]string{
+		{"CIS-1.1.3", "HIGH",
+			"Ensure any change to code receives approval of two strongly authenticated users",
+			"Pull requests require 0 approval(s).\n· requiredApprovers = 0\nfix: Set it at Repository settings -> Pull requests -> Merge checks."},
+		// A single unbreakable run far wider than any column will be.
+		{"CIS-1.2.1", "LOW", "x", strings.Repeat("thresholds.inactiveUserDays", 4)},
+	}
+
+	for _, width := range []int{60, 80, 100, 120, 200} {
+		var buf bytes.Buffer
+		RenderTable(&buf, width, cols, rows)
+		for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+			if n := utf8.RuneCountInString(stripEscapes(line)); n > width {
+				t.Errorf("width %d: line of %d columns: %q", width, n, line)
+			}
+		}
+	}
+}
+
+// Every row of a table has to agree with every other about where the columns
+// are, which is the whole reason a table is easier to read than a list.
+func TestTableColumnsLineUpOnEveryRow(t *testing.T) {
 	var buf bytes.Buffer
-	w := Writer{W: &buf, P: Painter{Enabled: false}}
-	w.Wrapped(Fail, 40, "CIS-1.1.3  ", 11, "one two three four five six seven eight")
+	RenderTable(&buf, 80, []Column{
+		{Header: "A", Align: AlignLeft},
+		{Header: "B", Align: AlignRight},
+		{Header: "C", Align: AlignLeft, Flex: true},
+	}, [][]string{
+		{"short", "1", "a sentence long enough that it has to wrap more than once inside its cell"},
+		{"a much longer value", "1234", "two\nhard\nlines"},
+	})
+
+	layouts := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+		var at []int
+		for i, r := range []rune(stripEscapes(line)) {
+			if strings.ContainsRune("│┌┬┐├┼┤└┴┘", r) {
+				at = append(at, i)
+			}
+		}
+		layouts[fmt.Sprint(at)] = true
+	}
+	if len(layouts) != 1 {
+		t.Errorf("got %d different column layouts, want 1:\n%s", len(layouts), buf.String())
+	}
+}
+
+// Colour is width the reader never sees. Measuring it would push the border of
+// a coloured row out of line with the row above it.
+func TestTableColourDoesNotMoveTheBorders(t *testing.T) {
+	cols := func(colour bool) []Column {
+		paint := func(s string) string { return s }
+		if colour {
+			paint = func(s string) string { return Red + s + Reset }
+		}
+		return []Column{
+			{Header: "Status", Align: AlignLeft, Colour: paint},
+			{Header: "Detail", Align: AlignLeft, Flex: true},
+		}
+	}
+	rows := [][]string{{"FAIL", "something went wrong here"}, {"PASS", "fine"}}
+
+	var plain, painted bytes.Buffer
+	RenderTable(&plain, 60, cols(false), rows)
+	RenderTable(&painted, 60, cols(true), rows)
+
+	if got := stripEscapes(painted.String()); got != plain.String() {
+		t.Errorf("colour changed the layout:\nplain:\n%s\npainted (escapes stripped):\n%s", plain.String(), got)
+	}
+	if strings.Contains(plain.String(), "\033[") {
+		t.Error("escapes leaked into an uncoloured table")
+	}
+}
+
+// Newlines in a cell are the caller saying "these are separate things" — a
+// finding's details, its evidence, its fix — and must survive as separate
+// lines rather than being reflowed into one paragraph.
+func TestTableKeepsHardBreaksInsideACell(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 60, []Column{{Header: "Finding", Align: AlignLeft, Flex: true}},
+		[][]string{{"first\n· second\nfix: third"}})
+
+	out := buf.String()
+	for _, want := range []string{"first", "· second", "fix: third"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q from:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "first · second") {
+		t.Errorf("hard breaks were reflowed:\n%s", out)
+	}
+}
+
+func stripEscapes(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// A table of nothing but fixed columns still has to fit. Nothing absorbs the
+// overflow, so the columns themselves have to give, widest first.
+func TestFixedOnlyTableShrinksToFit(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 40, []Column{
+		{Header: "Resource", Align: AlignLeft},
+		{Header: "Type", Align: AlignLeft},
+		{Header: "Failed", Align: AlignRight},
+	}, [][]string{
+		{"PLAT/a-very-long-repository-name-indeed", "repository", "12"},
+		{"PLAT/b", "repository", "-"},
+	})
+
+	for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+		if n := utf8.RuneCountInString(line); n > 40 {
+			t.Errorf("line of %d columns exceeds the width: %q", n, line)
+		}
+	}
+	if !strings.Contains(buf.String(), "12") {
+		t.Errorf("shrinking lost a value:\n%s", buf.String())
+	}
+}
+
+// When the fixed columns alone would leave the flexed ones with nothing, the
+// fixed ones have to give up width too — a table with a column of width zero
+// is not a table.
+func TestFixedColumnsGiveWayToKeepFlexedOnesReadable(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 60, []Column{
+		{Header: "A very wide fixed heading indeed", Align: AlignLeft},
+		{Header: "Another wide fixed heading", Align: AlignLeft},
+		{Header: "Flex", Align: AlignLeft, Flex: true},
+	}, [][]string{
+		{"value one", "value two", "a sentence that needs somewhere to go"},
+	})
 
 	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected the text to wrap, got %q", buf.String())
-	}
-	if !strings.HasPrefix(lines[0], "[FAIL] CIS-1.1.3  ") {
-		t.Errorf("first line = %q", lines[0])
-	}
 	for _, line := range lines {
-		if !strings.HasPrefix(line, "[FAIL] ") && !strings.HasPrefix(line, "[INFO] ") {
-			t.Errorf("line lost its tag: %q", line)
-		}
-		if n := utf8.RuneCountInString(line); n > 40 {
-			t.Errorf("line of %d runes exceeds the width: %q", n, line)
+		if n := utf8.RuneCountInString(line); n > 60 {
+			t.Errorf("line of %d columns exceeds the width: %q", n, line)
 		}
 	}
-	for _, line := range lines[1:] {
-		if !strings.HasPrefix(line, "[INFO] "+strings.Repeat(" ", 11)) {
-			t.Errorf("continuation is not indented under the prefix: %q", line)
+	// The flexed column kept enough room to hold real words rather than one
+	// letter per line.
+	if !strings.Contains(buf.String(), "sentence") {
+		t.Errorf("the flexed column was squeezed to nothing:\n%s", buf.String())
+	}
+}
+
+// A table of short values should not be stretched across a wide window with a
+// lake of padding in the middle.
+func TestFlexedColumnsDoNotGrowPastTheirContent(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 200, []Column{
+		{Header: "A", Align: AlignLeft},
+		{Header: "B", Align: AlignLeft, Flex: true},
+	}, [][]string{{"x", "y"}})
+
+	for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+		if n := utf8.RuneCountInString(line); n > 20 {
+			t.Errorf("a table of two one-character cells is %d columns wide: %q", n, line)
+		}
+	}
+}
+
+func TestRenderTableWithNoColumnsWritesNothing(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 80, nil, [][]string{{"ignored"}})
+	if buf.Len() != 0 {
+		t.Errorf("wrote %q for a table with no columns", buf.String())
+	}
+}
+
+// Alignment is what makes a column of counts readable, so it has to survive
+// padding on both sides.
+func TestCellsHonourTheirAlignment(t *testing.T) {
+	var buf bytes.Buffer
+	RenderTable(&buf, 40, []Column{
+		{Header: "Left", Align: AlignLeft},
+		{Header: "Right", Align: AlignRight},
+		{Header: "Centre", Align: AlignCentre},
+	}, [][]string{{"a", "b", "c"}})
+
+	out := buf.String()
+	for _, want := range []string{"│ a    ", "│     b │", "│   c    │"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q from:\n%s", want, out)
 		}
 	}
 }

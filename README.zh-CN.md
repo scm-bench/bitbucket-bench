@@ -267,45 +267,62 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 ## 输出格式
 
-**`table`**（默认）—— 分数在最前，然后是这次扫描没看到的东西，再是按规则**并按判定结论**
-分组的发现，因此「同一处配置问题散布在五十个仓库」读起来是一个问题，而不是五十个：
+**`table`**（默认）—— 分数在最前，然后是所有资源的汇总表，再是每个资源一张表，
+形态取自 trivy：
 
 ```
-[INFO] scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
+scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-[INFO] SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
-[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
-[INFO]       failures by severity: HIGH 4 · MEDIUM 5 · LOW 4
-[INFO]       most affected: PLAT/legacy-billing (12 failures)
+SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+      scored 28 of 47 controls (59%); 19 could not be evaluated
 
-[INFO] == Scan warnings ==
-[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You
-[INFO]   are not permitted to access this resource); administrator counts are lower bounds
+Report Summary
 
-[INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3   HIGH    Ensure any change to code receives approval of two strongly authenticated
-[INFO]                     users
-[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent
-[INFO]                          approvals are needed.
-[INFO]       · requiredApprovers = 0
-[INFO]       fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests ->
-[INFO]            Merge checks.
+┌─────────────────────┬──────────────┬────────┬────────┬────────┬────────┐
+│      Resource       │     Type     │ Failed │ Unread │ Manual │ Passed │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/legacy-billing │ repository   │     12 │      - │      1 │      1 │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ instance            │ organization │      1 │      - │      3 │      1 │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/vendor-mirror  │ repository   │      - │     13 │      1 │      - │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/payments-api   │ repository   │      - │      - │      1 │     13 │
+└─────────────────────┴──────────────┴────────┴────────┴────────┴────────┘
+Legend:
+- '-': none in this state
+- 'Unread': the scan could not read what the control asks about
 
-[INFO] == Not evaluated (13) ==
-[INFO]     No verdict was reached for these. The scan could not read what the control asks about —
-[INFO]     widen the token's access, check the scan warnings above, and run again.
-[WARN] PLAT/vendor-mirror  13 controls could not be evaluated
-[INFO]     CIS-1.1.3 CIS-1.1.4 CIS-1.1.8 CIS-1.1.9 CIS-1.1.11 CIS-1.1.12 CIS-1.1.13 CIS-1.1.15
-[INFO]     CIS-1.1.16 CIS-1.1.17 CIS-1.2.1 CIS-1.3.7 CIS-1.3.8
+Scan warnings
 
-[INFO] == Needs manual review (6) ==
-[WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
-[INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
+  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
+  permitted to access this resource); administrator counts are lower bounds
 
-[INFO] == Remediations (17) ==
-[INFO] CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: ...
-[INFO] CIS-1.3.5   Enforce MFA at the identity provider that fronts Bitbucket: ...
+PLAT/legacy-billing (repository)
+
+Total: 13 (LOW: 4, MEDIUM: 5, HIGH: 4)
+
+┌────────────┬──────────┬────────┬────────────────────────────────┬────────────────────────────────┐
+│  Control   │ Severity │ Status │             Title              │            Finding             │
+├────────────┼──────────┼────────┼────────────────────────────────┼────────────────────────────────┤
+│ CIS-1.1.3  │ HIGH     │ FAIL   │ Ensure any change to code      │ Pull requests require 0        │
+│            │          │        │ receives approval of two       │ approval(s); at least 2        │
+│            │          │        │ strongly authenticated users   │ independent approvals are      │
+│            │          │        │                                │ needed.                        │
+│            │          │        │                                │ · requiredApprovers = 0        │
+│            │          │        │                                │ fix: Set "Minimum approvals"   │
+│            │          │        │                                │ to at least 2 at Repository    │
+│            │          │        │                                │ settings -> Pull requests ->   │
+│            │          │        │                                │ Merge checks.                  │
+└────────────┴──────────┴────────┴────────────────────────────────┴────────────────────────────────┘
+
+... 每个资源一张表 ...
+
+Remediations (17)
+
+  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
+              set it to at least 2. ...
 ```
 
 上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
@@ -316,51 +333,42 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 无法判定的规则不进入分数的分子，也不进入分母 —— 单看每一条规则这是对的，合起来却有
 误导性，因为分母被缩小了，于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的
 分数。`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
-`most affected` 是逐规则分组看不出来的那份统计 —— 它指出该由谁去动手。
 
-扫描告警排在发现之前而不是之后，因为它决定了这份报告有多少可信：一个让扫描丢掉整个仓库的
-403，正是下面那一串「无法判定」的原因。
+**Report Summary 是导航。** 正文按资源分组，能在不读别人家仓库的前提下回答「我这个仓库
+哪里有问题」，但说不出各个资源之间怎么比。汇总表就是那份比较 —— 所有资源，最差的排最前 ——
+让实例的整体形状在任何细节之前先出现。
 
-**`Not evaluated` 与 `Needs manual review` 都是 `MANUAL`，按成因拆开。** 前者是**这次运行**
-读不到的东西 —— 一个读不到的仓库过去会产出一条规则一个条目，用十三种说法讲同一个 403 ——
-所以按资源折叠成一条，并列全它牵连的规则。后者是**任何 API 都答不了**的规则
-（metadata 里 `automated: false`），无论 token 多好都需要人来判断。只有后者会给出修复建议：
-一条扫描根本没看到的规则，并不能说它配错了，印出「怎么改设置」等于在说反话。
+扫描告警排在表格之前而不是之后，因为它决定了这份报告有多少可信：一个让扫描丢掉整个仓库的
+403，正是下面那一列 `UNREAD` 的原因。
 
-行宽跟随 `COLUMNS`，夹在 60–100 之间，未导出时默认 80。折行的续行保留标签列，
-并悬挂缩进对齐到首行内容。
+**`UNREAD` 与 `MANUAL` 底层都是 `MANUAL`，按成因拆开。** `UNREAD` 是**这次运行**读不到的
+东西；`MANUAL` 是**任何 API 都答不了**的规则（metadata 里 `automated: false`），无论 token
+多好都需要人来判断。只有后者会给出修复建议：一条扫描根本没看到的规则，并不能说它配错了，
+印出「怎么改设置」等于在说反话。JSON 与 SARIF 里两者都是 `MANUAL`，因为那才是规则返回的东西。
 
-每一行都以等宽的标签开头，在终端里带颜色：
+每条发现的 `Finding` 单元格里装着这个资源的实际状况、支撑它的证据，以及一行 `fix:` ——
+第一步动作，以及在哪里做。完整的修复段落独立成节放在末尾，仍是散文：那些段落写的是设置路径、
+项目级的等价做法和配置项名称，而一个段落塞进表格单元格就是一列三词一行的东西。
+`--no-remediations` 可以整段去掉；一行的 `fix:` 仍然保留。
 
-| 标签 | 含义 |
-|---|---|
-| `[PASS]` | 已判定，配置正确 |
-| `[FAIL]` | 已判定，配置有问题 |
-| `[WARN]` | 需要人介入：工具无法判定的规则（`MANUAL`），或扫描读不到的东西 |
-| `[INFO]` | 结构、证据、修复建议、折行的续行，以及不适用的规则——本身从不是判定结论 |
+表格宽度跟随 `COLUMNS`，夹在 60–120 之间，未导出时默认 80。任何一行都不会超出这个宽度 ——
+折了行的边框就不再像边框 —— 所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
 
-四个标签，与 kube-bench 用的是同一组。`MANUAL` 故意归到 `[WARN]` 而不是 `[INFO]`：
-「这一条没人验证过」是这个工具最不肯让它消失的信息，它不该和章节标题共用一列。
-
-每条发现带一行 `fix:` —— 第一步动作，以及在哪里做；完整的修复段落独立成节放在末尾。
-这个拆分才是让发现列表可以快速扫读的关键：那些段落写的是设置路径、项目级的等价做法和
-配置项名称，把它印在每条规则下面，会让一次二十仓库的扫描变成一堵必须读完才能找到下一条
-判定的散文墙。`--no-remediations` 可以整段去掉；一行的 `fix:` 仍然保留。
-
-真正承载信息的是标签，颜色只是强化它。所以输出被管道、重定向，或设置了 `NO_COLOR`
-时，什么都不会丢。这也让最自然的用法直接可用：
+颜色只是强化，所以输出被管道、重定向或设置了 `NO_COLOR` 时什么都不会丢。过滤是 JSON 的活：
 
 ```bash
-scm-bench scan 2>&1 | grep '^\[FAIL\]'   # 实例哪里有问题
-scm-bench scan 2>&1 | grep '^\[WARN\]'   # 这次扫描没看到什么
+scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
+scm-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
+scm-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
 ```
 
-一条规则无论覆盖多少个仓库，只贡献一行判定。数量放在最前，因为它决定了该怎么处理：
-三个仓库是疏漏，三百个说明这条策略从来没被推行过。同一规则下因**不同原因**失败的仓库
-仍然各自成组——那是不同的问题。
+**stderr** 上的行 —— 请求日志、解释退出码的那一行 —— 仍然带等宽的
+`[INFO]`/`[WARN]`/`[FAIL]`/`[PASS]` 标签，因为它们是和别的程序的输出交错着读的，
+也没有表格可归属。stdout 上的报告则不带。
 
-`--max-resources` 控制列出多少个名字之后开始汇总（默认 5，`0` 表示全部列出）。它只影响这一种
-格式：`json` 与 `sarif` 始终携带完整集合。
+`--max-resources` 限制多少个资源能有自己的表（默认 `0`，即每个都有）。真的截断时报告会说明
+省略了多少个；所有资源在 Report Summary 里仍然都在。它只影响这一种格式：`json` 与 `sarif`
+始终携带完整集合。
 
 通过和不适用的规则只计入汇总，不会逐条列出——报告是一份待办清单。`--show-passed` 会把它们
 也列出来，当你的问题是「这个实例已经做对了哪些」时用它。
@@ -507,29 +515,30 @@ scm-bench diff last-week.json today.json
 ```
 
 ```
-[INFO] scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
-[INFO] SCORE  53 → 31   (-22)
-[INFO]        weighted 29/55 → 25/80
+scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+SCORE  53 → 31   (-22)
+       weighted 29/55 → 25/80
 
-[INFO] REGRESSED (3)
-[FAIL]   HIGH    CIS-1.1.15  PLAT/payments-api  PASS → FAIL
-[INFO]       Anyone with write access can push directly to main, bypassing pull request review.
+Regressed (3)
 
-[INFO] NEW FAILURES (12)
-[FAIL]   HIGH    CIS-1.1.3  PLAT/brand-new  FAIL
+┌────────────┬──────────┬───────────────────┬─────────────┬──────────────────────────────────────┐
+│  Control   │ Severity │     Resource      │   Change    │                Detail                │
+├────────────┼──────────┼───────────────────┼─────────────┼──────────────────────────────────────┤
+│ CIS-1.1.15 │ HIGH     │ PLAT/payments-api │ PASS → FAIL │ Anyone with write access can push    │
+│            │          │                   │             │ directly to main, bypassing review.  │
+└────────────┴──────────┴───────────────────┴─────────────┴──────────────────────────────────────┘
 
-[INFO] FIXED (1)
-[PASS]   HIGH    CIS-1.1.3  PLAT/legacy-billing  FAIL → PASS
+... 每一类变化一张表：New failures、Fixed、Other changes、Gone ...
 
-[INFO] GONE (1)
-[INFO]   HIGH    PLAT/retired-service  gone
-[INFO]       no longer present; it was failing 5 controls of 14 evaluated
+How to fix the regressions
+
+  CIS-1.1.15  Repository settings -> Branch permissions -> Add restriction: ...
 ```
 
-`diff` 用的是和 `scan` 完全一样的标签列，所以
-`scm-bench diff a.json b.json | grep '^\[FAIL\]'` 就能回答「什么变差了」。
-`GONE` 是每个资源一条，而不是每条规则一条：删掉一个仓库是关于这个仓库的一个事实，
-把它报二十遍只会把这条命令本该凸显的回退埋掉。
+`diff` 和 `scan` 用的是同一个表格渲染器，所以两个子命令读起来像同一个程序。
+`Gone` 是每个资源一条，而不是每条规则一条：删掉一个仓库是关于这个仓库的一个事实，
+把它报二十遍只会把这条命令本该凸显的回退埋掉 —— 它的 Control 列写 `-`，
+因为表格没法为某一行去掉一列。
 
 它接受和 `scan` 相同的输出 flag —— `-o table|json`、`--output-file`、
 `--no-color` —— 外加 `--fail-on-regression`（默认开启）与 `--allow-other-instance`。

@@ -134,7 +134,7 @@ so.`,
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
-	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "table output: resource names to list per finding before summarising; 0 lists all")
+	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "table output: how many resources get a table of their own; 0 means every one")
 	f.StringVar(&opts.failOn, "fail-on", "high", "exit 1 when a failure at or above this severity exists: high, medium, low, none")
 	f.IntVar(&opts.failUnder, "fail-under", 0, "exit 1 when the score is below this; 0 disables")
 	// Defaults to off, because how much of an instance a token can read is a

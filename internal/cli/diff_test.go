@@ -68,10 +68,10 @@ func TestDiffReportsFixedControl(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d for an improvement", code, ExitOK)
 	}
-	if !strings.Contains(stdout, "FIXED") || !strings.Contains(stdout, "CIS-1.1.3") {
+	if !strings.Contains(stdout, "Fixed (") || !strings.Contains(stdout, "CIS-1.1.3") {
 		t.Errorf("the improvement was not reported\n---\n%s", stdout)
 	}
-	if strings.Contains(stdout, "REGRESSED") {
+	if strings.Contains(stdout, "Regressed (") {
 		t.Errorf("nothing regressed but the section was printed\n---\n%s", stdout)
 	}
 }
@@ -85,12 +85,12 @@ func TestDiffExitsOneOnRegression(t *testing.T) {
 	if code != ExitFindings {
 		t.Fatalf("exit code = %d, want %d when a control fell from PASS to FAIL", code, ExitFindings)
 	}
-	if !strings.Contains(stdout, "REGRESSED") {
+	if !strings.Contains(stdout, "Regressed (") {
 		t.Errorf("the regression was not reported\n---\n%s", stdout)
 	}
 	// A regression is the one thing someone is expected to act on immediately,
 	// so the fix has to be in front of them.
-	if !strings.Contains(stdout, "HOW TO FIX THE REGRESSIONS") {
+	if !strings.Contains(stdout, "How to fix the regressions") {
 		t.Errorf("no remediation was printed for the regression\n---\n%s", stdout)
 	}
 }

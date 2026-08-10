@@ -299,46 +299,62 @@ decide whether a result is acceptable.
 
 ## Output formats
 
-**`table`** (default) — the score first, then what the scan could not see, then
-the findings grouped by control **and by verdict**, so one misconfiguration
-repeated across fifty repositories reads as one problem rather than fifty:
+**`table`** (default) — the score, then a summary of every resource, then one
+table per resource, in the shape trivy uses:
 
 ```
-[INFO] scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
+scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-[INFO] SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
-[INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
-[INFO]       failures by severity: HIGH 4 · MEDIUM 5 · LOW 4
-[INFO]       most affected: PLAT/legacy-billing (12 failures)
+SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+      scored 28 of 47 controls (59%); 19 could not be evaluated
 
-[INFO] == Scan warnings ==
-[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You
-[INFO]   are not permitted to access this resource); administrator counts are lower bounds
+Report Summary
 
-[INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3   HIGH    Ensure any change to code receives approval of two strongly authenticated
-[INFO]                     users
-[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent
-[INFO]                          approvals are needed.
-[INFO]       · requiredApprovers = 0
-[INFO]       fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests ->
-[INFO]            Merge checks.
+┌─────────────────────┬──────────────┬────────┬────────┬────────┬────────┐
+│      Resource       │     Type     │ Failed │ Unread │ Manual │ Passed │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/legacy-billing │ repository   │     12 │      - │      1 │      1 │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ instance            │ organization │      1 │      - │      3 │      1 │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/vendor-mirror  │ repository   │      - │     13 │      1 │      - │
+├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
+│ PLAT/payments-api   │ repository   │      - │      - │      1 │     13 │
+└─────────────────────┴──────────────┴────────┴────────┴────────┴────────┘
+Legend:
+- '-': none in this state
+- 'Unread': the scan could not read what the control asks about
 
-[INFO] == Not evaluated (13) ==
-[INFO]     No verdict was reached for these. The scan could not read what the control asks about —
-[INFO]     widen the token's access, check the scan warnings above, and run again.
-[WARN] PLAT/vendor-mirror  13 controls could not be evaluated
-[INFO]     CIS-1.1.3 CIS-1.1.4 CIS-1.1.8 CIS-1.1.9 CIS-1.1.11 CIS-1.1.12 CIS-1.1.13 CIS-1.1.15
-[INFO]     CIS-1.1.16 CIS-1.1.17 CIS-1.2.1 CIS-1.3.7 CIS-1.3.8
+Scan warnings
 
-[INFO] == Needs manual review (6) ==
-[WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
-[INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
+  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
+  permitted to access this resource); administrator counts are lower bounds
 
-[INFO] == Remediations (17) ==
-[INFO] CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: ...
-[INFO] CIS-1.3.5   Enforce MFA at the identity provider that fronts Bitbucket: ...
+PLAT/legacy-billing (repository)
+
+Total: 13 (LOW: 4, MEDIUM: 5, HIGH: 4)
+
+┌────────────┬──────────┬────────┬────────────────────────────────┬────────────────────────────────┐
+│  Control   │ Severity │ Status │             Title              │            Finding             │
+├────────────┼──────────┼────────┼────────────────────────────────┼────────────────────────────────┤
+│ CIS-1.1.3  │ HIGH     │ FAIL   │ Ensure any change to code      │ Pull requests require 0        │
+│            │          │        │ receives approval of two       │ approval(s); at least 2        │
+│            │          │        │ strongly authenticated users   │ independent approvals are      │
+│            │          │        │                                │ needed.                        │
+│            │          │        │                                │ · requiredApprovers = 0        │
+│            │          │        │                                │ fix: Set "Minimum approvals"   │
+│            │          │        │                                │ to at least 2 at Repository    │
+│            │          │        │                                │ settings -> Pull requests ->   │
+│            │          │        │                                │ Merge checks.                  │
+└────────────┴──────────┴────────┴────────────────────────────────┴────────────────────────────────┘
+
+... one more table per resource ...
+
+Remediations (17)
+
+  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
+              set it to at least 2. ...
 ```
 
 That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
@@ -351,64 +367,56 @@ line is worth reading before the score above it: controls that could not be
 evaluated are excluded from both sides of the fraction, which is right for any
 single control and misleading in aggregate, since a token that can read very
 little produces a high score from a small sample. `--max-manual` turns that into
-a failed run rather than a good-looking one. `most affected` is the tally the
-control-by-control grouping cannot show — it names who has to do the work.
+a failed run rather than a good-looking one.
 
-Scan warnings come before the findings rather than after them, because they are
+**Report Summary is the navigation.** Grouping the body by resource answers "what
+is wrong with *my* repository" without reading about anybody else's, and says
+nothing about how one compares to another. The summary is that comparison —
+every resource, worst first — so the instance's shape is visible before any of
+the detail is.
+
+Scan warnings come before the tables rather than after them, because they are
 what decides how much of the report to believe: a 403 that cost the scan a whole
-repository explains a run of unevaluated controls further down.
+repository explains a column of `UNREAD` further down.
 
-**`Not evaluated` and `Needs manual review` are both `MANUAL`, split by cause.**
-The first is what *this run* could not read — one unreadable repository used to
-produce one entry per control, thirteen ways of saying the same 403 — so it is
-collapsed to one entry per resource, listing every control it cost. The second is
-the controls *no API can answer* (`automated: false` in their metadata), which
-need a person no matter how good your token is. Only the second gets remediation
-text: a control the scan never saw is not known to be misconfigured, and printing
-how to change its settings would say otherwise.
+**`UNREAD` and `MANUAL` are both `MANUAL` underneath, split by cause.** `UNREAD`
+is what *this run* could not read; `MANUAL` is a control *no API can answer*
+(`automated: false` in its metadata), which needs a person no matter how good
+your token is. Only the second gets remediation text: a control the scan never
+saw is not known to be misconfigured, and printing how to change its settings
+would say otherwise. The JSON and the SARIF say `MANUAL` for both, because that
+is what the control returned.
 
-Lines wrap to `COLUMNS`, clamped to 60–100 and defaulting to 80 when it is not
-exported. Continuations keep the tag column and hang under their first line.
+Each finding's `Finding` cell carries what the resource does, the evidence behind
+it, and a one-line `fix:` — the first move, and where. The full remediation
+paragraph lives in a section of its own at the end, as prose: those paragraphs
+name settings paths, project-wide variants and config keys, and a paragraph in a
+table cell is a column of three-word lines. `--no-remediations` drops the section
+entirely; the one-line fixes stay.
 
-Every line begins with a fixed-width tag, coloured on a terminal:
+Tables wrap to `COLUMNS`, clamped to 60–120 and defaulting to 80 when it is not
+exported. Nothing ever exceeds that width — a border that wraps stops reading as
+a border — so a long settings path is broken at the column edge rather than
+pushing the frame out of true.
 
-| Tag | Means |
-|---|---|
-| `[PASS]` | evaluated, and the setting is right |
-| `[FAIL]` | evaluated, and the setting is wrong |
-| `[WARN]` | needs a person: a control the tool could not decide (`MANUAL`), or something the scan could not read |
-| `[INFO]` | structure, evidence, remediation, wrapped continuations, and controls that do not apply — never a verdict |
-
-Four tags, the same four kube-bench uses. `MANUAL` is deliberately `[WARN]`
-rather than `[INFO]`: "nobody has checked this" is the one thing this tool
-refuses to let disappear, and it does not belong in the same column as a
-section header.
-
-Each finding carries a one-line `fix:` — the first move, and where — while the
-full remediation paragraph lives in a section of its own at the end. That split
-is what keeps the findings list scannable: the paragraphs name settings paths,
-project-wide variants and config keys, and printing one under every control
-turned a twenty-repository scan into prose you had to read to find the next
-verdict. `--no-remediations` drops the section entirely; the one-line fixes stay.
-
-The tag is the signal and the colour only reinforces it, so nothing is lost when
-output is piped, redirected, or run with `NO_COLOR` set. That also makes the
-obvious thing work:
+Colour is reinforcement only, so nothing is lost when output is piped,
+redirected, or run with `NO_COLOR` set. Filtering is a job for the JSON:
 
 ```bash
-scm-bench scan 2>&1 | grep '^\[FAIL\]'   # what is wrong with the instance
-scm-bench scan 2>&1 | grep '^\[WARN\]'   # what the scan could not see
+scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
+scm-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
+scm-bench scan 2>&1 >/dev/null                  # what the scan itself had to say
 ```
 
-One control contributes exactly one verdict line however many repositories it
-covers. The count leads because it is what decides the response: three
-repositories is an oversight, three hundred is a policy that was never applied.
-Repositories that failed the same control for a *different* reason stay in their
-own group — those are different problems.
+Lines on **stderr** — the request trace, the line explaining an exit code — still
+carry a fixed-width `[INFO]`/`[WARN]`/`[FAIL]`/`[PASS]` tag, because they are read
+interleaved with other programs' output and have no table to belong to. The
+report on stdout does not.
 
-`--max-resources` sets how many names are listed before the tail is summarised
-(default 5; `0` lists every one). It affects only this format: `json` and `sarif`
-always carry the full set.
+`--max-resources` caps how many resources get a table of their own (`0`, the
+default, gives every one of them a table). When it bites, the report says how
+many it withheld; every resource still appears in Report Summary. It affects only
+this format: `json` and `sarif` always carry the full set.
 
 Passing and not-applicable controls are summarised but not listed, since a
 report is a list of things to do. `--show-passed` lists them too, which is what
@@ -585,30 +593,31 @@ scm-bench diff last-week.json today.json
 ```
 
 ```
-[INFO] scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
-[INFO] SCORE  53 → 31   (-22)
-[INFO]        weighted 29/55 → 25/80
+scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+SCORE  53 → 31   (-22)
+       weighted 29/55 → 25/80
 
-[INFO] REGRESSED (3)
-[FAIL]   HIGH    CIS-1.1.15  PLAT/payments-api  PASS → FAIL
-[INFO]       Anyone with write access can push directly to main, bypassing pull request review.
+Regressed (3)
 
-[INFO] NEW FAILURES (12)
-[FAIL]   HIGH    CIS-1.1.3  PLAT/brand-new  FAIL
+┌────────────┬──────────┬───────────────────┬─────────────┬──────────────────────────────────────┐
+│  Control   │ Severity │     Resource      │   Change    │                Detail                │
+├────────────┼──────────┼───────────────────┼─────────────┼──────────────────────────────────────┤
+│ CIS-1.1.15 │ HIGH     │ PLAT/payments-api │ PASS → FAIL │ Anyone with write access can push    │
+│            │          │                   │             │ directly to main, bypassing review.  │
+└────────────┴──────────┴───────────────────┴─────────────┴──────────────────────────────────────┘
 
-[INFO] FIXED (1)
-[PASS]   HIGH    CIS-1.1.3  PLAT/legacy-billing  FAIL → PASS
+... one table per kind of change: New failures, Fixed, Other changes, Gone ...
 
-[INFO] GONE (1)
-[INFO]   HIGH    PLAT/retired-service  gone
-[INFO]       no longer present; it was failing 5 controls of 14 evaluated
+How to fix the regressions
+
+  CIS-1.1.15  Repository settings -> Branch permissions -> Add restriction: ...
 ```
 
-`diff` writes the same tag column as `scan`, so
-`scm-bench diff a.json b.json | grep '^\[FAIL\]'` answers "what got worse".
-`GONE` is one entry per resource rather than one per control: deleting a
-repository is one fact about the repository, and reporting it twenty times
-buried the regressions this command exists to surface.
+`diff` draws with the same table renderer as `scan`, so the two subcommands read
+as one program. `Gone` is one entry per resource rather than one per control:
+deleting a repository is one fact about the repository, and reporting it twenty
+times buried the regressions this command exists to surface — it shows a `-` in
+the Control column, since a table cannot drop a column for one row.
 
 It takes the same output flags as `scan` — `-o table|json`, `--output-file`,
 `--no-color` — plus `--fail-on-regression` (on by default) and

@@ -291,10 +291,10 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
 
-	// The summary leads, then the findings, then the remediations. "Branch
-	// permissions" is the remediation text, which has to survive being moved
-	// out of the findings list into its own section.
-	for _, want := range []string{"SCORE", "10 failed", "== Failed", "PRJ/app", "== Remediations", "Branch permissions"} {
+	// The summary leads, then a table per resource, then the remediations.
+	// "Branch permissions" is the remediation text, which has to survive being
+	// moved out of the tables into its own section.
+	for _, want := range []string{"SCORE", "10 failed", "Report Summary", "PRJ/app", "Total: ", "Remediations (", "Branch permissions"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}

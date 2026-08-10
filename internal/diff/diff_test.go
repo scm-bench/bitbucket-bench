@@ -2,12 +2,21 @@ package diff
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/scm-bench/scm-bench/internal/engine"
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
+
+// The renderer wraps to console.Width, which reads COLUMNS. Pinning it keeps
+// these assertions off the width of whatever terminal the suite runs under.
+func TestMain(m *testing.M) {
+	os.Setenv("COLUMNS", "80")
+	os.Exit(m.Run())
+}
 
 func finding(check, resource string, status engine.Status, severity string) engine.Finding {
 	return engine.Finding{
@@ -178,20 +187,22 @@ func TestSameInstance(t *testing.T) {
 	}
 }
 
-// The tag column is not decoration in the scan report and it is not
-// decoration here: it is a fixed-width first column so verdicts line up, and
-// it is what makes `scm-bench diff ... | grep '^\[FAIL\]'` answer "what got
-// worse". This renderer skipped it entirely, so a diff read like a different
-// program's output — right up to the closing line, which came from main and
-// did carry a tag.
-func TestTableOutputCarriesTheTagColumn(t *testing.T) {
+// Whatever the scan report looks like, diff has to look like it too. This
+// renderer once had a layout of its own, and a diff read like a different
+// program's output — right up to the closing line, which came from main and did
+// not. Now both draw with console.RenderTable, so the check is that a diff is
+// made of tables and that they hold their shape.
+func TestTableOutputIsDrawnWithTheSameTables(t *testing.T) {
 	result := &Result{
 		Before:    Side{BaseURL: "https://bitbucket.example.com", Score: engine.Score{Value: 80, EarnedWeight: 8, TotalWeight: 10}},
 		After:     Side{BaseURL: "https://bitbucket.example.com", Score: engine.Score{Value: 60, EarnedWeight: 6, TotalWeight: 10}},
 		Regressed: []Change{{CheckID: "CIS-1.1.15", Severity: "HIGH", Resource: "PRJ/app", From: "PASS", To: "FAIL", Details: "no longer restricted", Remediation: "restrict it"}},
 		Fixed:     []Change{{CheckID: "CIS-1.1.4", Severity: "MEDIUM", Resource: "PRJ/app", From: "FAIL", To: "PASS", Details: "approvals reset now"}},
 		Changed:   []Change{{CheckID: "CIS-1.1.9", Severity: "HIGH", Resource: "PRJ/app", From: "PASS", To: "MANUAL", Details: "cannot be read"}},
-		Departed:  []Change{{CheckID: "CIS-1.2.1", Severity: "LOW", Resource: "PRJ/old", From: "PASS"}},
+		// A departed resource is one entry for the resource, not one per
+		// control, so it carries no control ID — see
+		// TestDepartedResourcesCollapseToOneEntryEach.
+		Departed: []Change{{Severity: "LOW", Resource: "PRJ/old", From: "PASS", Details: "was failing 3 of 4 controls"}},
 	}
 
 	var buf bytes.Buffer
@@ -200,25 +211,46 @@ func TestTableOutputCarriesTheTagColumn(t *testing.T) {
 	}
 	out := buf.String()
 
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if line == "" {
-			continue
+	// Each kind of change gets its own table, headed the same way scan's are.
+	for _, want := range []string{
+		"Regressed (1)", "Fixed (1)", "Other changes (1)", "Gone (1)",
+		"┌", "│  Control  ", "Severity", "Resource", "Change", "Detail",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff output is missing %q\n---\n%s", want, out)
 		}
-		if !strings.HasPrefix(line, "[") {
-			t.Errorf("line does not start with a tag: %q", line)
+	}
+	// The transition is the point of the command, so it is spelled out rather
+	// than left to the reader to infer from two tables.
+	for _, want := range []string{"PASS → FAIL", "FAIL → PASS", "PASS → MANUAL", "gone"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff output is missing the transition %q\n---\n%s", want, out)
 		}
+	}
+	// A departed resource has no control of its own, and a table cannot drop a
+	// column for one row, so it gets the dash the scan report uses for "none".
+	if !strings.Contains(out, "│ -") {
+		t.Errorf("a departed resource should show a dash for its control\n---\n%s", out)
 	}
 
-	// A regression is a failure and must be greppable as one; a fix is a pass.
-	if !strings.Contains(out, "[FAIL]") {
-		t.Error("a regression did not produce a [FAIL] line")
-	}
-	if !strings.Contains(out, "[PASS]") {
-		t.Error("a fix did not produce a [PASS] line")
-	}
-	// Losing the ability to see a setting needs a person, not a verdict.
-	if !strings.Contains(out, "[WARN]") {
-		t.Error("a change involving MANUAL did not produce a [WARN] line")
+	// Every border line has to agree with every other on where the columns are.
+	for _, block := range strings.Split(out, "\n\n") {
+		layouts := map[string]bool{}
+		for _, line := range strings.Split(block, "\n") {
+			if !strings.ContainsAny(line, "│┌└├") {
+				continue
+			}
+			var at []int
+			for i, r := range []rune(line) {
+				if strings.ContainsRune("│┌┬┐├┼┤└┴┘", r) {
+					at = append(at, i)
+				}
+			}
+			layouts[fmt.Sprint(at)] = true
+		}
+		if len(layouts) > 1 {
+			t.Errorf("a table's columns do not line up:\n%s", block)
+		}
 	}
 }
 
