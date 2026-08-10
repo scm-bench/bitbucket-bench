@@ -1,0 +1,44 @@
+internal/config/config.go
+  s_faac4eacbd0dbb::t_495515171e23f1 55-57
+internal/engine/engine_test.go
+  s_faac4eacbd0dbb::t_495515171e23f1 5,543-594
+  s_faac4eacbd0dbb::t_3adbe2197869f5 595
+internal/report/table.go
+  s_faac4eacbd0dbb::t_5bd60ef454f8e4 116-136
+internal/report/report_test.go
+  s_faac4eacbd0dbb::t_3c4b0c6d5e56f4 586-611
+internal/cli/scan_test.go
+  s_faac4eacbd0dbb::t_1a9777a68ecfaf 22,25,27,422
+  s_faac4eacbd0dbb::t_22f3c1097f9c0b 74,479-500
+  s_faac4eacbd0dbb::t_1234ad10c646a1 23-24,26,28,72-73
+  s_faac4eacbd0dbb::t_32b0d086e497f2 409-410,420,423-430,439-443,450,452,457-462,476,478
+  s_faac4eacbd0dbb::t_faf3e45eadd868 411-419,421,431-438,444-449,451,453-456,463-475,477
+  s_faac4eacbd0dbb::t_1dceb6bcde9153 75
+internal/cli/scan.go
+  s_faac4eacbd0dbb::t_1dbce3ad6e10e6 72-73,141-146,263
+  s_faac4eacbd0dbb::t_ba3bfc983071af 108-118,285-289
+  s_faac4eacbd0dbb::t_4b6771c414cabf 290,448-489,491-499,502
+examples/config.yaml
+  s_faac4eacbd0dbb::t_495515171e23f1 18-19
+internal/checks/policies/bitbucketdc/cis-1.3.3/check.rego
+  s_faac4eacbd0dbb::t_dd53a0e0f73c1c 11-21
+  s_faac4eacbd0dbb::t_7f7a10fa02bde6 56
+  s_faac4eacbd0dbb::t_ef1bb46c6890fa 48
+  s_faac4eacbd0dbb::t_73dc656a8f1650 22-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "5772e81686b719176521b81bb85001746fd490ac",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
