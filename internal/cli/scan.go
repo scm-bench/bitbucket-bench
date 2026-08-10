@@ -470,7 +470,7 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 		return &exitCodeError{
 			code: ExitError,
 			msg: fmt.Sprintf("%s could not be evaluated; the report is incomplete and its score is not comparable\n%s",
-				pluralize(len(rep.Errors), "control"), strings.Join(rep.Errors, "\n")),
+				console.Pluralize(len(rep.Errors), "control"), strings.Join(rep.Errors, "\n")),
 		}
 	}
 
@@ -524,18 +524,11 @@ func failureSummary(rep *engine.Report, failOn string) string {
 		}
 	}
 
-	msg := fmt.Sprintf("%s failed", pluralize(len(controls), "control"))
+	msg := fmt.Sprintf("%s failed", console.Pluralize(len(controls), "control"))
 	if rep.Score.Failed > len(controls) {
-		msg += fmt.Sprintf(" across %s", pluralize(rep.Score.Failed, "finding"))
+		msg += fmt.Sprintf(" across %s", console.Pluralize(rep.Score.Failed, "finding"))
 	}
 	return msg + fmt.Sprintf(", including at least one at or above %s severity", strings.ToUpper(failOn))
-}
-
-func pluralize(n int, noun string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, noun)
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func logf(cmd *cobra.Command, opts *scanOptions, format string, args ...any) {

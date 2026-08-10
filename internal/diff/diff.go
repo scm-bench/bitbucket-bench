@@ -9,9 +9,11 @@
 package diff
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/scm-bench/scm-bench/internal/checks"
+	"github.com/scm-bench/scm-bench/internal/console"
 	"github.com/scm-bench/scm-bench/internal/engine"
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
@@ -56,7 +58,9 @@ type Result struct {
 	// not that the setting changed, and calling that a regression would blame
 	// the instance for a lost permission or a removed add-on.
 	Changed []Change `json:"changed,omitempty"`
-	// Departed are resources present before and absent now.
+	// Departed are resources present before and absent now, one entry per
+	// resource rather than per control: a repository being deleted is one fact
+	// about the repository, not twenty facts about twenty controls.
 	Departed []Change `json:"departed,omitempty"`
 }
 
@@ -87,10 +91,15 @@ func Compare(before, after *engine.Report) *Result {
 
 		switch {
 		case !existed:
-			// A resource nobody has seen before. Only its failures are worth
-			// reporting; a new repository that passes is not news.
-			if now.Status == engine.StatusFail {
+			// A resource nobody has seen before. A new repository that passes
+			// is not news. One that fails is, and so is one the tool cannot see
+			// into: "a repository arrived that nothing can be read from" used
+			// to produce no entry at all, so the fact disappeared entirely.
+			switch now.Status {
+			case engine.StatusFail:
 				result.NewFailures = append(result.NewFailures, change)
+			case engine.StatusManual:
+				result.Changed = append(result.Changed, change)
 			}
 		case then.Status == now.Status:
 			// No movement.
@@ -106,14 +115,7 @@ func Compare(before, after *engine.Report) *Result {
 		}
 	}
 
-	for key, then := range old {
-		if _, still := current[key]; !still {
-			change := changeOf(then)
-			change.From = then.Status
-			change.To = ""
-			result.Departed = append(result.Departed, change)
-		}
-	}
+	result.Departed = departedResources(old, current)
 
 	for _, set := range [][]Change{
 		result.Regressed, result.Fixed, result.NewFailures, result.Changed, result.Departed,
@@ -121,6 +123,73 @@ func Compare(before, after *engine.Report) *Result {
 		sortChanges(set)
 	}
 	return result
+}
+
+// departedResources collapses the controls of a vanished resource into one
+// entry for the resource itself.
+//
+// It used to emit one per control, so deleting a repository produced twenty
+// lines and deleting fifty produced a thousand — while the same event on the
+// other side, a repository arriving, produced only its failures. The asymmetry
+// buried real regressions under a wall of GONE, which is the opposite of what
+// this command is for. The count of failures the resource was carrying is kept,
+// because "the repository with five HIGH failures is gone" is the part worth
+// knowing.
+func departedResources(old, current map[findingKey]engine.Finding) []Change {
+	type gone struct {
+		change   Change
+		failures int
+		controls int
+	}
+	byResource := map[string]*gone{}
+
+	for key, then := range old {
+		if _, still := current[key]; still {
+			continue
+		}
+		entry, seen := byResource[key.resource]
+		if !seen {
+			entry = &gone{change: Change{
+				Resource:     then.Resource,
+				ResourceType: then.ResourceType,
+				To:           "",
+			}}
+			byResource[key.resource] = entry
+		}
+		entry.controls++
+		if then.Status == engine.StatusFail {
+			entry.failures++
+			// The severity shown is the worst the resource was carrying, so the
+			// list still sorts the way every other category does.
+			if checks.Weight(then.Severity) > checks.Weight(entry.change.Severity) {
+				entry.change.Severity = then.Severity
+			}
+		}
+	}
+
+	out := make([]Change, 0, len(byResource))
+	for _, entry := range byResource {
+		entry.change.Details = departedDetails(entry.controls, entry.failures)
+		out = append(out, entry.change)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if wa, wb := checks.Weight(out[i].Severity), checks.Weight(out[j].Severity); wa != wb {
+			return wa > wb
+		}
+		return out[i].Resource < out[j].Resource
+	})
+	return out
+}
+
+// departedDetails says what the resource was carrying when it was last seen,
+// because "the repository with five HIGH failures is gone" is the part of a
+// deletion worth knowing.
+func departedDetails(controls, failures int) string {
+	if failures == 0 {
+		return fmt.Sprintf("no longer present; none of its %s were failing", console.Pluralize(controls, "control"))
+	}
+	return fmt.Sprintf("no longer present; it was failing %s of %d evaluated",
+		console.Pluralize(failures, "control"), controls)
 }
 
 func side(rep *engine.Report) Side {

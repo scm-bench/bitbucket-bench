@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/scm-bench/scm-bench/internal/config"
+	"github.com/scm-bench/scm-bench/internal/console"
 	"github.com/scm-bench/scm-bench/internal/diff"
 	"github.com/scm-bench/scm-bench/internal/engine"
 	"github.com/scm-bench/scm-bench/internal/report"
@@ -136,7 +137,11 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 	if opts.failOnRegression && result.HasRegression() {
 		return &exitCodeError{
 			code: ExitFindings,
-			msg:  fmt.Sprintf("%d control(s) fell from PASS to FAIL", len(result.Regressed)),
+			// pluralize, not "control(s)": the scan report went to the trouble
+			// of writing real grammar for exactly this line, and having the two
+			// subcommands disagree about how to say the same thing is the drift
+			// the shared console package exists to stop.
+			msg: fmt.Sprintf("%s fell from PASS to FAIL", console.Pluralize(len(result.Regressed), "control")),
 		}
 	}
 	return nil

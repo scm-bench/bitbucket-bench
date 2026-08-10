@@ -50,25 +50,40 @@ func paint(enabled bool, code, s string) string {
 	return console.Painter{Enabled: enabled}.Paint(code, s)
 }
 
+// writeTable renders the comparison in the same shape as the scan report.
+//
+// Every line carries the tag column, and it carries it for the same reasons
+// the scan report does: the tags are a fixed-width first column so verdicts
+// line up down the page, and `scm-bench diff ... | grep '^\[FAIL\]'` answers
+// "what got worse". Those reasons do not stop applying because this is a
+// different subcommand, and this renderer used to skip the column entirely —
+// so a diff looked like a different program's output, right up to the closing
+// line, which came from main and did carry a tag.
 func writeTable(w io.Writer, r *Result, opts Options) error {
 	c := opts.Color
+	t := console.Writer{W: w, P: console.Painter{Enabled: c}}
 
-	fmt.Fprintf(w, "%s  %s\n", paint(c, ansiBold, "scm-bench diff"), paint(c, ansiDim, sideLabel(r)))
-	writeScoreLine(w, r, c)
+	t.Info("%s  %s", paint(c, ansiBold, "scm-bench diff"), paint(c, ansiDim, sideLabel(r)))
+	writeScoreLine(t, r, c)
 
 	sections := []struct {
 		changes []Change
 		header  string
 		colour  string
+		// tag is how the section reads in column one. A regression and a new
+		// failure are failures; a fix is a pass; a change that involves MANUAL
+		// is something a person has to look at; a departed resource is neither
+		// good nor bad news.
+		tag console.Tag
 		// arrow is false where a from-status would be noise: a new resource has
 		// no previous verdict to move from.
 		arrow bool
 	}{
-		{r.Regressed, "REGRESSED", ansiRed, true},
-		{r.NewFailures, "NEW FAILURES", ansiYellow, false},
-		{r.Fixed, "FIXED", ansiGreen, true},
-		{r.Changed, "OTHER CHANGES", ansiYellow, true},
-		{r.Departed, "GONE", ansiDim, false},
+		{r.Regressed, "REGRESSED", ansiRed, console.Fail, true},
+		{r.NewFailures, "NEW FAILURES", ansiYellow, console.Fail, false},
+		{r.Fixed, "FIXED", ansiGreen, console.Pass, true},
+		{r.Changed, "OTHER CHANGES", ansiYellow, console.Warn, true},
+		{r.Departed, "GONE", ansiDim, console.Info, false},
 	}
 
 	var any bool
@@ -77,37 +92,40 @@ func writeTable(w io.Writer, r *Result, opts Options) error {
 			continue
 		}
 		any = true
-		fmt.Fprintf(w, "\n%s %s\n", paint(c, ansiBold+s.colour, s.header), paint(c, ansiDim, fmt.Sprintf("(%d)", len(s.changes))))
-		fmt.Fprintln(w, paint(c, ansiDim, strings.Repeat("─", 76)))
+		t.Blank()
+		t.Info("%s %s", paint(c, ansiBold+s.colour, s.header), paint(c, ansiDim, fmt.Sprintf("(%d)", len(s.changes))))
+		t.Info("%s", paint(c, ansiDim, strings.Repeat("─", 76)))
 		for _, ch := range s.changes {
-			writeChange(w, ch, opts, s.arrow)
+			writeChange(t, ch, opts, s.tag, s.arrow)
 		}
 	}
 
 	if !any {
-		fmt.Fprintf(w, "\n%s\n", paint(c, ansiGreen, "No control changed verdict."))
+		t.Blank()
+		t.Line(console.Pass, "%s", paint(c, ansiGreen, "No control changed verdict."))
 	}
 
 	// Remediation is printed once, for the regressions only: those are the ones
 	// somebody is expected to act on right now.
 	if len(r.Regressed) > 0 {
-		fmt.Fprintf(w, "\n%s\n", paint(c, ansiBold, "HOW TO FIX THE REGRESSIONS"))
+		t.Blank()
+		t.Info("%s", paint(c, ansiBold, "HOW TO FIX THE REGRESSIONS"))
 		for _, id := range distinctChecks(r.Regressed) {
 			for _, ch := range r.Regressed {
 				if ch.CheckID != id {
 					continue
 				}
-				fmt.Fprintf(w, "  %s  %s\n", paint(c, ansiBold, ch.CheckID), remediation(ch, opts.Lang))
+				t.Info("  %s  %s", paint(c, ansiBold, ch.CheckID), remediation(ch, opts.Lang))
 				break
 			}
 		}
 	}
 
-	fmt.Fprintln(w)
+	t.Blank()
 	return nil
 }
 
-func writeScoreLine(w io.Writer, r *Result, c bool) {
+func writeScoreLine(t console.Writer, r *Result, c bool) {
 	before, after := r.Before.Score.Value, r.After.Score.Value
 	delta := after - before
 
@@ -121,7 +139,7 @@ func writeScoreLine(w io.Writer, r *Result, c bool) {
 		colour = ansiRed
 	}
 
-	fmt.Fprintf(w, "%s  %d %s %d   %s\n",
+	t.Info("%s  %d %s %d   %s",
 		paint(c, ansiBold, "SCORE"),
 		before, arrow, after,
 		paint(c, colour, fmt.Sprintf("(%s%d)", sign, delta)),
@@ -129,14 +147,14 @@ func writeScoreLine(w io.Writer, r *Result, c bool) {
 	// The weighted arithmetic moves for two different reasons — a verdict
 	// changed, or the number of applicable controls did — and the score alone
 	// cannot tell them apart.
-	fmt.Fprintf(w, "%s\n", paint(c, ansiDim, fmt.Sprintf(
+	t.Info("%s", paint(c, ansiDim, fmt.Sprintf(
 		"       weighted %d/%d → %d/%d",
 		r.Before.Score.EarnedWeight, r.Before.Score.TotalWeight,
 		r.After.Score.EarnedWeight, r.After.Score.TotalWeight,
 	)))
 }
 
-func writeChange(w io.Writer, ch Change, opts Options, arrow bool) {
+func writeChange(t console.Writer, ch Change, opts Options, tag console.Tag, arrow bool) {
 	c := opts.Color
 
 	transition := string(ch.To)
@@ -144,17 +162,27 @@ func writeChange(w io.Writer, ch Change, opts Options, arrow bool) {
 		transition = fmt.Sprintf("%s → %s", ch.From, ch.To)
 	}
 	if ch.To == "" {
-		transition = fmt.Sprintf("%s → gone", ch.From)
+		transition = "gone"
 	}
 
-	fmt.Fprintf(w, "  %s  %s  %s  %s\n",
-		paint(c, ansiBold, ch.CheckID),
+	// A departed resource has no control ID: it is one entry for the resource,
+	// not one per control, so the column is dropped rather than padded with a
+	// blank that reads like a missing value.
+	head := ch.Resource
+	if ch.CheckID != "" {
+		head = fmt.Sprintf("%s  %s", paint(c, ansiBold, ch.CheckID), ch.Resource)
+	}
+	t.Line(tag, "  %s  %s  %s",
 		severityLabel(c, ch.Severity),
-		ch.Resource,
+		head,
 		paint(c, ansiDim, transition),
 	)
-	if ch.Details != "" && ch.To != "" {
-		fmt.Fprintf(w, "      %s\n", paint(c, ansiDim, ch.Details))
+	if ch.Details != "" {
+		// Detail lines are context, not a second verdict, so they carry INFO
+		// exactly as they do in the scan report. Departed entries carry it too:
+		// "it was failing 12 of 14 controls" is the part of a deletion worth
+		// knowing, and it was being suppressed.
+		t.Info("      %s", paint(c, ansiDim, ch.Details))
 	}
 }
 

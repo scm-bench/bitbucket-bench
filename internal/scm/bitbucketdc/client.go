@@ -496,11 +496,28 @@ func getPaged[T any](ctx context.Context, c *Client, path string, query url.Valu
 			}
 			out = append(out, item)
 		}
-		// A last page, or one that reports no way forward, ends the walk.
-		if p.IsLastPage || p.NextPageStart == nil || *p.NextPageStart <= start {
+		// A last page ends the walk.
+		if p.IsLastPage {
 			return out, nil
 		}
-		start = *p.NextPageStart
+
+		// Not the last page, so there is more to read. Bitbucket normally says
+		// where to resume; some add-on endpoints do not, and treating a missing
+		// nextPageStart as the end quietly returned the first hundred results
+		// as though they were all of them — with Available still true, so the
+		// verdict was drawn from a list nobody knew was short. A truncated
+		// branch-permission list reads as a branch nobody protected.
+		next := start + len(p.Values)
+		if p.NextPageStart != nil && *p.NextPageStart > start {
+			next = *p.NextPageStart
+		}
+		if next <= start {
+			// The page said there was more and offered no way to reach it.
+			// Erroring makes the caller mark the data unavailable, which is
+			// what turns this into MANUAL instead of a confident wrong answer.
+			return out, fmt.Errorf("GET %s: the instance reported more results after %d but no way to reach them", path, start)
+		}
+		start = next
 	}
 	return out, fmt.Errorf("GET %s: exceeded %d pages", path, maxPages)
 }

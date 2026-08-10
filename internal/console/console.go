@@ -88,6 +88,19 @@ func (w Writer) Line(t Tag, format string, args ...any) {
 
 func (w Writer) Info(format string, args ...any) { w.Line(Info, format, args...) }
 
+// Pluralize renders a count with its noun, adding "s" for anything but one.
+//
+// It lives here rather than in either command because both need it and they
+// must not disagree: the scan report went to the trouble of writing real
+// grammar instead of "1 control(s)", and diff was writing "control(s)" three
+// files away. A shared helper is how that stops drifting.
+func Pluralize(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // Blank separates blocks. It is deliberately a real empty line rather than a
 // bare "[INFO]": the tag column exists to be scanned down, and a column of tags
 // attached to nothing makes that harder, not easier.

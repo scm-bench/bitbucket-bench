@@ -218,3 +218,62 @@ func TestRedactURL(t *testing.T) {
 		}
 	}
 }
+
+// Bitbucket normally reports where to resume, but some add-on endpoints leave
+// nextPageStart out. Treating that as the end returned the first page as
+// though it were the whole collection, with Available still true — so the
+// verdict was drawn from a list nobody knew was short. A truncated
+// branch-permission list reads as a branch nobody protected.
+func TestGetPagedDoesNotStopEarlyWhenNextPageStartIsMissing(t *testing.T) {
+	var pages int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("start") {
+		case "", "0":
+			// isLastPage false, and no nextPageStart to follow.
+			fmt.Fprint(w, `{"size":2,"limit":2,"isLastPage":false,"start":0,"values":[{"name":"a"},{"name":"b"}]}`)
+		default:
+			fmt.Fprint(w, `{"size":1,"limit":2,"isLastPage":true,"start":2,"values":[{"name":"c"}]}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	type item struct {
+		Name string `json:"name"`
+	}
+	got, err := getPaged[item](context.Background(), client, "/api/1.0/things", nil)
+	if err != nil {
+		t.Fatalf("getPaged: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("got %d items over %d pages (%v), want 3: the walk stopped at the first page", len(got), pages, got)
+	}
+}
+
+// The other half: a page that claims more results, offers no cursor, and
+// carries no values leaves no way forward at all. Returning what was collected
+// as though it were complete is the failure this guards; an error makes the
+// caller mark the data unavailable, which is MANUAL rather than a wrong answer.
+func TestGetPagedErrorsWhenPagingCannotAdvance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"size":0,"limit":100,"isLastPage":false,"start":0,"values":[]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	type item struct{}
+	if _, err := getPaged[item](context.Background(), client, "/api/1.0/things", nil); err == nil {
+		t.Error("getPaged returned nil for a collection it could not finish reading")
+	}
+}
