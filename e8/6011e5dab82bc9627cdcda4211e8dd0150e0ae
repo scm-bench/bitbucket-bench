@@ -1,0 +1,20 @@
+.goreleaser.yaml
+  s_faac4eacbd0dbb::t_0f2839a5d34215 252-257,259-261,263-264,266-270,272-273,277,282-283,285-288
+  s_faac4eacbd0dbb::t_88616d3dad3405 109-114,116-117,119-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "e86011e5dab82bc9627cdcda4211e8dd0150e0ae",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
