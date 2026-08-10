@@ -50,6 +50,10 @@ Reports of the following are especially welcome:
   we treat it as a security issue rather than a correctness one.
 - **Snapshot or report files written with permissive modes.** A snapshot is a
   precise map of an instance's weak points and is written `0600` on purpose.
+  That mode is enforced on Unix-like systems; Windows has no equivalent bit and
+  the file inherits its directory's ACL, which is a known gap rather than a
+  vulnerability report — though a way to make Go's `os` package honour it would
+  be a welcome contribution.
 
 ## Scope
 

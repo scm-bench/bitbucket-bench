@@ -538,6 +538,11 @@ Re-running policies over an archived snapshot also shows how a decision would ha
 changed under new thresholds, without touching the instance again.
 
 Snapshots are written `0600`: they are a precise map of an instance's weak points.
+So are reports. That is a Unix mode, and it is enforced on Unix-like systems
+only — Windows has no equivalent bit, so Go maps the mode to the read-only
+attribute and the file's actual access control comes from the ACL it inherits
+from its directory. On Windows, put snapshots and reports somewhere already
+restricted.
 
 ### Catching regressions
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -179,12 +180,35 @@ func TestScanWritesReportToFile(t *testing.T) {
 	// A rendered report names every repository that can be force-pushed and
 	// every account that should have been deactivated. That is the same map of
 	// weak points the snapshot is, so it gets the same permissions.
-	info, err := os.Stat(out)
+	assertOwnerOnly(t, out, "report")
+}
+
+// assertOwnerOnly checks that a file the tool wrote is readable by its owner
+// alone.
+//
+// It is a no-op on Windows, and that is a statement about the platform rather
+// than a way of getting the test to pass. Windows has no Unix permission bits:
+// Go's os package maps the mode argument to the read-only attribute and
+// nothing else, so a file created with 0600 reports 0666 and its real access
+// control comes from the ACL it inherits from its directory. Restricting it
+// properly means writing a Windows ACL through golang.org/x/sys/windows, which
+// is a feature this has not implemented — so the honest thing is to skip the
+// assertion here and say so in the documentation, rather than assert something
+// weaker and let the promise look kept.
+func assertOwnerOnly(t *testing.T, path, what string) {
+	t.Helper()
+
+	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("stat: %v", err)
+		t.Fatalf("stat %s: %v", what, err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Logf("%s permissions are not enforced on Windows (got %o); see the note in the README",
+			what, info.Mode().Perm())
+		return
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("report permissions = %o, want 600", perm)
+		t.Errorf("%s permissions = %o, want 600", what, perm)
 	}
 }
 
@@ -209,13 +233,7 @@ func TestScanRoundTripsSnapshotOut(t *testing.T) {
 	}
 
 	// A snapshot records an instance's weak points; it must not be world-readable.
-	info, err := os.Stat(out)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("snapshot permissions = %o, want 600", perm)
-	}
+	assertOwnerOnly(t, out, "snapshot")
 }
 
 func TestScanRejectsBadArguments(t *testing.T) {
