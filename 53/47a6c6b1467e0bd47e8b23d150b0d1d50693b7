@@ -1,0 +1,33 @@
+internal/report/report_test.go
+  s_faac4eacbd0dbb::t_481a550ea50039 612-695
+internal/checks/policies/bitbucketdc/cis-1.3.8/check.rego
+  s_faac4eacbd0dbb::t_6617987198d6e8 15-29,62-67
+internal/engine/engine.go
+  s_faac4eacbd0dbb::t_3849a40d028e61 207-214
+internal/checks/policies/bitbucketdc/cis-1.1.8/check.rego
+  s_faac4eacbd0dbb::t_98c571b2f0139b 13-14,16-34,48-49,53-63
+internal/engine/engine_test.go
+  s_faac4eacbd0dbb::t_4dfcf2f2630ef2 662-711
+  s_faac4eacbd0dbb::t_769f775348d3e8 596-661
+internal/checks/policies/lib/common.rego
+  s_faac4eacbd0dbb::t_aaf14997abb0e9 76-88,90-96,99
+  s_faac4eacbd0dbb::t_596a4af74267d2 100
+internal/report/sarif.go
+  s_faac4eacbd0dbb::t_e5a91cf917fabd 134-141,207-220,228,231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "5347a6c6b1467e0bd47e8b23d150b0d1d50693b7",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
