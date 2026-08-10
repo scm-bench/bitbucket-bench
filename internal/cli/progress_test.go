@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // A redirected stream has no cursor to move, so carriage returns would pile up
@@ -124,5 +125,42 @@ func TestScanFailureNamesTheDeadline(t *testing.T) {
 	original := context.DeadlineExceeded
 	if got := describeScanFailure(ctx, noDeadline, original); got != original {
 		t.Errorf("error = %v, want the original error unchanged", got)
+	}
+}
+
+// The status line pads to the previous width so a shorter line cannot leave
+// the tail of a longer one behind it. Width in runes: a project or repository
+// name outside ASCII — which an instance is free to have — made len() count
+// three bytes per character, so the padding overshot by twice the name's
+// length and wrapped onto the next row instead of overwriting.
+func TestProgressPadsByDisplayWidthNotBytes(t *testing.T) {
+	var buf bytes.Buffer
+	p := &progressWriter{out: &buf}
+
+	long := "scanning · 平台工程/支付服务 12/40 repositories"
+	p.update(long)
+	buf.Reset()
+	p.update("done")
+
+	out := buf.String()
+	padding := strings.Count(out, " ") - strings.Count("done", " ")
+	if want := utf8.RuneCountInString(long) - utf8.RuneCountInString("done"); padding != want {
+		t.Errorf("padded %d columns, want %d: byte length over-counts multi-byte runes", padding, want)
+	}
+}
+
+// os.DevNull is a character device, so `scm-bench scan > /dev/null` looked like
+// a terminal: colour escapes went into output that had been explicitly thrown
+// away, and the compact progress line drew carriage returns at a destination
+// with no cursor.
+func TestDevNullIsNotATerminal(t *testing.T) {
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Skipf("cannot open %s: %v", os.DevNull, err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+
+	if isTerminal(devnull) {
+		t.Errorf("isTerminal(%s) = true", os.DevNull)
 	}
 }

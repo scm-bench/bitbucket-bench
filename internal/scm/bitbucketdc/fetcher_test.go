@@ -1083,3 +1083,34 @@ func TestParseTargetsRejectsMalformedRepository(t *testing.T) {
 		t.Errorf("parseTargets rejected a valid entry: %v", err)
 	}
 }
+
+// A scan that covered no repository renders as a clean instance: the
+// repository-scope controls simply have nothing to report, the instance-scope
+// ones carry the score alone, and the summary looks like an audit. One
+// mistyped --project key produces it, and nothing else in the output says so.
+func TestScanningNoRepositoriesIsWarnedAbout(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos", pageOf(``))
+
+	_, snapshot := fetchSnapshot(t, f)
+
+	var warned bool
+	for _, w := range snapshot.Metadata.Warnings {
+		if strings.Contains(w, "0 repositories") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no warning that the scan covered nothing: %v", snapshot.Metadata.Warnings)
+	}
+}
+
+// The ordinary case must not carry the warning, or it stops meaning anything.
+func TestScanningRepositoriesIsNotWarnedAbout(t *testing.T) {
+	_, snapshot := fetchSnapshot(t, standardInstance(t))
+	for _, w := range snapshot.Metadata.Warnings {
+		if strings.Contains(w, "0 repositories") {
+			t.Errorf("warned about an empty scan that was not empty: %q", w)
+		}
+	}
+}

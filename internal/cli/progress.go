@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // progressWriter renders a single self-overwriting status line on stderr.
@@ -43,12 +44,19 @@ func (p *progressWriter) update(text string) {
 
 	// Pad to the previous width so a shorter line cannot leave the tail of a
 	// longer one behind it.
+	//
+	// Width in runes, not bytes. A repository or project name outside ASCII —
+	// which a Bitbucket instance is perfectly free to have — made len() count
+	// three bytes per character, so the padding overshot by twice the name's
+	// length and wrapped the status line onto the next row instead of
+	// overwriting it.
+	width := utf8.RuneCountInString(text)
 	padding := ""
-	if trailing := p.last - len(text); trailing > 0 {
+	if trailing := p.last - width; trailing > 0 {
 		padding = strings.Repeat(" ", trailing)
 	}
 	fmt.Fprintf(p.out, "\r%s%s", text, padding)
-	p.last = len(text)
+	p.last = width
 }
 
 // clear erases the status line, so the report does not begin on a line that
@@ -77,9 +85,19 @@ func (p *progressWriter) callback() func(string) {
 
 // isTerminal reports whether w is a character device, which is the same test
 // used to decide on colour.
+//
+// os.DevNull is excluded by name because it is a character device too, so
+// `scm-bench scan > /dev/null` looked like a terminal: colour escapes were
+// written into output that had been explicitly thrown away, and the compact
+// progress line drew carriage returns at a destination with no cursor. This is
+// the same check without a dependency on golang.org/x/term, which is not worth
+// adding to a supply chain security tool for one boolean.
 func isTerminal(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	if !ok {
+		return false
+	}
+	if file.Name() == os.DevNull {
 		return false
 	}
 	info, err := file.Stat()

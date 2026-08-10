@@ -85,15 +85,17 @@ func section(t console.Writer, p painter, title string) {
 
 // writeSummary closes with the counts, in kube-bench's shape, plus the score.
 //
-// The counts are of controls-by-resource, which is what "19 checks WARN" means
-// everywhere else in this file; the score line below states its own arithmetic
-// so the number is checkable rather than something to trust.
+// The counts are of one control against one resource — findings, in the term
+// the rest of the tool uses — and the score lines below state their own
+// arithmetic, so every number here is checkable rather than something to
+// trust.
 func writeSummary(t console.Writer, rep *engine.Report, p painter) {
 	s := rep.Score
 	section(t, p, "Summary")
 
 	// kube-bench writes "1 checks PASS"; the grammar is fixed here because
-	// copying a wart is not the same as following a convention.
+	// copying a wart is not the same as following a convention. The noun is
+	// findings rather than checks for the reason given on checkCount.
 	t.Info("%s", p.paint(ansiGreen, checkCount(s.Passed, "PASS")))
 	t.Info("%s", p.paint(ansiRed, checkCount(s.Failed, "FAIL")))
 	t.Info("%s", p.paint(ansiYellow, checkCount(s.Manual, "WARN")))
@@ -147,12 +149,16 @@ func writeSummary(t console.Writer, rep *engine.Report, p painter) {
 	t.Blank()
 }
 
+// checkCount renders one line of the summary block.
+//
+// "findings", not "checks". The counts here are of one control against one
+// resource, so a twenty-control bundle run over three repositories reports
+// forty-eight of them — and a reader who had just seen `list-checks` say "20
+// controls" was being asked to reconcile "15 checks PASS, 13 checks FAIL" with
+// a total of twenty. The tool already calls these findings everywhere else,
+// including in the JSON it emits.
 func checkCount(n int, state string) string {
-	noun := "checks"
-	if n == 1 {
-		noun = "check"
-	}
-	return fmt.Sprintf("%d %s %s", n, noun, state)
+	return fmt.Sprintf("%s %s", console.Pluralize(n, "finding"), state)
 }
 
 func writeFindings(t console.Writer, rep *engine.Report, p painter, opts Options) {

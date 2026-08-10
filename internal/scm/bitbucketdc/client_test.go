@@ -2,6 +2,7 @@ package bitbucketdc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // retryAfter caps what an instance can ask for. An instance answering
@@ -277,3 +279,64 @@ func TestGetPagedErrorsWhenPagingCannotAdvance(t *testing.T) {
 		t.Error("getPaged returned nil for a collection it could not finish reading")
 	}
 }
+
+// backoff clamps before the shift, not after. `1 << (attempt-1)` overflows
+// int64 past the thirty-fifth attempt and comes back negative, which the 16s
+// ceiling cannot catch — and a negative duration reaches rand.Int64N, which
+// panics on a non-positive argument.
+func TestBackoffSurvivesAbsurdAttemptCounts(t *testing.T) {
+	for _, attempt := range []int{0, 1, 34, 35, 36, 63, 64, 1000} {
+		d := backoff(attempt)
+		if d <= 0 {
+			t.Errorf("backoff(%d) = %v, must be positive", attempt, d)
+		}
+		if d > 16*time.Second {
+			t.Errorf("backoff(%d) = %v, over the 16s ceiling", attempt, d)
+		}
+	}
+}
+
+// A localised Bitbucket answering in Chinese would otherwise be cut
+// mid-character, and the broken byte travels into repo.Errors, the snapshot
+// JSON and the report.
+func TestErrorBodyIsTruncatedByRunesNotBytes(t *testing.T) {
+	body := strings.Repeat("权限不足", 100) // 400 runes, 1200 bytes
+	got := parseErrorMessages([]byte(body))
+	if len(got) != 1 {
+		t.Fatalf("parseErrorMessages returned %d messages, want 1", len(got))
+	}
+	if !utf8.ValidString(got[0]) {
+		t.Errorf("truncated message is not valid UTF-8: %q", got[0])
+	}
+	if runes := []rune(strings.TrimSuffix(got[0], "...")); len(runes) != 200 {
+		t.Errorf("kept %d runes, want 200", len(runes))
+	}
+}
+
+// Any library in the process can replace http.DefaultTransport; a bare type
+// assertion turned that into a panic at startup rather than a degraded scan.
+func TestNewClientSurvivesAReplacedDefaultTransport(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("not used")
+	})
+
+	client, err := NewClient(Options{BaseURL: "https://bitbucket.example.com", Token: "t", Concurrency: 8})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport is %T, want *http.Transport", client.httpClient.Transport)
+	}
+	// Every request in a scan goes to one host, so the two-connection default
+	// idle pool closed all but two after each request and renegotiated TLS.
+	if transport.MaxIdleConnsPerHost < 8 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want at least the concurrency (8)", transport.MaxIdleConnsPerHost)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

@@ -166,6 +166,8 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		ctx = context.Background()
 	}
 
+	resolveCredentials(cmd, opts)
+
 	if err := validateScanOptions(opts); err != nil {
 		return err
 	}
@@ -263,6 +265,30 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	return exitStatus(rep, opts)
 }
 
+// resolveCredentials settles which credential wins when more than one is
+// present.
+//
+// The flags default to the environment, so an exported BITBUCKET_TOKEN filled
+// --token in before the command line was read — and the client prefers a token
+// over basic auth. Someone with a stale token in their shell profile who typed
+// --username and --password was therefore authenticated with the token they
+// had not mentioned, and told "the instance rejected the credentials", which
+// sent them to check the password they had just typed. What was typed wins
+// over what was merely lying around.
+func resolveCredentials(cmd *cobra.Command, opts *scanOptions) {
+	flags := cmd.Flags()
+	typedToken := flags.Changed("token")
+	typedBasic := flags.Changed("username") || flags.Changed("password")
+
+	if typedBasic && !typedToken {
+		opts.token = ""
+		return
+	}
+	if typedToken && !typedBasic {
+		opts.username, opts.password = "", ""
+	}
+}
+
 func validateScanOptions(opts *scanOptions) error {
 	switch strings.ToLower(opts.lang) {
 	case report.LangEnglish, report.LangChinese:
@@ -298,6 +324,12 @@ func validateScanOptions(opts *scanOptions) error {
 			return fmt.Errorf("--repository %q must be PROJECT/slug, e.g. PLATFORM/payments-api", r)
 		}
 	}
+	// Both typed out explicitly is a question, not something to resolve by
+	// precedence: only one of them will be used and the user cannot tell which.
+	if strings.TrimSpace(opts.token) != "" && strings.TrimSpace(opts.username) != "" &&
+		opts.snapshotIn == "" {
+		return fmt.Errorf("--token and --username were both given; use one or the other")
+	}
 	if opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
 		return fmt.Errorf("--url is required (or set BITBUCKET_URL, or pass --snapshot-in to evaluate a saved snapshot)")
 	}
@@ -328,6 +360,7 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Username:       opts.username,
 		Password:       opts.password,
 		Timeout:        opts.timeout,
+		Concurrency:    opts.concurrency,
 		Insecure:       opts.insecure,
 		AllowPlaintext: opts.allowPlaintext,
 		OnRequest:      trace.record,

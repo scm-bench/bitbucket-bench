@@ -119,6 +119,10 @@ type Options struct {
 	AllowPlaintext bool
 	// MaxRetries bounds retries of 429/5xx responses. Zero uses 3.
 	MaxRetries int
+	// Concurrency is how many requests the caller intends to have in flight.
+	// It sizes the idle connection pool, which otherwise holds two per host
+	// and closes the rest after every request. Zero leaves the default.
+	Concurrency int
 	// Logf is called from multiple goroutines during a scan and must be safe
 	// for concurrent use.
 	Logf func(format string, args ...any)
@@ -186,7 +190,26 @@ func NewClient(opts Options) (*Client, error) {
 		retries = 3
 	}
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Cloned from the default when it is still the standard transport, and
+	// built from scratch when it is not: any library in the process can replace
+	// http.DefaultTransport (instrumentation packages do it routinely), and a
+	// bare type assertion turns that into a panic at startup rather than a
+	// degraded scan.
+	transport := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if standard, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = standard.Clone()
+	}
+	// The default idle pool holds two connections per host. Every request in a
+	// scan goes to the same host, and there are Concurrency of them in flight,
+	// so all but two were closed after use and renegotiated TLS on the next
+	// one. MaxIdleConns is raised alongside it because the per-host figure is
+	// capped by the total.
+	if opts.Concurrency > transport.MaxIdleConnsPerHost {
+		transport.MaxIdleConnsPerHost = opts.Concurrency
+	}
+	if transport.MaxIdleConnsPerHost > transport.MaxIdleConns {
+		transport.MaxIdleConns = transport.MaxIdleConnsPerHost
+	}
 	var warnings []string
 	if opts.Insecure {
 		transport.TLSClientConfig = tlsInsecureConfig()
@@ -556,8 +579,11 @@ func parseErrorMessages(body []byte) []string {
 	if text == "" {
 		return nil
 	}
-	if len(text) > 200 {
-		text = text[:200] + "..."
+	// Truncated by runes, not bytes. A localised Bitbucket answering in
+	// Chinese or Japanese would otherwise be cut mid-character, and the broken
+	// byte travels into repo.Errors, the snapshot JSON and the report.
+	if runes := []rune(text); len(runes) > 200 {
+		text = string(runes[:200]) + "..."
 	}
 	return []string{text}
 }
@@ -586,9 +612,20 @@ func retryAfter(resp *http.Response) (time.Duration, bool) {
 // instant, reproducing the burst that caused the throttling. Subtracting rather
 // than adding keeps the documented ceiling a real ceiling.
 func backoff(attempt int) time.Duration {
-	d := time.Duration(1<<uint(attempt-1)) * time.Second
-	if d > 16*time.Second {
-		d = 16 * time.Second
+	// Clamped before the shift, not after. `1 << (attempt-1)` overflows int64
+	// somewhere past the thirty-fifth attempt and comes back negative, which
+	// the `> 16s` ceiling below cannot catch — and a negative duration reaches
+	// rand.Int64N, which panics on a non-positive argument. Nothing in the CLI
+	// can ask for that many retries today; a library caller setting MaxRetries
+	// can, and a panic inside a retry loop is a poor way to find out.
+	const maxShift = 4 // 1<<4 seconds == the 16s ceiling
+	shift := attempt - 1
+	if shift > maxShift {
+		shift = maxShift
 	}
+	if shift < 0 {
+		shift = 0
+	}
+	d := time.Duration(1<<uint(shift)) * time.Second
 	return d - time.Duration(rand.Int64N(int64(d/4)))
 }

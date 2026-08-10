@@ -112,7 +112,7 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 	if strings.Contains(out, "Ensure two approvals") {
 		t.Error("passing controls should be hidden without --show-passed")
 	}
-	if !strings.Contains(out, "1 check PASS") {
+	if !strings.Contains(out, "1 finding PASS") {
 		t.Errorf("the summary should still count the passing control\n---\n%s", out)
 	}
 }
@@ -525,10 +525,15 @@ func TestNoRemediationsDropsTheSection(t *testing.T) {
 }
 
 // The counts are the last thing printed and the first thing read.
+//
+// They count findings — one control against one resource — not controls, which
+// is why the noun matters: a reader who had just seen `list-checks` report "20
+// controls" was being asked to reconcile that with a summary whose four lines
+// added up to forty-eight.
 func TestSummaryReportsAllFourStates(t *testing.T) {
 	out := render(t, Options{Format: FormatTable, Lang: LangEnglish})
 
-	for _, want := range []string{"1 check PASS", "1 check FAIL", "1 check WARN", "0 checks INFO"} {
+	for _, want := range []string{"1 finding PASS", "1 finding FAIL", "1 finding WARN", "0 findings INFO"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary is missing %q\n---\n%s", want, out)
 		}

@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/scm-bench/scm-bench/internal/engine"
 	"github.com/scm-bench/scm-bench/internal/scm"
@@ -266,7 +269,7 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 	// The section names follow kube-bench's shape: findings, then remediations,
 	// then a summary. "Branch permissions" is the remediation text, which has to
 	// survive being moved out of the findings list into its own section.
-	for _, want := range []string{"SCORE", "== Failed", "PRJ/app", "== Remediations", "Branch permissions", "== Summary", "checks FAIL"} {
+	for _, want := range []string{"SCORE", "== Failed", "PRJ/app", "== Remediations", "Branch permissions", "== Summary", "findings FAIL"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}
@@ -496,5 +499,95 @@ func TestPolicyErrorsFailTheScan(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "policy produced no result") {
 		t.Errorf("error does not carry the reason: %v", err)
+	}
+}
+
+// The credential flags default to the environment, so an exported
+// BITBUCKET_TOKEN filled --token in before the command line was read — and the
+// client prefers a token over basic auth. Someone with a stale token in their
+// shell profile who typed --username and --password was authenticated with the
+// token they never mentioned, then told "the instance rejected the
+// credentials", which sent them to check the password they had just typed.
+func TestExplicitCredentialsBeatInheritedOnes(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		env          map[string]string
+		args         []string
+		wantToken    string
+		wantUsername string
+	}{
+		{
+			name:         "typed basic auth beats an inherited token",
+			env:          map[string]string{"BITBUCKET_TOKEN": "stale"},
+			args:         []string{"--username", "alice", "--password", "pw"},
+			wantToken:    "",
+			wantUsername: "alice",
+		},
+		{
+			name:         "typed token beats an inherited username",
+			env:          map[string]string{"BITBUCKET_USERNAME": "leftover"},
+			args:         []string{"--token", "fresh"},
+			wantToken:    "fresh",
+			wantUsername: "",
+		},
+		{
+			name:         "an inherited token is still used when nothing is typed",
+			env:          map[string]string{"BITBUCKET_TOKEN": "inherited"},
+			args:         nil,
+			wantToken:    "inherited",
+			wantUsername: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+
+			// Built after the environment is set, because the flag defaults are
+			// read from it at construction — which is the whole mechanism.
+			var got *scanOptions
+			cmd := newScanCommand()
+			cmd.RunE = func(c *cobra.Command, _ []string) error {
+				opts := scanOptionsFrom(t, c)
+				resolveCredentials(c, opts)
+				got = opts
+				return nil
+			}
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+
+			if got.token != tc.wantToken {
+				t.Errorf("token = %q, want %q", got.token, tc.wantToken)
+			}
+			if got.username != tc.wantUsername {
+				t.Errorf("username = %q, want %q", got.username, tc.wantUsername)
+			}
+		})
+	}
+}
+
+// scanOptionsFrom rebuilds the options from the parsed flags, so the test reads
+// what the command actually bound rather than reaching into its closure.
+func scanOptionsFrom(t *testing.T, cmd *cobra.Command) *scanOptions {
+	t.Helper()
+	get := func(name string) string {
+		v, err := cmd.Flags().GetString(name)
+		if err != nil {
+			t.Fatalf("read --%s: %v", name, err)
+		}
+		return v
+	}
+	return &scanOptions{token: get("token"), username: get("username"), password: get("password")}
+}
+
+// Both typed out explicitly is a question, not something to settle by
+// precedence: only one would be used and the user cannot tell which.
+func TestBothCredentialKindsTypedIsRejected(t *testing.T) {
+	if _, _, code := run(t, "scan", "--url", "https://example.invalid", "--token", "t", "--username", "alice"); code != ExitError {
+		t.Errorf("exit code = %d, want %d", code, ExitError)
 	}
 }

@@ -160,6 +160,16 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 	}
 	snapshot.Projects = projects
 
+	// A scan that covered no repository is not a clean instance, but it renders
+	// as one: every repository-scope control simply has nothing to report, the
+	// instance-scope ones carry the score on their own, and the summary looks
+	// like an audit. One mistyped --project key is enough to produce it, and
+	// nothing else in the output would say so.
+	if repos := countRepositories(projects); repos == 0 {
+		f.warn("the scan covered 0 repositories, so only instance-level controls were evaluated; " +
+			"check --project/--repository, and whether the token can see the repositories you expected")
+	}
+
 	// Repository access can only be decided once every grant has been seen.
 	f.markRepositoryAccess(ctx, snapshot)
 
@@ -1161,6 +1171,14 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 		u := &snapshot.Organization.Users[i]
 		u.HasRepositoryAccess = (everyoneHasAccess && u.Active) || withAccess[u.Name]
 	}
+}
+
+func countRepositories(projects []scm.Project) int {
+	n := 0
+	for _, p := range projects {
+		n += len(p.Repositories)
+	}
+	return n
 }
 
 func (f *Fetcher) daysSince(epoch int64) int {
