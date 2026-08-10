@@ -1,0 +1,130 @@
+internal/checks/policies/bitbucketdc/cis-1.1.12/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.2.1/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.6/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.16/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.3.5/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.17/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/registry_test.go
+  s_233f66a6b3226d::t_22ce0bf2d0f8f8 90-104
+internal/checks/policies/bitbucketdc/cis-1.3.7/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.13/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/console/console_test.go
+  s_233f66a6b3226d::t_e572da5fe47d2c 7
+  s_233f66a6b3226d::t_4f305a13f28c83 70-159
+internal/cli/scan_test.go
+  s_233f66a6b3226d::t_4ae742c7ff8d40 22-29
+  s_233f66a6b3226d::t_e475093440ef5b 294-297
+internal/checks/policies/bitbucketdc/cis-1.3.9/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.8/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/engine/engine.go
+  s_233f66a6b3226d::t_59ebeb26cecf61 63-67
+  s_233f66a6b3226d::t_ea2d5ae05ad1de 269
+internal/checks/registry.go
+  s_233f66a6b3226d::t_eb2b885c473240 204-205
+  s_233f66a6b3226d::t_f316173ea4816e 84-93
+  s_233f66a6b3226d::t_515087df557d2a 206
+internal/checks/policies/bitbucketdc/cis-1.1.4/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.2.2/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/console/console.go
+  s_233f66a6b3226d::t_4497be56c270d3 14-17
+  s_233f66a6b3226d::t_63e6e68c142652 112-202
+internal/report/report_test.go
+  s_233f66a6b3226d::t_869eab882621a7 729-734,738,743-752
+  s_233f66a6b3226d::t_06025a06f06e25 407-408
+  s_233f66a6b3226d::t_d18b7375b906c6 36
+  s_233f66a6b3226d::t_3847e9e8935385 50-56
+  s_233f66a6b3226d::t_1570900a1e874e 197,399-406,409-412
+  s_233f66a6b3226d::t_85c66a7050987b 164,169-196
+  s_233f66a6b3226d::t_6dafcef6dedc00 7,11,17-24
+  s_233f66a6b3226d::t_4ff3b07598c07a 76-105
+  s_233f66a6b3226d::t_10bebb627115eb 286-287,289-290
+  s_233f66a6b3226d::t_860a29b841815c 106,198,200-285,288,291-393
+  s_223a8922d2562c::t_2e4ca75ad93fd0 25,107,199
+internal/report/table.go
+  s_233f66a6b3226d::t_b4c95a83033722 264-268,270-271,274-276
+  s_233f66a6b3226d::t_85cda5138dbf3f 253-258
+  s_233f66a6b3226d::t_9f84fb3b42d3c3 91,94-101,112-116,121-125
+  s_233f66a6b3226d::t_8274317f7bbba7 84,178,493,497-499,501,504,507,511-534
+  s_233f66a6b3226d::t_4c4411f3f9ab1a 603,606
+  s_233f66a6b3226d::t_586ec7d58d2aa2 290
+  s_233f66a6b3226d::t_a62fd88128d634 67-83
+  s_233f66a6b3226d::t_1190cd2a75c7e5 342
+  s_faac4eacbd0dbb::t_f44711387b5851 117-120,126-132,136,138-141,143
+  s_233f66a6b3226d::t_f89a8281a14891 179,194-236
+  s_233f66a6b3226d::t_bd359ac2572bc4 577-579
+  s_233f66a6b3226d::t_ed31483f787cdf 293
+  s_233f66a6b3226d::t_29f953eaf1781c 563-573
+  s_233f66a6b3226d::t_f0fa49472fb0ca 239-252,261-262,272-273,283,289,291-292,294-304,306-316,318-340,343-356,358-361,363-367,369-387,392
+  s_233f66a6b3226d::t_ca9e505f3c3bae 133-135,137
+  s_233f66a6b3226d::t_00a03293ce8575 174-177
+  s_233f66a6b3226d::t_02c047ede81c6a 341,407-408,410-418,425,435-441,444-445
+  s_233f66a6b3226d::t_59a82af592f3ee 57
+  s_233f66a6b3226d::t_e3823594e57f90 305
+  s_233f66a6b3226d::t_b088b4d0ee00c8 36-45,47-51,55,58-60,62
+  s_233f66a6b3226d::t_79ceb7bce08a08 357,362,368,388-391,393-401,403
+  s_233f66a6b3226d::t_d2e241e06f75e5 161-163,180,184,186-193
+  s_233f66a6b3226d::t_2e5dd997a8c96d 587
+  s_233f66a6b3226d::t_4534bf6da2818b 85,535
+CONTRIBUTING.md
+  s_233f66a6b3226d::t_a2b48757b7d748 68-80
+internal/checks/policies/bitbucketdc/cis-1.3.1/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.3.3/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.3/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.11/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.3.8/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.15/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.1.9/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+internal/checks/policies/bitbucketdc/cis-1.2.3/metadata.json
+  s_233f66a6b3226d::t_0101d4bd874fc3 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0db385874c5d9b20a314a9cfdf8a4457c7309d05",
+  "prompts": {},
+  "sessions": {
+    "s_223a8922d2562c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "169bf608-8129-4523-9428-738d473802c9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    },
+    "s_233f66a6b3226d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9dc0b0d9-6203-4bb7-bb80-5b54be68a9f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    },
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
