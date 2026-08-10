@@ -72,9 +72,11 @@ go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest
 
 ### 校验下载的产物
 
-发布的压缩包与容器镜像都用 [cosign](https://docs.sigstore.dev/) 做了 keyless 签名——
-签名身份就是本仓库的 release workflow，因此不存在需要信任、也不会泄露的密钥。压缩包另外带有
-SLSA build provenance 证明。
+`checksums.txt` 与容器镜像用 [cosign](https://docs.sigstore.dev/) 做了 keyless 签名——
+签名身份就是本仓库的 release workflow，因此不存在需要信任、也不会泄露的密钥。
+
+压缩包本身没有逐个签名。每个压缩包的摘要都已经在 `checksums.txt` 里，所以一个签名就覆盖了
+整次发布：先验签名，再用它担保的那个文件去验压缩包。压缩包另外带有 SLSA build provenance 证明。
 
 每次发布的 release notes 里都附上了填好身份参数的 `cosign verify-blob` 与
 `gh attestation verify` 命令。那几个身份参数才是关键：不带它们，校验只能确认「有人」签过这个
@@ -114,6 +116,10 @@ scm-bench scan --lang zh
 ```bash
 scm-bench scan --snapshot-in examples/snapshot.json --lang zh
 ```
+
+仓库是并发抓取的——`--concurrency`（默认 8）限制同时抓取的数量，实例负载高时把它调低是
+比较客气的做法。`--timeout` 限制单个请求（默认 30s）；`--max-duration` 限制整次扫描，
+默认不开启，因为「多久算太久」完全取决于实例有多大。
 
 ### 看着它扫
 
@@ -173,11 +179,19 @@ scm-bench scan --max-duration 20m
 
 | 权限 | 可判定的内容 |
 |---|---|
-| **仓库读取** | 全部 13 条仓库级规则 |
+| **仓库读取** | 全部 14 条仓库级规则 |
 | **额外的管理员读取** | 实例管理员数量（CIS-1.3.3）与闲置账号（CIS-1.3.1） |
 
 普通只读 token 已经足够产出价值。没有管理员读取权限时，两条实例级规则输出 `MANUAL`，
 扫描正常继续——不会失败。
+
+推荐的凭据是 HTTP access token（`--token`，`BITBUCKET_TOKEN`）。不支持 token 的实例可以用
+basic auth（`--username` / `--password`，或 `BITBUCKET_USERNAME` / `BITBUCKET_PASSWORD`）；
+两者给一个即可，不要都给。命令行上显式输入的优先于环境变量提供的，因此 shell profile 里
+一个过期的 `BITBUCKET_TOKEN` 不会悄悄盖掉你刚敲进去的凭据。
+
+写在 URL 里的凭据——`https://user:pw@bitbucket.example.com`——不会被使用，并且在这个 URL
+进入快照或报告之前就被剥掉了。
 
 但**凭据被实例拒绝**是另一回事：这会在扫描开始前检出并以 `2` 退出。若把它当成「权限不足」，
 一个打错的 token 就会产出满屏 `MANUAL`、得分 0 的完整报告——看起来像审计结论，其实只是拼写错误。
@@ -260,30 +274,41 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 ```
 [INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3  HIGH  Ensure any change to code receives approval of two users
-[INFO]     Pull requests require 0 approval(s); at least 2 independent approvals are needed.
+[FAIL] CIS-1.1.3  HIGH    Ensure any change to code receives approval of two strongly authenticated users
+[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent approvals are needed.
 [INFO]       · requiredApprovers = 0
-[INFO]       20 repositories: PLAT/svc-001, PLAT/svc-004, PLAT/svc-007 and 17 more
 
 [INFO] == Needs manual review (19) ==
-[WARN] CIS-1.3.5  HIGH  Ensure multi-factor authentication is enforced
+[WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
+[INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
 
-[INFO] == Remediations (14) ==
+[INFO] == Remediations (18) ==
 [INFO] CIS-1.1.3  Repository settings -> Pull requests -> Merge checks: ...
 [INFO] CIS-1.3.5  Enforce MFA at the identity provider that fronts Bitbucket: ...
 
 [INFO] == Scan warnings ==
-[WARN] the user directory is not readable; dormant-account rules will report MANUAL
+[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 ...); administrator counts are lower bounds
 
 [INFO] == Summary ==
-[INFO] 15 checks PASS
-[INFO] 13 checks FAIL
-[INFO] 19 checks WARN
-[INFO] 1 check INFO
+[INFO] 15 findings PASS
+[INFO] 13 findings FAIL
+[INFO] 19 findings WARN
+[INFO] 1 finding INFO
 
 [INFO] SCORE 53/100
 [INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; WARN and INFO excluded)
+[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
+[INFO]       failures by severity: HIGH 4  MEDIUM 5  LOW 4
 ```
+
+上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 的真实输出，
+只在标了 `...` 的地方做了省略。计数的单位是 finding —— 一条规则对一个资源，
+所以它们加起来会多于 `list-checks` 报出的 20 条规则。
+
+`scored N of M` 这一行值得在看分数之前先读。无法判定的规则不进入分数的分子，
+也不进入分母 —— 单看每一条规则这是对的，合起来却有误导性：分母被缩小了，
+于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的分数。
+`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
 
 每一行都以等宽的标签开头，在终端里带颜色：
 
@@ -314,6 +339,12 @@ scm-bench scan 2>&1 | grep '^\[WARN\]'   # 这次扫描没看到什么
 
 `--max-resources` 控制列出多少个名字之后开始汇总（默认 5，`0` 表示全部列出）。它只影响这一种
 格式：`json` 与 `sarif` 始终携带完整集合。
+
+通过和不适用的规则只计入汇总，不会逐条列出——报告是一份待办清单。`--show-passed` 会把它们
+也列出来，当你的问题是「这个实例已经做对了哪些」时用它。
+
+颜色只在 stdout 是终端时启用，并遵守 `NO_COLOR`；`--no-color` 是显式关掉它，
+适用于终端被某个会保留转义序列的东西捕获的场景。
 
 只有 stdout 是终端时才上色，并遵守 `NO_COLOR`。
 
@@ -361,7 +392,14 @@ exclude: [CIS-1.1.13]    # 或用 include: 只跑子集
 
 无法识别的键会直接报错，而不是被忽略。把 `minApprovers` 写成 `minApprover` 一样能解析成功、
 什么都不改，却会产出一份读者以为「按我的阈值判定过」的报告——所以扫描宁可拒绝启动。
-`include` / `exclude` 中指向不存在控制项的条目同理。
+`include` / `exclude` 中指向不存在控制项的条目同理，负数阈值同理，任何列表里的空条目也同理——
+`signatureHookKeys` 里的一个空串是所有 hook 名字的子串，会把第一个启用的 hook（无论它做什么）
+报成「已启用提交签名校验」。
+
+`permissionRank` 是大多数人从不改、但应该知道它存在的一个字段：它定义了 Bitbucket 各个权限名
+之间的高低关系，`maxDefaultPermission` 就是拿它来比对的。如果你的 Bitbucket 版本报出一个这张表
+里没有的权限，CIS-1.3.8 会输出 `MANUAL`，而不是去猜它排在哪。和上面的序列不同，它是映射，
+按键合并而不是整体替换，所以只写一个权限不会影响其余的。
 
 ---
 
@@ -369,24 +407,56 @@ exclude: [CIS-1.1.13]    # 或用 include: 只跑子集
 
 ```yaml
 - name: Audit Bitbucket
+  id: audit
+  # 扫描发现问题时会以 1 退出，这正是它的用途——但那样这一步就结束了整个 job，
+  # 报告还没来得及上传。所以把「失败」推迟到最后一步。
+  continue-on-error: true
   run: |
     scm-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
       --output sarif --output-file scm-bench.sarif \
-      --fail-on high
+      --fail-on high --max-manual 40
+
+- name: Upload to code scanning
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: scm-bench.sarif
+
+- name: Fail the job if the audit did
+  if: steps.audit.outcome == 'failure'
+  run: exit 1
 ```
 
 退出码：
 
 | 码 | 含义 |
 |---|---|
-| `0` | 扫描完成，未触发 `--fail-on` 阈值 |
-| `1` | 扫描完成，存在达到或超过阈值的失败项 |
+| `0` | 扫描完成，未触发任何阈值 |
+| `1` | 扫描完成，触发了某个阈值 |
 | `2` | 扫描本身没能完成 |
 
-`--fail-on` 接受 `high`（默认）、`medium`、`low`、`none`。建议从 `high` 起步，
-清完第一轮发现后再收紧。
+有三个 flag 会导致退出码 `1`，它们问的是不同的问题：
+
+| Flag | 问的是 |
+|---|---|
+| `--fail-on` | 有没有达到这个严重度的失败项？`high`（默认）、`medium`、`low`、`none` |
+| `--fail-under` | 分数可以接受吗？0-100 的数字，`0` 表示关闭 |
+| `--max-manual` | 这次扫描到底看到了多少，够不够形成判断？百分比，`-1` 表示关闭 |
+
+建议从 `--fail-on high` 起步，清完第一轮发现后再收紧。
+
+`--max-manual` 是最值得尽早设上、也最不直观的一个。无法判定的规则是被排除出分数，
+而不是计为失败——单看每一条规则这是对的，合起来却有误导性，因为它缩小了分母。
+于是一个丢了权限的 token 反而可能比正常的 token 得分**更高**：在自带的示例快照上，
+把所有可读字段清空会让分数从 53 涨到 100。`--fail-under` 拦不住这种情况，`--max-manual` 可以。
+
+关于 SARIF，如果你要上传它：本工具的发现是配置事实，不是源码行，所以每个 result 带的是指向
+仓库的 `logicalLocation`，而不是指向某个并不存在的文件的 `physicalLocation`。GitHub code
+scanning 用 `physicalLocation` 把告警挂到代码上，因此告警会以「没有关联文件」的形式出现。
+在依赖它之前请先在你自己的仓库上实测一次；如果你是要喂给仪表盘而不是 code scanning，
+`json` 格式是更合适的选择。
 
 ### 把「抓取」和「判定」拆开
 
@@ -413,21 +483,33 @@ scm-bench diff last-week.json today.json
 ```
 
 ```
-SCORE  53 → 31   (-22)
-       weighted 29/55 → 25/80
+[INFO] scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+[INFO] SCORE  53 → 31   (-22)
+[INFO]        weighted 29/55 → 25/80
 
-REGRESSED (3)
-  CIS-1.1.15  HIGH    PLAT/payments-api  PASS → FAIL
-      Anyone with write access can push directly to main, bypassing pull request review.
-  ...
+[INFO] REGRESSED (3)
+[FAIL]   HIGH    CIS-1.1.15  PLAT/payments-api  PASS → FAIL
+[INFO]       Anyone with write access can push directly to main, bypassing pull request review.
 
-NEW FAILURES (12)
-  CIS-1.1.3   HIGH    PLAT/brand-new     FAIL
-  ...
+[INFO] NEW FAILURES (12)
+[FAIL]   HIGH    CIS-1.1.3  PLAT/brand-new  FAIL
 
-FIXED (1)
-  CIS-1.1.3   HIGH    PLAT/legacy-billing  FAIL → PASS
+[INFO] FIXED (1)
+[PASS]   HIGH    CIS-1.1.3  PLAT/legacy-billing  FAIL → PASS
+
+[INFO] GONE (1)
+[INFO]   HIGH    PLAT/retired-service  gone
+[INFO]       no longer present; it was failing 5 controls of 14 evaluated
 ```
+
+`diff` 用的是和 `scan` 完全一样的标签列，所以
+`scm-bench diff a.json b.json | grep '^\[FAIL\]'` 就能回答「什么变差了」。
+`GONE` 是每个资源一条，而不是每条规则一条：删掉一个仓库是关于这个仓库的一个事实，
+把它报二十遍只会把这条命令本该凸显的回退埋掉。
+
+它接受和 `scan` 相同的输出 flag —— `-o table|json`、`--output-file`、`--lang`、
+`--no-color` —— 外加 `--fail-on-regression`（默认开启）与 `--allow-other-instance`。
+不提供 SARIF：一次比较不是一组发现。
 
 **两份快照都会先用当前构建、当前配置各评估一次**再比较。直接 diff 两份已渲染的报告更省事，
 但那样差异里会混进「两次运行之间工具或阈值发生的变化」——而这恰恰是回退检查最不能被混淆的东西。

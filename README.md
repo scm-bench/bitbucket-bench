@@ -78,10 +78,14 @@ go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest
 
 ### Verifying what you downloaded
 
-Release archives and container images are signed with [cosign](https://docs.sigstore.dev/),
-keyless — the signing identity is this repository's release workflow, so there is
-no key to trust or to leak. Archives additionally carry a SLSA build provenance
-attestation.
+`checksums.txt` and the container images are signed with
+[cosign](https://docs.sigstore.dev/), keylessly — the signing identity is this
+repository's release workflow, so there is no key to trust or to leak.
+
+The archives are not signed individually. Every archive's digest is already in
+`checksums.txt`, so one signature covers the whole release: verify the
+signature, then verify the archive against the file it vouches for. Archives
+additionally carry a SLSA build provenance attestation.
 
 Every release's notes carry the exact `cosign verify-blob` and
 `gh attestation verify` commands, with the identity flags filled in. Those flags
@@ -116,6 +120,12 @@ No instance handy? Every report format works against the bundled sample:
 ```bash
 scm-bench scan --snapshot-in examples/snapshot.json
 ```
+
+Repositories are fetched concurrently — `--concurrency` (default 8) bounds how
+many at once, and lowering it is the polite response to an instance under load.
+`--timeout` bounds a single request (default 30s); `--max-duration` bounds the
+whole scan and is off unless set, because how long is too long depends entirely
+on how big the instance is.
 
 ### Watching the scan
 
@@ -184,12 +194,22 @@ whole scan.
 
 | Access | Enables |
 |---|---|
-| **Repository read** | All 13 repository-scope controls |
+| **Repository read** | All 14 repository-scope controls |
 | **Admin read** (additionally) | Instance administrator counts (CIS-1.3.3) and dormant accounts (CIS-1.3.1) |
 
 A plain read-only token is enough to get value. Without admin read, the two
 instance-scope controls report `MANUAL` and the scan continues normally — it does
 not fail.
+
+An HTTP access token (`--token`, `BITBUCKET_TOKEN`) is the expected credential.
+Instances with no token support take basic auth instead (`--username` /
+`--password`, or `BITBUCKET_USERNAME` / `BITBUCKET_PASSWORD`); give one or the
+other, not both. What you type on the command line beats what the environment
+supplies, so a stale `BITBUCKET_TOKEN` in a shell profile does not silently
+override the credentials you just entered.
+
+Credentials embedded in the URL — `https://user:pw@bitbucket.example.com` — are
+not used and are stripped before the URL reaches a snapshot or a report.
 
 A credential the instance *rejects* is a different matter: that is checked before
 the scan starts and exits `2`. Treating it like a missing permission would turn a
@@ -284,30 +304,43 @@ than fifty:
 
 ```
 [INFO] == Failed (13) ==
-[FAIL] CIS-1.1.3  HIGH  Ensure any change to code receives approval of two users
-[INFO]     Pull requests require 0 approval(s); at least 2 independent approvals are needed.
+[FAIL] CIS-1.1.3  HIGH    Ensure any change to code receives approval of two strongly authenticated users
+[INFO]     PLAT/legacy-billing  Pull requests require 0 approval(s); at least 2 independent approvals are needed.
 [INFO]       · requiredApprovers = 0
-[INFO]       20 repositories: PLAT/svc-001, PLAT/svc-004, PLAT/svc-007 and 17 more
 
 [INFO] == Needs manual review (19) ==
-[WARN] CIS-1.3.5  HIGH  Ensure multi-factor authentication is enforced
+[WARN] CIS-1.3.5  HIGH    Ensure multi-factor authentication is enforced for the organization
+[INFO]     instance  Multi-factor authentication is enforced by the identity provider in front of ...
 
-[INFO] == Remediations (14) ==
+[INFO] == Remediations (18) ==
 [INFO] CIS-1.1.3  Repository settings -> Pull requests -> Merge checks: ...
 [INFO] CIS-1.3.5  Enforce MFA at the identity provider that fronts Bitbucket: ...
 
 [INFO] == Scan warnings ==
-[WARN] the user directory is not readable; dormant-account rules will report MANUAL
+[WARN] group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 ...); administrator counts are lower bounds
 
 [INFO] == Summary ==
-[INFO] 15 checks PASS
-[INFO] 13 checks FAIL
-[INFO] 19 checks WARN
-[INFO] 1 check INFO
+[INFO] 15 findings PASS
+[INFO] 13 findings FAIL
+[INFO] 19 findings WARN
+[INFO] 1 finding INFO
 
 [INFO] SCORE 53/100
 [INFO]       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; WARN and INFO excluded)
+[INFO]       scored 28 of 47 controls (59%); 19 could not be evaluated
+[INFO]       failures by severity: HIGH 4  MEDIUM 5  LOW 4
 ```
+
+That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`,
+abbreviated only where a line is marked `...`. The counts are of findings — one
+control against one resource — which is why they add up to more than the twenty
+controls `list-checks` reports.
+
+The `scored N of M` line is worth reading before the score above it. Controls
+that could not be evaluated are excluded from both sides of the fraction, which
+is right for any single control and misleading in aggregate: a token that can
+read very little produces a high score from a small sample. `--max-manual`
+turns that into a failed run rather than a good-looking one.
 
 Every line begins with a fixed-width tag, coloured on a terminal:
 
@@ -346,7 +379,13 @@ own group — those are different problems.
 (default 5; `0` lists every one). It affects only this format: `json` and `sarif`
 always carry the full set.
 
-Colour is used only when stdout is a terminal, and honours `NO_COLOR`.
+Passing and not-applicable controls are summarised but not listed, since a
+report is a list of things to do. `--show-passed` lists them too, which is what
+you want when the question is "what does this instance already get right".
+
+Colour is used only when stdout is a terminal, and honours `NO_COLOR`;
+`--no-color` turns it off explicitly, which is the one to reach for when a
+terminal is being captured by something that keeps the escapes.
 
 **`json`** — the full report: every finding, its evidence, why the control exists,
 its remediation, and the score breakdown. `title` and `remediation` carry the
@@ -404,7 +443,18 @@ default. Sequences are the exception: YAML replaces a list wholesale, so setting
 An unrecognised key is an error, not a shrug. `minApprover` for `minApprovers`
 parses perfectly well, changes nothing, and yields a report the reader believes
 was evaluated at their threshold — so the scan refuses to start instead. The
-same applies to `include`/`exclude` entries that name no control.
+same applies to `include`/`exclude` entries that name no control, to a negative
+threshold, and to a blank entry in any list — a blank `signatureHookKeys` entry
+is a substring of every hook name, which would report the first enabled hook,
+whatever it does, as commit signature verification.
+
+`permissionRank` is the one field most people never touch and should know
+exists: it is how Bitbucket's permission names compare to one another, and
+`maxDefaultPermission` is checked against it. A permission your Bitbucket
+version reports that the table has never heard of makes CIS-1.3.8 report
+`MANUAL` rather than guessing where it ranks. Unlike the sequences, it is a map
+and is merged rather than replaced, so naming one permission leaves the rest
+alone.
 
 ---
 
@@ -412,24 +462,63 @@ same applies to `include`/`exclude` entries that name no control.
 
 ```yaml
 - name: Audit Bitbucket
+  id: audit
+  # The scan exits 1 when it finds something, which is the point — but that
+  # would end the job before the report could be uploaded, so the failure is
+  # deferred to the last step.
+  continue-on-error: true
   run: |
     scm-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
       --output sarif --output-file scm-bench.sarif \
-      --fail-on high
+      --fail-on high --max-manual 40
+
+- name: Upload to code scanning
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: scm-bench.sarif
+
+- name: Fail the job if the audit did
+  if: steps.audit.outcome == 'failure'
+  run: exit 1
 ```
 
 Exit codes:
 
 | Code | Meaning |
 |---|---|
-| `0` | The scan ran; nothing breached `--fail-on` |
-| `1` | The scan ran; failures at or above the threshold |
+| `0` | The scan ran and breached no threshold |
+| `1` | The scan ran and breached one |
 | `2` | The scan itself could not complete |
 
-`--fail-on` accepts `high` (default), `medium`, `low` or `none`. Start at `high`
-and tighten once the first round of findings is cleared.
+Three flags drive exit `1`, and they answer different questions:
+
+| Flag | Asks |
+|---|---|
+| `--fail-on` | Are there failures this severe? `high` (default), `medium`, `low`, `none` |
+| `--fail-under` | Is the score acceptable? A number 0-100; `0` disables |
+| `--max-manual` | Did the scan see enough to have an opinion? A percentage; `-1` disables |
+
+Start at `--fail-on high` and tighten once the first round of findings is
+cleared.
+
+`--max-manual` is the one worth setting early, and the least obvious. Controls
+that could not be evaluated are excluded from the score rather than counted
+against it — right for any single control, and misleading in aggregate, because
+it shrinks the denominator. A token that has lost a permission can therefore
+score *higher* than a working one: on the bundled sample, blanking every
+readable field takes the score from 53 to 100. `--fail-under` cannot catch
+that. `--max-manual` can.
+
+A note on the SARIF, if you upload it: findings are configuration facts, not
+lines of source, so each result carries a `logicalLocation` naming the
+repository rather than a `physicalLocation` pointing into a file that does not
+exist. GitHub code scanning uses `physicalLocation` to place an alert against
+code, so alerts appear without a file attached. Verify the behaviour against
+your own repository before relying on it; the `json` format is the better
+choice if you are feeding a dashboard rather than code scanning.
 
 ### Splitting capture from evaluation
 
@@ -460,21 +549,35 @@ scm-bench diff last-week.json today.json
 ```
 
 ```
-SCORE  53 → 31   (-22)
-       weighted 29/55 → 25/80
+[INFO] scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+[INFO] SCORE  53 → 31   (-22)
+[INFO]        weighted 29/55 → 25/80
 
-REGRESSED (3)
-  CIS-1.1.15  HIGH    PLAT/payments-api  PASS → FAIL
-      Anyone with write access can push directly to main, bypassing pull request review.
-  ...
+[INFO] REGRESSED (3)
+[FAIL]   HIGH    CIS-1.1.15  PLAT/payments-api  PASS → FAIL
+[INFO]       Anyone with write access can push directly to main, bypassing pull request review.
 
-NEW FAILURES (12)
-  CIS-1.1.3   HIGH    PLAT/brand-new     FAIL
-  ...
+[INFO] NEW FAILURES (12)
+[FAIL]   HIGH    CIS-1.1.3  PLAT/brand-new  FAIL
 
-FIXED (1)
-  CIS-1.1.3   HIGH    PLAT/legacy-billing  FAIL → PASS
+[INFO] FIXED (1)
+[PASS]   HIGH    CIS-1.1.3  PLAT/legacy-billing  FAIL → PASS
+
+[INFO] GONE (1)
+[INFO]   HIGH    PLAT/retired-service  gone
+[INFO]       no longer present; it was failing 5 controls of 14 evaluated
 ```
+
+`diff` writes the same tag column as `scan`, so
+`scm-bench diff a.json b.json | grep '^\[FAIL\]'` answers "what got worse".
+`GONE` is one entry per resource rather than one per control: deleting a
+repository is one fact about the repository, and reporting it twenty times
+buried the regressions this command exists to surface.
+
+It takes the same output flags as `scan` — `-o table|json`, `--output-file`,
+`--lang`, `--no-color` — plus `--fail-on-regression` (on by default) and
+`--allow-other-instance`. SARIF is not offered: a comparison is not a set of
+findings.
 
 **Both snapshots are evaluated by the running build with the running
 configuration** before being compared. Diffing two already-rendered reports
@@ -538,10 +641,14 @@ and are not policy. The fetcher resolves them and hands Rego a boolean:
 internal/
   scm/                  normalized snapshot types (the fetcher/policy contract)
     bitbucketdc/        REST client, fetcher, ref-matcher resolution
-  checks/policies/      one directory per control: check.rego + metadata.json
+  checks/policies/      one directory per control: check.rego, check_test.rego,
+                        metadata.json
   engine/               compiles the bundle once, evaluates, scores
   report/               table, json, sarif
+  diff/                 compares two evaluations; backs `scm-bench diff`
   config/               thresholds handed to Rego as input.config
+  cli/                  flags, exit codes, the scan trace
+  console/              the tag column and colours both outputs share
 ```
 
 ### Adding a control
@@ -584,6 +691,11 @@ value comes back as null, and passing that to `concat` or `sort` makes the rule
 undefined, so the control reports nothing at all.
 `TestZeroValuedSnapshotProducesAVerdictForEveryControl` guards this.
 
+`check_test.rego` sits beside it and is not optional. Every control's PASS,
+FAIL and MANUAL branches are covered, and CI holds the bundle at 100% — an
+uncovered branch is a verdict nobody has ever seen the rule produce. Run them
+with `make policy`.
+
 `metadata.json` carries the ID, severity, scope, and — most importantly — the
 remediation text. A test enforces that every remediation names a concrete
 location: a settings path, a file to add, or an explicit statement that nothing
@@ -594,18 +706,37 @@ applies. Vague remediation is worse than none.
 ## Development
 
 ```bash
-make check      # fmt, vet, test — everything CI runs
+make check      # fmt, vet, race-enabled tests, Rego compile + policy tests
+make policy     # just the Rego: compile, unit tests, coverage
+make vuln       # govulncheck against what this code actually reaches
 make build      # binary into bin/
 make snapshot   # full release build locally, without publishing
 ```
 
-The test suite evaluates the entire policy bundle against hardened, misconfigured,
-unreadable, and empty fixtures, asserting the expected status for every control in
-each case — including that unreadable settings produce `MANUAL` rather than a
-confident wrong answer. The fetcher is tested against a stand-in Bitbucket that
-also exercises pagination, renamed endpoints, permission denials, and the
-cross-version field shapes where a merge check arrives as a number in one release
-and an object in another.
+`make check` needs [opa](https://www.openpolicyagent.org/docs/latest/#running-opa)
+on your PATH for the policy half. Everything else is the Go toolchain.
+
+Two test suites, because the project is written in two languages and `go test
+-cover` cannot see Rego at all:
+
+- **Go** covers the fetcher, the engine, the reporters and the CLI. The fetcher
+  runs against a stand-in Bitbucket that exercises pagination, renamed
+  endpoints, permission denials, and the cross-version field shapes where a
+  merge check arrives as a number in one release and an object in another.
+  Coverage is measured with `-coverpkg=./...`, since Go otherwise counts each
+  package only from its own tests and reports a number for something nobody
+  asked about.
+- **Rego** covers the controls themselves, one `check_test.rego` per control,
+  held at 100%. These are the tests that pin the reasoning: that an under-count
+  from an incomplete administrator set is `MANUAL` while an over-count is a
+  conclusive `FAIL`, that a branch whose age could not be read is not a fresh
+  branch, and that the five controls with no automatable answer stay `MANUAL`
+  rather than acquiring a plausible-looking one.
+
+On top of both, the Go suite evaluates the entire bundle against hardened,
+misconfigured, unreadable, and empty snapshots, asserting that every control
+produces a verdict in each case — including that unreadable settings produce
+`MANUAL` rather than a confident wrong answer.
 
 ---
 
