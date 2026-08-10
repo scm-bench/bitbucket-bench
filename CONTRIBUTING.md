@@ -14,8 +14,10 @@ make check        # gofmt, go vet, race-enabled tests, Rego compile + tests
 make build        # binary into bin/
 ```
 
-Go 1.25+ is required. Nothing else — the policy bundle is embedded in the
-binary and there is no code generation step.
+Go 1.25+ is required; go.mod pins a patched toolchain, which Go fetches on its
+own. `opa` is needed for the policy half of `make check` — everything else is
+the Go toolchain, since the bundle is embedded and there is no code generation
+step.
 
 No instance to test against? Every code path except the fetcher runs offline:
 

@@ -70,7 +70,7 @@ docker run --rm ghcr.io/scm-bench/scm-bench:latest \
   scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
 ```
 
-**From source** (Go 1.25+):
+**From source** (Go 1.25+; the build pins a patched toolchain and will fetch it):
 
 ```bash
 go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest

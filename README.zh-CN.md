@@ -64,7 +64,7 @@ docker run --rm ghcr.io/scm-bench/scm-bench:latest \
   scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
 ```
 
-**从源码构建**（Go 1.25+）：
+**从源码构建**（Go 1.25+；构建会固定到一个已打补丁的 toolchain 并自动获取）：
 
 ```bash
 go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest
