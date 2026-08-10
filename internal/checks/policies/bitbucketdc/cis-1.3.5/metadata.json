@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.3.5",
+  "cisId": "1.3.5",
+  "package": "scmbench.rules.cis_1_3_5",
+  "scope": "organization",
+  "severity": "HIGH",
+  "platforms": ["bitbucket-dc"],
+  "automated": false,
+  "title": "Ensure multi-factor authentication is enforced for the organization",
+  "titleZh": "强制 MFA",
+  "description": "Not observable from Bitbucket Data Center: authentication is delegated to an external identity provider, and Bitbucket's API exposes nothing about factors. Reported as MANUAL because a verdict from Bitbucket data alone would be invented.",
+  "remediation": "Enforce MFA at the identity provider that fronts Bitbucket: require it for the SAML/OIDC application in your IdP, or enable two-step verification in Crowd. Then close the bypass paths — Administration -> Authentication: disable direct Bitbucket login where SSO is mandatory, and require SSH keys or HTTP access tokens for Git operations so passwords cannot be used to skip the IdP.",
+  "remediationZh": "在 Bitbucket 前置的身份提供方处强制 MFA：在 IdP 中对该 SAML/OIDC 应用启用强制多因子，或在 Crowd 中开启两步验证。随后封堵旁路——管理后台 -> Authentication：在强制 SSO 的场景下禁用 Bitbucket 本地登录；并要求 Git 操作使用 SSH key 或 HTTP access token，避免用密码绕过 IdP。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html"
+  ]
+}

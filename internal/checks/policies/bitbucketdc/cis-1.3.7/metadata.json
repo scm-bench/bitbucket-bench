@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.3.7",
+  "cisId": "1.3.7",
+  "package": "scmbench.rules.cis_1_3_7",
+  "scope": "repository",
+  "severity": "LOW",
+  "platforms": ["bitbucket-dc"],
+  "automated": true,
+  "title": "Ensure a minimum number of administrators are set for the repository",
+  "titleZh": "每个仓库至少 2 名管理员",
+  "description": "A repository with one administrator is a repository whose settings become unmaintainable the moment that person is unavailable — and whose branch protections nobody else can restore.",
+  "remediation": "Repository settings -> Repository permissions: grant \"Admin\" to at least one more trusted maintainer, or grant \"Admin\" at Project settings -> Project permissions so a group covers all repositories in the project. Adjust the minimum with thresholds.minRepositoryAdmins in scm-bench's config.",
+  "remediationZh": "仓库设置 -> Repository permissions：为至少一位可信维护者授予「Admin」；也可在 项目设置 -> Project permissions 授予组级 Admin，一次覆盖项目内全部仓库。最小值可通过 scm-bench 配置项 thresholds.minRepositoryAdmins 调整。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html"
+  ]
+}

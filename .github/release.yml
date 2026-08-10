@@ -1,0 +1,62 @@
+# Categories for GitHub's own generated release notes. This file has no
+# effect on what goreleaser writes into a release body — .goreleaser.yaml
+# currently sets `changelog.use: github`, goreleaser's own renderer, not
+# `github-native`, the mode that would read this file. It stays wired up in
+# case that changes, and it still governs GitHub's "Generate release notes"
+# button/API if that is ever invoked separately.
+#
+# This is GitHub's own schema, not Release Drafter's: everything nests under
+# `changelog:`, exclusions live at `changelog.exclude.labels` rather than a
+# top-level `exclude-labels:`, and there is no `collapse-after:`. A file in
+# Release Drafter's shape is not rejected — it is silently ignored, and the
+# notes quietly fall back to one flat uncategorised list.
+#
+# Order matters: a pull request lands in the first category whose labels it
+# matches, so the categories that change what users must react to come first.
+changelog:
+  exclude:
+    labels:
+      - no-changelog
+      - skip-changelog
+      - invalid
+      - duplicate
+      - question
+      - wontfix
+
+  categories:
+    - title: 💥 Breaking changes
+      labels: [breaking, breaking-change]
+
+    # scm-bench specific, and deliberately near the top: a new or retuned
+    # control changes what an unchanged instance scores, which is the thing
+    # most likely to surprise someone after upgrading.
+    - title: 🔍 Policy changes
+      labels: [policy, check]
+
+    - title: 🚀 Features
+      labels: [feature, enhancement]
+
+    - title: 🐛 Bug fixes
+      labels: [bug, bugfix, fix, regression]
+
+    - title: 📝 Documentation
+      labels: [documentation, docs]
+
+    - title: 🚦 Tests
+      labels: [test, tests]
+
+    - title: 👻 Maintenance
+      labels: [chore, internal, maintenance, ci, release]
+
+    - title: 📦 Dependencies
+      labels: [dependencies]
+
+    - title: 🗑 Removed
+      labels: [removed, deprecated]
+
+    # Must stay last, and must carry the "*" wildcard. Release Drafter treats a
+    # category with no labels as the catch-all; GitHub does not, so leaving the
+    # labels off here would drop every unlabelled pull request instead of
+    # collecting it.
+    - title: ✍ Other changes
+      labels: ["*"]

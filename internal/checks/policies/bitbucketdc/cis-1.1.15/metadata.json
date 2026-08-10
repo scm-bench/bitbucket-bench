@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.1.15",
+  "cisId": "1.1.15",
+  "package": "scmbench.rules.cis_1_1_15",
+  "scope": "repository",
+  "severity": "HIGH",
+  "platforms": ["bitbucket-dc"],
+  "automated": true,
+  "title": "Ensure pushing or merging of new code is restricted to trusted users",
+  "titleZh": "限制向受保护分支直接 push",
+  "description": "Every approval rule configured on pull requests is worth nothing if the same people can push straight to the branch instead. This is the restriction that makes the rest of the review controls binding.",
+  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent changes without a pull request\". Grant exemptions only to build service accounts that genuinely need them, since each exemption reopens the bypass. Configure it at Project settings -> Branch permissions to cover every repository in the project.",
+  "remediationZh": "仓库设置 -> Branch permissions -> Add restriction：选中默认分支，启用「Prevent changes without a pull request」。仅对确有需要的构建服务账号授予豁免——每个豁免都会重新打开旁路。在 项目设置 -> Branch permissions 配置可覆盖整个项目。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"
+  ]
+}

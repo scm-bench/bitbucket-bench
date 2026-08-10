@@ -1,0 +1,75 @@
+# scm-bench configuration.
+#
+# Every field is optional: what you leave out keeps its default, so this file
+# only needs to state what you want changed. Pass it with --config.
+#
+# Sequences are the one exception — YAML replaces a list wholesale rather than
+# merging it, so if you set signatureHookKeys you are replacing the whole list.
+
+thresholds:
+  # CIS-1.1.3: approvals a pull request must collect before merging.
+  minApprovers: 2
+
+  # CIS-1.3.7: administrators a single repository should have, so its settings
+  # stay maintainable when one person is unavailable.
+  minRepositoryAdmins: 2
+
+  # CIS-1.3.3: acceptable range for instance administrators. Below the minimum
+  # is a lockout risk; above the maximum is an oversized blast radius.
+  minOrgAdmins: 2
+  maxOrgAdmins: 5
+
+  # CIS-1.1.8: how long a branch may sit untouched before it counts as
+  # abandoned, and how many such branches a repository may carry.
+  staleBranchDays: 90
+  maxStaleBranches: 0
+
+  # CIS-1.3.1: how long a user may go without authenticating before their
+  # access should be reviewed.
+  inactiveUserDays: 90
+
+# CIS-1.1.12: Bitbucket Data Center ships no signature verification of its own,
+# so name the add-on you use. A hook counts when its plugin key or display name
+# contains any of these (case-insensitive) substrings.
+signatureHookKeys:
+  - signature
+  - signed-commit
+  - gpg
+  - verify-commit
+  - commit-signing
+
+# CIS-1.1.13: merge strategy IDs that can introduce a merge commit. "ff" is
+# deliberately absent because it only falls back to a merge commit when the
+# target has moved. Add "squash" here if your team wants strictly linear
+# history through fast-forwards alone.
+nonLinearMergeStrategies:
+  - no-ff
+  - rebase-no-ff
+
+# CIS-1.2.1: paths probed on the default branch for a security policy.
+securityPolicyPaths:
+  - SECURITY.md
+  - .github/SECURITY.md
+  - docs/SECURITY.md
+  - SECURITY.rst
+  - SECURITY.txt
+  - SECURITY
+
+# CIS-1.3.8: the highest permission a project may grant to every licensed user
+# by default, and whether anonymously readable repositories are acceptable.
+maxDefaultPermission: REPO_READ
+allowPublicRepositories: false
+
+# Archived repositories are read-only by definition, so their branch
+# protections say little. Set to false to scan them anyway.
+skipArchivedRepositories: true
+
+# Narrow the run. exclude always wins over include, so you can pin a list and
+# still drop one entry from it.
+#
+# exclude:
+#   - CIS-1.1.13
+# include:
+#   - CIS-1.1.15
+#   - CIS-1.1.16
+#   - CIS-1.1.17

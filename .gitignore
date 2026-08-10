@@ -1,0 +1,31 @@
+# Build output. These patterns are anchored to the repository root on purpose:
+# an unanchored "scm-bench" also matches the cmd/scm-bench/ source directory,
+# which silently excludes the main package from the repository.
+/bin/
+/dist/
+/scm-bench
+/scm-bench.exe
+
+# Test and coverage output
+coverage.out
+coverage.html
+
+# Captured snapshots and reports describe a real instance's weak points.
+# Keeping them out of git by default avoids publishing them by accident.
+*.snapshot.json
+snapshot.json
+report.json
+report.sarif
+
+# The bundled sample is synthetic and is meant to be committed: it is what
+# `scm-bench scan --snapshot-in examples/snapshot.json` runs against.
+!examples/snapshot.json
+
+# Local configuration
+scm-bench.local.yaml
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

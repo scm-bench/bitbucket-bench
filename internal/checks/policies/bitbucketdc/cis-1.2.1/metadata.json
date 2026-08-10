@@ -1,0 +1,17 @@
+{
+  "id": "CIS-1.2.1",
+  "cisId": "1.2.1",
+  "package": "scmbench.rules.cis_1_2_1",
+  "scope": "repository",
+  "severity": "LOW",
+  "platforms": ["bitbucket-dc"],
+  "automated": true,
+  "title": "Ensure the repository publishes a security policy (SECURITY.md)",
+  "titleZh": "仓库包含 SECURITY.md",
+  "description": "A security policy tells whoever finds a flaw where to send it and what to expect. Without one, reports either go nowhere or go public.",
+  "remediation": "Add a SECURITY.md at the repository root (or under .github/) on the default branch, stating the contact address for reports, which versions are supported, and the expected response time. Adjust which paths count with securityPolicyPaths in scm-bench's config.",
+  "remediationZh": "在默认分支的仓库根目录（或 .github/ 下）添加 SECURITY.md，写明漏洞报告联系方式、受支持的版本范围与预期响应时间。可通过 scm-bench 配置项 securityPolicyPaths 调整识别路径。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security"
+  ]
+}

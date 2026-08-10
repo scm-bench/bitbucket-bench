@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.1.6",
+  "cisId": "1.1.6",
+  "package": "scmbench.rules.cis_1_1_6",
+  "scope": "repository",
+  "severity": "MEDIUM",
+  "platforms": ["bitbucket-dc"],
+  "automated": false,
+  "title": "Ensure code owners are set for extra sensitive code or configuration",
+  "titleZh": "敏感代码/配置设置 Code owners",
+  "description": "Not automatable on Bitbucket Data Center: there is no CODEOWNERS file, and default reviewers are advisory unless combined with an approval requirement. Reported as MANUAL so the gap is visible rather than silently passing.",
+  "remediation": "Repository settings -> Default reviewers -> Add default reviewer condition: scope the condition to the source and target branches that carry sensitive changes, name the owning reviewers, and set \"Approvals required\" to at least 1 so the review is binding rather than suggested.",
+  "remediationZh": "仓库设置 -> Default reviewers -> Add default reviewer condition：按承载敏感变更的源/目标分支限定条件，指定归属评审人，并把「Approvals required」设为至少 1，使评审具备强制力而非仅作提示。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/add-default-reviewers-to-pull-requests-834221295.html"
+  ]
+}

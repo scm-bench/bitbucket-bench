@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.1.13",
+  "cisId": "1.1.13",
+  "package": "scmbench.rules.cis_1_1_13",
+  "scope": "repository",
+  "severity": "LOW",
+  "platforms": ["bitbucket-dc"],
+  "automated": true,
+  "title": "Ensure linear history is required",
+  "titleZh": "要求线性历史",
+  "description": "A linear history keeps the record of what shipped simple to read and to bisect. Merge commits let a branch's history be reshaped in ways that are hard to audit after the fact.",
+  "remediation": "Repository settings -> Pull requests -> Merge strategies: disable \"Merge commit\" (no-ff) and \"Rebase, merge commit\" (rebase-no-ff), leaving fast-forward, rebase-fast-forward or squash strategies enabled. Set the same at Project settings -> Pull requests to apply project-wide. If your workflow requires merge commits, add the strategy ID to nonLinearMergeStrategies in scm-bench's config to adjust what counts.",
+  "remediationZh": "仓库设置 -> Pull requests -> Merge strategies：关闭「Merge commit」(no-ff) 与「Rebase, merge commit」(rebase-no-ff)，保留 fast-forward / rebase-ff / squash。在 项目设置 -> Pull requests 配置可覆盖整个项目。若团队确实需要 merge commit，可在 scm-bench 配置的 nonLinearMergeStrategies 中调整判定口径。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/pull-request-merge-strategies-844499235.html"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.2.2",
+  "cisId": "1.2.2",
+  "package": "scmbench.rules.cis_1_2_2",
+  "scope": "organization",
+  "severity": "MEDIUM",
+  "platforms": ["bitbucket-dc"],
+  "automated": false,
+  "title": "Ensure repository creation is limited to specific members",
+  "titleZh": "仓库创建受限于特定成员",
+  "description": "Deferred to a later release: a verdict requires reading the global Project Creator permission alongside group membership and per-project create grants, and what counts as sufficiently limited varies by deployment. Reported as MANUAL so the control is not silently dropped.",
+  "remediation": "Administration -> Global permissions: review who holds \"Project Creator\" and reduce it to the platform or team leads who need it. Then check Project settings -> Project permissions for each project, since project administrators can create repositories within their own project.",
+  "remediationZh": "管理后台 -> Global permissions：检查持有「Project Creator」的账号，收敛到确需的平台/团队负责人。再逐项目检查 项目设置 -> Project permissions——项目管理员可在自己项目内创建仓库。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/global-permissions-776640369.html"
+  ]
+}

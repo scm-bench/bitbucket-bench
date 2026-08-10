@@ -1,0 +1,18 @@
+{
+  "id": "CIS-1.1.9",
+  "cisId": "1.1.9",
+  "package": "scmbench.rules.cis_1_1_9",
+  "scope": "repository",
+  "severity": "HIGH",
+  "platforms": ["bitbucket-dc"],
+  "automated": true,
+  "title": "Ensure all checks have passed before merging new code",
+  "titleZh": "合并前所有检查必须通过",
+  "description": "A pipeline that runs but cannot block a merge is decoration. Tests, linters, and security scans only reduce risk if a red result stops the merge.",
+  "remediation": "Repository settings -> Required builds -> Add required build: name the CI plan key and set the ref matcher to the default branch. Alternatively, Repository settings -> Pull requests -> Merge checks -> \"Minimum successful builds\" set to at least 1. Required builds is the stronger option because it names which build must pass, not merely how many.",
+  "remediationZh": "仓库设置 -> Required builds -> Add required build：填入 CI plan key，ref matcher 选默认分支。或在 仓库设置 -> Pull requests -> Merge checks 中把「Minimum successful builds」设为至少 1。推荐前者——它指定「哪个」构建必须通过，而不只是「几个」。",
+  "references": [
+    "https://www.cisecurity.org/benchmark/software-supply-chain-security",
+    "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "1",
+  "metadata": {
+    "tool": "scm-bench",
+    "toolVersion": "example",
+    "platform": "bitbucket-dc",
+    "baseUrl": "https://bitbucket.example.com",
+    "generatedAt": "2026-01-15T09:00:00Z",
+    "warnings": [
+      "group \"contractors\" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not permitted to access this resource); administrator counts are lower bounds"
+    ]
+  },
+  "organization": {
+    "admins": [
+      { "name": "alice", "displayName": "Alice Chen", "type": "user", "permission": "SYS_ADMIN", "active": true },
+      { "name": "bob", "displayName": "Bob Silva", "type": "user", "permission": "ADMIN", "active": true }
+    ],
+    "effectiveAdmins": { "users": ["alice", "bob"], "count": 2, "complete": true },
+    "users": [
+      { "name": "alice", "displayName": "Alice Chen", "active": true, "lastActivityEpoch": 1768460400, "inactiveDays": 2, "hasRepositoryAccess": true },
+      { "name": "bob", "displayName": "Bob Silva", "active": true, "lastActivityEpoch": 1767769200, "inactiveDays": 10, "hasRepositoryAccess": true },
+      { "name": "dana", "displayName": "Dana Okafor", "active": true, "lastActivityEpoch": 1735732800, "inactiveDays": 380, "hasRepositoryAccess": true }
+    ],
+    "available": { "adminUsers": true, "adminGroups": true, "users": true, "userActivity": true }
+  },
+  "projects": [
+    {
+      "key": "PLAT",
+      "name": "Platform",
+      "type": "NORMAL",
+      "public": false,
+      "permissions": {
+        "users": [{ "name": "alice", "type": "user", "permission": "PROJECT_ADMIN", "active": true }],
+        "groups": [],
+        "defaultPermissionKnown": true
+      },
+      "repositories": [
+        {
+          "slug": "payments-api",
+          "name": "payments-api",
+          "projectKey": "PLAT",
+          "fullName": "PLAT/payments-api",
+          "public": false,
+          "archived": false,
+          "forkable": true,
+          "defaultBranch": "refs/heads/main",
+          "defaultBranchDisplay": "main",
+          "empty": false,
+          "pullRequestSettings": {
+            "requiredApprovers": 2,
+            "requiredAllApprovers": false,
+            "requiredAllTasksComplete": true,
+            "requiredSuccessfulBuilds": 1,
+            "unapproveOnUpdate": true,
+            "mergeStrategies": [
+              { "id": "squash", "name": "Squash", "enabled": true },
+              { "id": "no-ff", "name": "Merge commit", "enabled": false }
+            ],
+            "defaultStrategy": "squash"
+          },
+          "branchRestrictions": [
+            { "id": 1, "type": "pull-request-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true },
+            { "id": 2, "type": "fast-forward-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true },
+            { "id": 3, "type": "no-deletes", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "PROJECT", "matchesDefaultBranch": true, "exemptUsers": ["release-bot"] }
+          ],
+          "requiredBuilds": [
+            { "id": 7, "buildParentKeys": ["PLAT-PAY-BUILD"], "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "matchesDefaultBranch": true }
+          ],
+          "hooks": [
+            { "key": "com.example.gpg-signature-verify", "name": "GPG signature verification", "type": "PRE_RECEIVE", "enabled": true, "configured": true, "scope": "REPOSITORY" }
+          ],
+          "branches": [
+            { "id": "refs/heads/main", "displayId": "main", "isDefault": true, "latestCommit": "9f2c1ab", "latestCommitEpoch": 1768460400, "ageDays": 2 },
+            { "id": "refs/heads/feature/idempotency", "displayId": "feature/idempotency", "isDefault": false, "latestCommit": "44ade10", "latestCommitEpoch": 1768201200, "ageDays": 5 }
+          ],
+          "files": {
+            "securityPolicyPaths": ["SECURITY.md"],
+            "probed": ["SECURITY.md"]
+          },
+          "permissions": {
+            "users": [
+              { "name": "alice", "type": "user", "permission": "REPO_ADMIN", "active": true },
+              { "name": "bob", "type": "user", "permission": "REPO_ADMIN", "active": true }
+            ],
+            "groups": [],
+            "defaultPermissionKnown": true,
+            "publicAccess": false
+          },
+          "admins": { "users": ["alice", "bob"], "count": 2, "complete": true },
+          "available": {
+            "defaultBranch": true, "pullRequestSettings": true, "mergeStrategies": true,
+            "branchRestrictions": true, "requiredBuilds": true, "hooks": true,
+            "branches": true, "branchAges": true, "files": true, "permissions": true, "admins": true
+          }
+        },
+        {
+          "slug": "legacy-billing",
+          "name": "legacy-billing",
+          "projectKey": "PLAT",
+          "fullName": "PLAT/legacy-billing",
+          "public": true,
+          "archived": false,
+          "forkable": true,
+          "defaultBranch": "refs/heads/master",
+          "defaultBranchDisplay": "master",
+          "empty": false,
+          "pullRequestSettings": {
+            "requiredApprovers": 0,
+            "requiredAllApprovers": false,
+            "requiredAllTasksComplete": false,
+            "requiredSuccessfulBuilds": 0,
+            "unapproveOnUpdate": false,
+            "mergeStrategies": [
+              { "id": "no-ff", "name": "Merge commit", "enabled": true },
+              { "id": "squash", "name": "Squash", "enabled": true }
+            ],
+            "defaultStrategy": "no-ff"
+          },
+          "branchRestrictions": [],
+          "requiredBuilds": [],
+          "hooks": [
+            { "key": "com.example.jira-issue-check", "name": "Jira issue key check", "type": "PRE_RECEIVE", "enabled": true, "configured": true, "scope": "REPOSITORY" }
+          ],
+          "branches": [
+            { "id": "refs/heads/master", "displayId": "master", "isDefault": true, "latestCommit": "c01dbee", "latestCommitEpoch": 1766732400, "ageDays": 22 },
+            { "id": "refs/heads/spike/rewrite", "displayId": "spike/rewrite", "isDefault": false, "latestCommit": "0ldc0de", "latestCommitEpoch": 1704110400, "ageDays": 745 },
+            { "id": "refs/heads/hotfix/2023-tax", "displayId": "hotfix/2023-tax", "isDefault": false, "latestCommit": "a11dead", "latestCommitEpoch": 1701432000, "ageDays": 776 }
+          ],
+          "files": {
+            "securityPolicyPaths": [],
+            "probed": ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md", "SECURITY.rst", "SECURITY.txt", "SECURITY"]
+          },
+          "permissions": {
+            "users": [{ "name": "dana", "type": "user", "permission": "REPO_ADMIN", "active": true }],
+            "groups": [],
+            "defaultPermission": "PROJECT_WRITE",
+            "defaultPermissionKnown": true,
+            "publicAccess": true
+          },
+          "admins": { "users": ["alice", "dana"], "count": 2, "complete": true },
+          "available": {
+            "defaultBranch": true, "pullRequestSettings": true, "mergeStrategies": true,
+            "branchRestrictions": true, "requiredBuilds": true, "hooks": true,
+            "branches": true, "branchAges": true, "files": true, "permissions": true, "admins": true
+          }
+        },
+        {
+          "slug": "vendor-mirror",
+          "name": "vendor-mirror",
+          "projectKey": "PLAT",
+          "fullName": "PLAT/vendor-mirror",
+          "public": false,
+          "archived": false,
+          "forkable": false,
+          "defaultBranch": "refs/heads/main",
+          "defaultBranchDisplay": "main",
+          "empty": false,
+          "pullRequestSettings": {
+            "requiredApprovers": 0,
+            "requiredAllApprovers": false,
+            "requiredAllTasksComplete": false,
+            "requiredSuccessfulBuilds": 0,
+            "unapproveOnUpdate": false,
+            "mergeStrategies": []
+          },
+          "branchRestrictions": [],
+          "requiredBuilds": [],
+          "hooks": [],
+          "branches": [],
+          "files": { "securityPolicyPaths": [], "probed": [] },
+          "permissions": { "users": [], "groups": [], "defaultPermissionKnown": false },
+          "admins": { "users": [], "count": 0, "complete": false },
+          "available": {
+            "defaultBranch": true, "pullRequestSettings": false, "mergeStrategies": false,
+            "branchRestrictions": false, "requiredBuilds": false, "hooks": false,
+            "branches": false, "branchAges": false, "files": false, "permissions": false, "admins": false
+          },
+          "errors": [
+            "pull request settings: GET /api/1.0/projects/PLAT/repos/vendor-mirror/settings/pull-requests: 403 You are not permitted to access this resource",
+            "required builds API unavailable (Bitbucket 8.0+ with the required-builds feature); merge-check rule reports MANUAL"
+          ]
+        }
+      ]
+    }
+  ]
+}
