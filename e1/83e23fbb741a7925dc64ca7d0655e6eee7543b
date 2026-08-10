@@ -1,0 +1,85 @@
+internal/checks/policies/bitbucketdc/cis-1.1.8/check_test.rego
+  s_faac4eacbd0dbb::t_47c4c52ab24bd4 1-69
+internal/checks/policies/bitbucketdc/cis-1.3.1/check_test.rego
+  s_faac4eacbd0dbb::t_32a092cbb0eac0 1-91
+internal/checks/policies/bitbucketdc/cis-1.3.3/check_test.rego
+  s_faac4eacbd0dbb::t_32a092cbb0eac0 1-68
+.github/workflows/ci.yml
+  s_faac4eacbd0dbb::t_3e5c328b34ef41 73-79,122-128
+  s_faac4eacbd0dbb::t_51a4954901fe0d 18-27,37,41,44-62,64-72,82,111-121,129,133-149,167-210
+internal/checks/policies/bitbucketdc/cis-1.1.6/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-15
+CONTRIBUTING.md
+  s_faac4eacbd0dbb::t_ae55791bf31824 13
+internal/checks/policies/bitbucketdc/cis-1.1.3/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-34
+internal/checks/policies/bitbucketdc/cis-1.1.11/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-21
+internal/checks/policies/bitbucketdc/cis-1.1.16/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-55
+internal/checks/policies/lib/common_test.rego
+  s_faac4eacbd0dbb::t_0fcf8423b4f76f 1-73
+internal/checks/policies/bitbucketdc/cis-1.3.9/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-14
+.github/workflows/links.yml
+  s_faac4eacbd0dbb::t_4c852a14adb0b9 36
+internal/checks/policies/bitbucketdc/cis-1.1.13/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-40
+internal/checks/policies/lib/fixtures_test.rego
+  s_faac4eacbd0dbb::t_92c1fd41242090 1-80
+internal/cli/examples_test.go
+  s_faac4eacbd0dbb::t_394a0293a7d28f 1-4,6-100,110
+  s_faac4eacbd0dbb::t_1fa220d8b486f6 5,101-109
+internal/checks/registry.go
+  s_faac4eacbd0dbb::t_484cb1989c8896 122-130
+  s_faac4eacbd0dbb::t_9c90b2d01148b6 16-31
+Makefile
+  s_faac4eacbd0dbb::t_ae55791bf31824 53-73,79
+internal/checks/policies/bitbucketdc/cis-1.1.15/check_test.rego
+  s_faac4eacbd0dbb::t_fab9634ba5df34 1-89
+internal/checks/policies/bitbucketdc/cis-1.1.9/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-59
+internal/checks/policies/bitbucketdc/cis-1.1.12/check_test.rego
+  s_faac4eacbd0dbb::t_47c4c52ab24bd4 1-69
+internal/checks/registry_test.go
+  s_faac4eacbd0dbb::t_f2d44ffa1dd221 160-165,167-178
+  s_faac4eacbd0dbb::t_33001e945b71ab 166
+internal/checks/policies/bitbucketdc/cis-1.1.17/check_test.rego
+  s_faac4eacbd0dbb::t_d38cbc3fd66400 40-48
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-39
+internal/checks/policies/bitbucketdc/cis-1.1.4/check_test.rego
+  s_faac4eacbd0dbb::t_5ccba732c836f2 1-27
+internal/checks/policies/bitbucketdc/cis-1.2.3/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-13
+examples/config.yaml
+  s_faac4eacbd0dbb::t_438f9a10b2539a 64-75
+internal/checks/policies/bitbucketdc/cis-1.2.2/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-14
+internal/checks/policies/bitbucketdc/cis-1.3.5/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-14
+internal/checks/policies/bitbucketdc/cis-1.2.1/check_test.rego
+  s_faac4eacbd0dbb::t_972e97e3f1fc1f 1-48
+internal/checks/policies/bitbucketdc/cis-1.3.8/check_test.rego
+  s_faac4eacbd0dbb::t_32a092cbb0eac0 1-83
+internal/checks/policies/bitbucketdc/cis-1.3.7/check_test.rego
+  s_faac4eacbd0dbb::t_47c4c52ab24bd4 1-54
+internal/scm/snapshot_test.go
+  s_faac4eacbd0dbb::t_3ae1e117817ac8 41
+  s_faac4eacbd0dbb::t_abad1a9e90a2ca 1-40,42-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "e183e23fbb741a7925dc64ca7d0655e6eee7543b",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
