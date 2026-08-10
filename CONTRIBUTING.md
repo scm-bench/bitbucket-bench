@@ -65,6 +65,19 @@ a file to add, or an explicit statement that nothing applies. A test enforces
 this. Vague remediation is worse than none, because it wastes the reader's time
 before they discover it does not help.
 
+Write it twice, at two lengths:
+
+- `remediation` — the full paragraph. The settings path, the project-level
+  variant that covers every repository at once, the exemptions worth granting,
+  and the config key that changes what the control counts.
+- `fixSummary` — the first move in one imperative line, under 100 characters,
+  still naming the place: `Enable "Prevent deletion" at Repository settings ->
+  Branch permissions.` This is what the findings list prints beside the verdict,
+  so it has to be actionable on its own; the paragraph waits in its own section
+  at the end of the report.
+
+Both are checked by `TestRemediationSaysWhereToAct`.
+
 Then add the control to the coverage table in both READMEs.
 
 ## Testing

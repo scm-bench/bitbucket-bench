@@ -9,6 +9,7 @@
   "title": "Ensure inactive branches are periodically reviewed and removed",
   "description": "Abandoned branches hold unreviewed code and stale dependencies while still being reachable and mergeable. They also hide genuinely active work in a long branch list.",
   "remediation": "Review the listed branches and delete the ones that are finished or abandoned: Repository -> Branches -> (branch) -> Delete, or push a deletion with `git push origin --delete <branch>`. To keep this from recurring, enable Repository settings -> Pull requests -> \"Delete source branch after merging\". Adjust the window with thresholds.staleBranchDays in scm-bench's config.",
+  "fixSummary": "Delete the branches that are finished at Repository -> Branches -> (branch) -> Delete.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

@@ -9,6 +9,7 @@
   "title": "Ensure any change to code receives approval of two strongly authenticated users",
   "description": "Requiring two approvals means no single account — compromised, careless, or malicious — can land code on its own. One approver is a rubber stamp waiting to happen; two makes collusion or a single stolen credential insufficient.",
   "remediation": "Repository settings -> Pull requests -> Merge checks: enable \"Minimum approvals\" and set it to at least 2. To cover every repository at once, set the same check at Project settings -> Pull requests -> Merge checks, which repositories inherit unless they override it.",
+  "fixSummary": "Set \"Minimum approvals\" to at least 2 at Repository settings -> Pull requests -> Merge checks.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

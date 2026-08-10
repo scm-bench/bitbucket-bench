@@ -9,6 +9,7 @@
   "title": "Ensure default repository access is restricted",
   "description": "Blanket grants are the quietest way for access to spread: nobody requests them, nobody reviews them, and they apply to accounts created long after the decision was made. Access should be granted deliberately, to named people or groups.",
   "remediation": "Project settings -> Project permissions: clear the default permission granted to all licensed users, or reduce it to Read, and grant Write/Admin to specific groups instead. To remove anonymous access, uncheck \"Public access\" at Repository settings -> Repository details and at Project settings -> Project details. For instances that intentionally publish code, set allowPublicRepositories: true in scm-bench's config.",
+  "fixSummary": "Clear the default permission for all licensed users at Project settings -> Project permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-project-permissions-776639801.html"

@@ -19,6 +19,14 @@ import (
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
 
+// The table report wraps to console.Width, which reads COLUMNS. Pinning it
+// keeps assertions about the rendered output from depending on the width of
+// whatever terminal the suite runs under.
+func TestMain(m *testing.M) {
+	os.Setenv("COLUMNS", "80")
+	os.Exit(m.Run())
+}
+
 // writeSnapshotFixture saves a snapshot with one badly configured repository,
 // so the CLI has something with a known verdict to report on.
 func writeSnapshotFixture(t *testing.T) string {
@@ -283,10 +291,10 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
 
-	// The section names follow kube-bench's shape: findings, then remediations,
-	// then a summary. "Branch permissions" is the remediation text, which has to
-	// survive being moved out of the findings list into its own section.
-	for _, want := range []string{"SCORE", "== Failed", "PRJ/app", "== Remediations", "Branch permissions", "== Summary", "findings FAIL"} {
+	// The summary leads, then the findings, then the remediations. "Branch
+	// permissions" is the remediation text, which has to survive being moved
+	// out of the findings list into its own section.
+	for _, want := range []string{"SCORE", "10 failed", "== Failed", "PRJ/app", "== Remediations", "Branch permissions"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}

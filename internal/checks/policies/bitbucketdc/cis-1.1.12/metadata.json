@@ -9,6 +9,7 @@
   "title": "Ensure verification of signed commits for new changes before merging",
   "description": "Git commit authorship is self-asserted: anyone who can push can claim to be anyone. Verifying signatures at the server is what makes the audit trail mean something.",
   "remediation": "Bitbucket Data Center has no built-in signature check, so install a hook add-on that verifies GPG or SSH signatures (Atlassian Marketplace, e.g. a \"commit signature verification\" pre-receive hook), then enable it at Repository settings -> Hooks. Once installed, add its plugin key to scm-bench's signatureHookKeys config so this check recognises it.",
+  "fixSummary": "Install a signature-verifying hook add-on and enable it at Repository settings -> Hooks.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-repository-hooks-776639836.html"

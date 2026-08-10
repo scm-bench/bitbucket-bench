@@ -87,6 +87,21 @@ func TestRemediationSaysWhereToAct(t *testing.T) {
 			t.Errorf("%s: no references", c.ID)
 		}
 	}
+
+	// The summary rides beside the verdict, so it has to earn its line: one
+	// sentence, still naming a place, and short enough to survive wrapping into
+	// a narrow terminal without pushing the finding off the screen.
+	for _, c := range bundle.Checks {
+		if len(c.FixSummary) > 100 {
+			t.Errorf("%s: fixSummary is %d characters, want at most 100: %q", c.ID, len(c.FixSummary), c.FixSummary)
+		}
+		if !namesALocation(c.FixSummary) {
+			t.Errorf("%s: fixSummary does not say where to act: %q", c.ID, c.FixSummary)
+		}
+		if strings.Contains(c.FixSummary, "\n") {
+			t.Errorf("%s: fixSummary must be a single line: %q", c.ID, c.FixSummary)
+		}
+	}
 }
 
 func TestChecksAreSortedByBenchmarkNumber(t *testing.T) {

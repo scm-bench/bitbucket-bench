@@ -11,6 +11,10 @@ package console
 import (
 	"fmt"
 	"io"
+	"os"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // ANSI codes, applied only when the destination is a terminal.
@@ -105,3 +109,94 @@ func Pluralize(n int, noun string) string {
 // bare "[INFO]": the tag column exists to be scanned down, and a column of tags
 // attached to nothing makes that harder, not easier.
 func (w Writer) Blank() { fmt.Fprintln(w.W) }
+
+// Width limits are deliberately narrow. 80 is what a pipe, a CI log and an
+// unconfigured terminal all are; 100 is where a line stops being comfortable to
+// read regardless of how wide the window is.
+const (
+	fallbackWidth = 80
+	minWidth      = 60
+	maxWidth      = 100
+)
+
+// Width reports how wide a rendered line may be.
+//
+// It reads COLUMNS rather than asking the kernel for the window size. The ioctl
+// is not portable across the three operating systems this ships on, and
+// golang.org/x/term is not worth adding to a supply chain security tool for one
+// integer — the same trade already made for terminal detection in the CLI. The
+// cost is that an unexported COLUMNS gets 80, which is the right answer for a
+// pipe and a safe one for a terminal; a reader who wants their full window can
+// export it.
+func Width() int {
+	w := fallbackWidth
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		w = n
+	}
+	if w < minWidth {
+		return minWidth
+	}
+	if w > maxWidth {
+		return maxWidth
+	}
+	return w
+}
+
+// Wrap breaks s into lines of at most width columns, returning at least one
+// line. The caller supplies the width already reduced by whatever prefix and
+// indent it intends to put in front, and indents the continuations itself, so
+// the text keeps a straight left edge.
+//
+// It must be called before any colour is applied: an escape sequence is bytes
+// the reader never sees, and counting it as width is what made the request
+// trace's columns drift before it padded by hand.
+//
+// A word longer than width is left whole on its own line rather than split. The
+// long words here are settings paths, config keys and URLs, and a reader who
+// cannot select one of those in a double click has lost more than the ragged
+// right margin cost them.
+func Wrap(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	if width <= 0 {
+		return []string{strings.Join(words, " ")}
+	}
+
+	var lines []string
+	line := words[0]
+	used := utf8.RuneCountInString(line)
+	for _, word := range words[1:] {
+		n := utf8.RuneCountInString(word)
+		if used+1+n > width {
+			lines = append(lines, line)
+			line, used = word, n
+			continue
+		}
+		line += " " + word
+		used += 1 + n
+	}
+	return append(lines, line)
+}
+
+// TagWidth is what a rendered tag and its trailing space occupy, e.g. "[FAIL] ".
+// Wrapping has to subtract it, and it is a constant here rather than a literal
+// at each call site because the tag column is a contract.
+const TagWidth = 7
+
+// Wrapped writes s across as many tagged lines as it needs. The first carries
+// prefix, every continuation carries prefixWidth spaces in its place, and the
+// tag column is preserved on all of them — a continuation is still a line of
+// the report, and `grep '^\[' ` must not have holes in it.
+//
+// prefix may be coloured; prefixWidth is its width on screen, which is why the
+// caller passes it rather than having it measured.
+func (w Writer) Wrapped(t Tag, width int, prefix string, prefixWidth int, s string) {
+	lines := Wrap(s, width-TagWidth-prefixWidth)
+	w.Line(t, "%s%s", prefix, lines[0])
+	pad := strings.Repeat(" ", prefixWidth)
+	for _, line := range lines[1:] {
+		w.Line(Info, "%s%s", pad, line)
+	}
+}

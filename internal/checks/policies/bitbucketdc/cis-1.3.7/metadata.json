@@ -9,6 +9,7 @@
   "title": "Ensure a minimum number of administrators are set for the repository",
   "description": "A repository with one administrator is a repository whose settings become unmaintainable the moment that person is unavailable — and whose branch protections nobody else can restore.",
   "remediation": "Repository settings -> Repository permissions: grant \"Admin\" to at least one more trusted maintainer, or grant \"Admin\" at Project settings -> Project permissions so a group covers all repositories in the project. Adjust the minimum with thresholds.minRepositoryAdmins in scm-bench's config.",
+  "fixSummary": "Grant \"Admin\" to another trusted maintainer at Repository settings -> Repository permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html"

@@ -9,6 +9,7 @@
   "title": "Ensure branch deletions are denied",
   "description": "Deleting a protected branch removes both the code and the protections attached to it. Recreating it afterwards restores neither the history nor the restrictions.",
   "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent deletion\". Configure it at Project settings -> Branch permissions to cover every repository in the project.",
+  "fixSummary": "Enable \"Prevent deletion\" at Repository settings -> Branch permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

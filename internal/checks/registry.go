@@ -81,8 +81,16 @@ type Metadata struct {
 	Description string `json:"description"`
 	// Remediation names the exact UI path an operator has to walk. This is the
 	// part of a finding that actually gets acted on, so it stays concrete.
-	Remediation string   `json:"remediation"`
-	References  []string `json:"references,omitempty"`
+	Remediation string `json:"remediation"`
+	// FixSummary is Remediation's first move, in one imperative line: the thing
+	// to do, and where. Remediation keeps the rest — the project-wide variant,
+	// the exemptions worth granting, the config key that changes what the
+	// control counts — because that is a paragraph, and a paragraph under every
+	// verdict is what turned this report into prose you had to read to find the
+	// next finding. The summary rides with the verdict; the paragraph waits in
+	// its own section.
+	FixSummary string   `json:"fixSummary"`
+	References []string `json:"references,omitempty"`
 }
 
 // Check couples metadata with the directory it was loaded from.
@@ -192,6 +200,9 @@ func (c Check) validate() error {
 	}
 	if c.Remediation == "" {
 		return fmt.Errorf("remediation is required")
+	}
+	if c.FixSummary == "" {
+		return fmt.Errorf("fixSummary is required")
 	}
 	if len(c.Platforms) == 0 {
 		return fmt.Errorf("at least one platform is required")

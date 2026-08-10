@@ -9,6 +9,7 @@
   "title": "Ensure previous approvals are dismissed when new changes are pushed",
   "description": "Without this, an author can collect approvals on a harmless diff and then push anything they like to the same branch before merging. The approval no longer refers to the code that ships.",
   "remediation": "Repository settings -> Pull requests: enable \"Unapprove automatically on new changes\" (labelled \"Reset approvals when the source branch is modified\" on some versions). Set it at Project settings -> Pull requests to apply it project-wide.",
+  "fixSummary": "Enable \"Unapprove automatically on new changes\" at Repository settings -> Pull requests.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

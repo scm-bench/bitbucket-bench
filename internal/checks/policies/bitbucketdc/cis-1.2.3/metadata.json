@@ -9,6 +9,7 @@
   "title": "Ensure repository deletion is limited to specific users",
   "description": "Deferred to a later release: Bitbucket does not expose deletion as a permission of its own, so any verdict would be a restatement of the administrator counts already reported by CIS-1.3.3 and CIS-1.3.7.",
   "remediation": "Reduce the number of accounts holding repository or project Admin under Repository settings -> Repository permissions and Project settings -> Project permissions. For repositories that must not be lost, keep an independent backup or mirror, since a deletion by an administrator cannot be prevented by configuration alone.",
+  "fixSummary": "Reduce who holds Admin at Repository settings -> Repository permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

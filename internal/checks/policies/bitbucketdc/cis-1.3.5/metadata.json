@@ -9,6 +9,7 @@
   "title": "Ensure multi-factor authentication is enforced for the organization",
   "description": "Not observable from Bitbucket Data Center: authentication is delegated to an external identity provider, and Bitbucket's API exposes nothing about factors. Reported as MANUAL because a verdict from Bitbucket data alone would be invented.",
   "remediation": "Enforce MFA at the identity provider that fronts Bitbucket: require it for the SAML/OIDC application in your IdP, or enable two-step verification in Crowd. Then close the bypass paths — Administration -> Authentication: disable direct Bitbucket login where SSO is mandatory, and require SSH keys or HTTP access tokens for Git operations so passwords cannot be used to skip the IdP.",
+  "fixSummary": "Require MFA in the IdP, then disable direct login at Administration -> Authentication.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html"

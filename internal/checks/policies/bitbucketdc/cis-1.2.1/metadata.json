@@ -9,6 +9,7 @@
   "title": "Ensure the repository publishes a security policy (SECURITY.md)",
   "description": "A security policy tells whoever finds a flaw where to send it and what to expect. Without one, reports either go nowhere or go public.",
   "remediation": "Add a SECURITY.md at the repository root (or under .github/) on the default branch, stating the contact address for reports, which versions are supported, and the expected response time. Adjust which paths count with securityPolicyPaths in scm-bench's config.",
+  "fixSummary": "Add a SECURITY.md at the repository root on the default branch.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

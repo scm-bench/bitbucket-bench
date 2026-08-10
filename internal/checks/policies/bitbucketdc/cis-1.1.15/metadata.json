@@ -9,6 +9,7 @@
   "title": "Ensure pushing or merging of new code is restricted to trusted users",
   "description": "Every approval rule configured on pull requests is worth nothing if the same people can push straight to the branch instead. This is the restriction that makes the rest of the review controls binding.",
   "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent changes without a pull request\". Grant exemptions only to build service accounts that genuinely need them, since each exemption reopens the bypass. Configure it at Project settings -> Branch permissions to cover every repository in the project.",
+  "fixSummary": "Enable \"Prevent changes without a pull request\" at Repository settings -> Branch permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

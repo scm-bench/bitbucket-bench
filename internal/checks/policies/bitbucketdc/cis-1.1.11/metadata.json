@@ -9,6 +9,7 @@
   "title": "Ensure all open comments are resolved before merging",
   "description": "Reviewer objections raised as tasks should not be mergeable away. Enforcing task completion turns review comments into something that has to be answered rather than outlived.",
   "remediation": "Repository settings -> Pull requests -> Merge checks: enable \"All tasks resolved\". Set it at Project settings -> Pull requests -> Merge checks to apply it project-wide.",
+  "fixSummary": "Enable \"All tasks resolved\" at Repository settings -> Pull requests -> Merge checks.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

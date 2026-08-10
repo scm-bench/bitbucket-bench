@@ -60,7 +60,11 @@ type Finding struct {
 	Details     string   `json:"details"`
 	Evidence    []string `json:"evidence,omitempty"`
 	Remediation string   `json:"remediation"`
-	References  []string `json:"references,omitempty"`
+	// FixSummary is Remediation's first move in one line. The table report
+	// prints it beside the verdict and keeps the full paragraph for its own
+	// section; consumers that want everything should read Remediation.
+	FixSummary string   `json:"fixSummary,omitempty"`
+	References []string `json:"references,omitempty"`
 	// Automated is false for controls that are documented as unanswerable by
 	// the API and always report MANUAL.
 	Automated bool `json:"automated"`
@@ -262,6 +266,7 @@ func (e *Engine) evaluateOne(ctx context.Context, pq rego.PreparedEvalQuery, che
 		ResourceType: resourceType,
 		Description:  check.Description,
 		Remediation:  check.Remediation,
+		FixSummary:   check.FixSummary,
 		References:   check.References,
 		Automated:    check.Automated,
 	}

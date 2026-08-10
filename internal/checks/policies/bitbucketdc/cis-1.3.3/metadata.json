@@ -9,6 +9,7 @@
   "title": "Ensure a minimum number of administrators are set for the organization",
   "description": "Instance administrators can change any permission, bypass any branch restriction, and read any repository. Too few is a lockout risk; too many multiplies the number of accounts whose compromise ends the discussion.",
   "remediation": "Administration -> Global permissions: review everyone holding \"System Admin\" or \"Admin\" and downgrade those who no longer need it. Keep at least two so no single lost account locks out the instance. Prefer granting project-level administration over global rights. Adjust the range with thresholds.minOrgAdmins and thresholds.maxOrgAdmins in scm-bench's config.",
+  "fixSummary": "Review who holds \"System Admin\" or \"Admin\" at Administration -> Global permissions.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/global-permissions-776640369.html"

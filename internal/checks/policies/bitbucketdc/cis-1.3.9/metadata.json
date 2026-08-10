@@ -9,6 +9,7 @@
   "title": "Ensure the organization is verified",
   "description": "Not applicable to Bitbucket Data Center: domain verification badges exist on hosted platforms to prove ownership of a public organization identity, which a self-hosted instance does not have. Carried as an explicit NA so the mapping is documented rather than missing.",
   "remediation": "No action applies to a self-hosted instance. The nearest equivalent is proving the identity of the server itself: serve Bitbucket over TLS with a certificate issued to your own verified domain.",
+  "fixSummary": "No action applies to a self-hosted instance; serve Bitbucket over TLS on your own domain.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"
   ]

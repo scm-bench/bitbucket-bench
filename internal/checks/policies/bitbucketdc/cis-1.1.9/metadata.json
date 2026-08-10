@@ -9,6 +9,7 @@
   "title": "Ensure all checks have passed before merging new code",
   "description": "A pipeline that runs but cannot block a merge is decoration. Tests, linters, and security scans only reduce risk if a red result stops the merge.",
   "remediation": "Repository settings -> Required builds -> Add required build: name the CI plan key and set the ref matcher to the default branch. Alternatively, Repository settings -> Pull requests -> Merge checks -> \"Minimum successful builds\" set to at least 1. Required builds is the stronger option because it names which build must pass, not merely how many.",
+  "fixSummary": "Add the CI plan key at Repository settings -> Required builds, matched to the default branch.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"
