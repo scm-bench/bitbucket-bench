@@ -1,0 +1,46 @@
+internal/diff/diff.go
+  s_faac4eacbd0dbb::t_bbe3d4eb0927ed 217-225
+internal/report/report_test.go
+  s_faac4eacbd0dbb::t_ca785fc1e6c7b2 94,120,168,200,223,398,427,445
+  s_faac4eacbd0dbb::t_050c805f398435 19,21-26
+internal/cli/diff_test.go
+  s_faac4eacbd0dbb::t_82b62cf2341a31 201-202
+internal/diff/render.go
+  s_faac4eacbd0dbb::t_03d5bcf613223f 116
+internal/checks/registry.go
+  s_faac4eacbd0dbb::t_7f07b9ef7adaa3 84-85
+internal/report/sarif.go
+  s_faac4eacbd0dbb::t_a9f4702212531c 132,142,191,202,222,224,237,249
+CONTRIBUTING.md
+  s_faac4eacbd0dbb::t_4d37d2f9fc61ea 52,56-60
+README.zh-CN.md
+  s_faac4eacbd0dbb::t_ac6d1c6a28e128 107-109,114,509
+  s_faac4eacbd0dbb::t_df50322aab7d29 349
+internal/report/json.go
+  s_faac4eacbd0dbb::t_20004a3364bb49 10-11
+internal/report/report.go
+  s_faac4eacbd0dbb::t_a9f4702212531c 57
+README.md
+  s_faac4eacbd0dbb::t_82f8ae2a1e9fba 391,401-406,583
+internal/report/table.go
+  s_faac4eacbd0dbb::t_a9f4702212531c 195,229
+internal/engine/engine.go
+  s_faac4eacbd0dbb::t_bbe3d4eb0927ed 59-61,257-266
+  s_faac4eacbd0dbb::t_7f07b9ef7adaa3 62-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "506c6a010ca0fa17dc3c40e826ef836b4a1c165b",
+  "prompts": {},
+  "sessions": {
+    "s_faac4eacbd0dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fb120971-0786-4352-b6bd-fe9a65406b62",
+        "model": "claude-opus-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
