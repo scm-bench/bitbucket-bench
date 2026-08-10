@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -234,9 +235,17 @@ func TestFetchBuildsCompleteSnapshot(t *testing.T) {
 		t.Errorf("security policy paths = %v", repo.Files.SecurityPolicyPaths)
 	}
 
-	// Repository REPO_ADMIN plus project PROJECT_ADMIN, both resolved.
-	if repo.Admins.Count != 2 || !repo.Admins.Complete {
-		t.Errorf("repository admins = %+v, want 2 complete", repo.Admins)
+	// Repository REPO_ADMIN (carol), project PROJECT_ADMIN (alice) and the
+	// instance grants (alice as SYS_ADMIN, bob through bitbucket-admins), all
+	// resolved and deduplicated. The instance half is the part that used to be
+	// dropped, which is why this was 2.
+	if repo.Admins.Count != 3 || !repo.Admins.Complete {
+		t.Errorf("repository admins = %+v, want 3 complete", repo.Admins)
+	}
+	for _, want := range []string{"alice", "bob", "carol"} {
+		if !slices.Contains(repo.Admins.Users, want) {
+			t.Errorf("repository admins = %v, missing %s", repo.Admins.Users, want)
+		}
 	}
 
 	for key, want := range map[string]bool{
@@ -835,5 +844,242 @@ func TestNarrowedScanFailsWhenTheProjectCannotBeRead(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "PRJ") {
 		t.Errorf("error should name the project: %v", err)
+	}
+}
+
+// A repository administered only by the instance's administrators has
+// administrators. Before instance grants were unioned in, its count was zero
+// and CIS-1.3.7 reported "Only 0 administrator(s) can manage this repository" —
+// a confident wrong answer, which is the one output this project treats as
+// worse than a crash.
+func TestRepositoryAdminsIncludeInstanceAdministrators(t *testing.T) {
+	f := standardInstance(t)
+	// Nobody holds admin on the repository or the project. The only
+	// administrators are alice (SYS_ADMIN) and bob (via the bitbucket-admins
+	// group), both from the global permission table.
+	f.json("/api/1.0/projects/PRJ/permissions/users", pageOf(`{"user":{"name":"carol","active":true},"permission":"PROJECT_READ"}`))
+	f.json("/api/1.0/projects/PRJ/repos/app/permissions/users", pageOf(``))
+	f.json("/api/1.0/projects/PRJ/repos/app/permissions/groups", pageOf(``))
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+
+	if !repo.Admins.Complete {
+		t.Fatalf("admins.Complete = false, want true: every grant was readable")
+	}
+	if repo.Admins.Count != 2 {
+		t.Errorf("admins.Count = %d (%v), want 2 (alice, bob)", repo.Admins.Count, repo.Admins.Users)
+	}
+	for _, want := range []string{"alice", "bob"} {
+		if !slices.Contains(repo.Admins.Users, want) {
+			t.Errorf("admins.Users = %v, missing %s", repo.Admins.Users, want)
+		}
+	}
+	if !slices.Contains(repo.Admins.Groups, "bitbucket-admins") {
+		t.Errorf("admins.Groups = %v, missing bitbucket-admins", repo.Admins.Groups)
+	}
+}
+
+// The other half of the same change: when the instance grants cannot be read,
+// the repository's administrator set is a lower bound, and saying so is what
+// turns a wrong FAIL into an honest MANUAL.
+func TestRepositoryAdminsAreIncompleteWhenInstanceGrantsAreUnreadable(t *testing.T) {
+	f := standardInstance(t)
+	f.handle("/api/1.0/admin/permissions/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+
+	if repo.Admins.Complete {
+		t.Error("admins.Complete = true, but the instance grants could not be read")
+	}
+	if repo.Available["admins"] {
+		t.Error(`Available["admins"] = true, want false so the rule reports MANUAL`)
+	}
+}
+
+// A project administrator administers every repository in the project, so a
+// project grant table that could not be read leaves each of those repositories
+// with an administrator set that is a lower bound. It used to come back empty
+// and indistinguishable from a project that grants nothing, and the
+// repositories below reported a confident FAIL built on a count nobody had
+// been able to take.
+func TestUnreadableProjectPermissionsMakeRepositoryAdminsIncomplete(t *testing.T) {
+	for _, tc := range []struct{ name, path string }{
+		{"users", "/api/1.0/projects/PRJ/permissions/users"},
+		{"groups", "/api/1.0/projects/PRJ/permissions/groups"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := standardInstance(t)
+			f.handle(tc.path, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+			})
+
+			_, snapshot := fetchSnapshot(t, f)
+			repo := snapshot.Projects[0].Repositories[0]
+
+			if repo.Admins.Complete {
+				t.Error("admins.Complete = true, but a project grant table was unreadable")
+			}
+			if repo.Available["permissions"] {
+				t.Error(`Available["permissions"] = true, want false so the rule reports MANUAL`)
+			}
+			if repo.Available["admins"] {
+				t.Error(`Available["admins"] = true, want false`)
+			}
+		})
+	}
+}
+
+// The default-permission probe walks from most permissive down, so a hit is
+// only the whole answer if every probe above it answered. When the
+// PROJECT_ADMIN probe fails and PROJECT_WRITE says yes, the real default could
+// still be PROJECT_ADMIN; reporting PROJECT_WRITE as certain understates the
+// grant, and DefaultPermissionKnown exists precisely to say "this is a lower
+// bound" instead.
+func TestPartialDefaultPermissionProbeIsNotReportedAsKnown(t *testing.T) {
+	f := standardInstance(t)
+	// 401 rather than 5xx: after the preflight it means "you may not read
+	// this", which is the realistic way this probe fails, and it is not
+	// retried — a 500 here costs the whole suite six seconds of backoff to
+	// prove the same point.
+	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_ADMIN/all", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+	})
+	f.json("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", `{"permitted":true}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	perms := snapshot.Projects[0].Permissions
+
+	if perms.DefaultPermission != "PROJECT_WRITE" {
+		t.Errorf("DefaultPermission = %q, want PROJECT_WRITE", perms.DefaultPermission)
+	}
+	if perms.DefaultPermissionKnown {
+		t.Error("DefaultPermissionKnown = true, but the PROJECT_ADMIN probe never answered")
+	}
+	if snapshot.Projects[0].Repositories[0].Permissions.DefaultPermissionKnown {
+		t.Error("the repository inherited DefaultPermissionKnown = true")
+	}
+}
+
+// The ordinary case must keep working: every probe answers, so the first hit
+// is the answer and it is known.
+func TestCompleteDefaultPermissionProbeIsKnown(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", `{"permitted":true}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	perms := snapshot.Projects[0].Permissions
+
+	if perms.DefaultPermission != "PROJECT_WRITE" || !perms.DefaultPermissionKnown {
+		t.Errorf("got (%q, %v), want (PROJECT_WRITE, true)", perms.DefaultPermission, perms.DefaultPermissionKnown)
+	}
+}
+
+// Instance administrator rights are usually granted to a group, not to named
+// users. Reading them off the raw grant table and keeping only Type == "user"
+// dropped everyone in that group from HasRepositoryAccess — and since
+// CIS-1.3.1 only reviews accounts that can reach code, a dormant instance
+// administrator went unreported. That is the account on the instance with the
+// most access and the one most worth finding.
+func TestInstanceAdminsGrantedThroughAGroupCountAsHavingAccess(t *testing.T) {
+	f := standardInstance(t)
+	// dormant is only ever seen as a member of bitbucket-admins, which holds
+	// global ADMIN. No user grant anywhere names them.
+	f.json("/api/1.0/admin/groups/more-members", pageOf(`{"name":"dormant","displayName":"Dormant","active":true}`))
+	f.json("/api/1.0/admin/users", pageOf(`{"name":"dormant","displayName":"Dormant","active":true,"lastAuthenticationTimestamp":1500000000000}`))
+
+	_, snapshot := fetchSnapshot(t, f)
+
+	var found bool
+	for _, u := range snapshot.Organization.Users {
+		if u.Name != "dormant" {
+			continue
+		}
+		found = true
+		if !u.HasRepositoryAccess {
+			t.Error("HasRepositoryAccess = false for an instance administrator granted through a group")
+		}
+	}
+	if !found {
+		t.Fatalf("user directory did not contain dormant: %+v", snapshot.Organization.Users)
+	}
+}
+
+// --project and --repository are both additive includes, and they used to
+// share one filter. `--project PLATFORM --repository OTHER/app` therefore
+// scanned nothing in PLATFORM: naming any repository switched the filter on
+// for every project, and PLATFORM had no entry in it. The project was still
+// fetched and still landed in the snapshot, just empty — so its controls did
+// not report MANUAL, they disappeared, and what came back read as a clean scan
+// of a project nobody had looked at.
+func TestProjectAndRepositoryFiltersAreAdditive(t *testing.T) {
+	whole := targets{
+		projects:      map[string]string{"platform": "PLATFORM", "other": "OTHER"},
+		wholeProjects: map[string]bool{"platform": true},
+		repositories:  map[string]bool{"other/app": true},
+	}
+	for _, tc := range []struct {
+		project, slug string
+		want          bool
+	}{
+		// Named by --project: everything under it is in scope.
+		{"PLATFORM", "api", true},
+		{"PLATFORM", "web", true},
+		// Named by --repository: only that repository.
+		{"OTHER", "app", true},
+		{"OTHER", "unrelated", false},
+		// Bitbucket's REST paths are case-insensitive, so the comparison is too.
+		{"platform", "api", true},
+		{"other", "APP", true},
+	} {
+		if got := whole.selects(tc.project, tc.slug); got != tc.want {
+			t.Errorf("selects(%q, %q) = %v, want %v", tc.project, tc.slug, got, tc.want)
+		}
+	}
+
+	// No --repository at all leaves every repository of the named projects in.
+	none := targets{projects: map[string]string{"p": "P"}, wholeProjects: map[string]bool{"p": true}}
+	if !none.selects("P", "anything") {
+		t.Error("with no --repository, every repository of a named project is in scope")
+	}
+}
+
+// `-p PRJ -r prj/app` names one project, not two. Treating the spellings as
+// distinct fetched it twice, put it in the snapshot twice, and doubled every
+// finding and every request under it.
+func TestParseTargetsFoldsProjectKeyCase(t *testing.T) {
+	got, err := parseTargets(FetchOptions{
+		Projects:     []string{"PRJ", "prj", " PRJ "},
+		Repositories: []string{"pRj/app"},
+	})
+	if err != nil {
+		t.Fatalf("parseTargets: %v", err)
+	}
+	if len(got.projects) != 1 {
+		t.Errorf("projects = %v, want a single entry", got.projects)
+	}
+	if keys := got.keys(); len(keys) != 1 || keys[0] != "PRJ" {
+		t.Errorf("keys() = %v, want [PRJ]: the first spelling given is the one requested", keys)
+	}
+}
+
+// A --repository that names no project used to be dropped in silence, which
+// left the repository filter empty. An empty filter does not mean "that one
+// repository", it means no filter — so asking for one repository scanned the
+// whole instance.
+func TestParseTargetsRejectsMalformedRepository(t *testing.T) {
+	for _, bad := range []string{"payments-api", "PRJ/", "/app", "   /   "} {
+		if _, err := parseTargets(FetchOptions{Repositories: []string{bad}}); err == nil {
+			t.Errorf("parseTargets accepted --repository %q", bad)
+		}
+	}
+	if _, err := parseTargets(FetchOptions{Repositories: []string{"PRJ/app"}}); err != nil {
+		t.Errorf("parseTargets rejected a valid entry: %v", err)
 	}
 }

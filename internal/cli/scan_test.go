@@ -217,6 +217,16 @@ func TestScanRejectsBadArguments(t *testing.T) {
 		{"unknown fail-on", []string{"scan", "--snapshot-in", fixture, "--fail-on", "critical"}},
 		{"zero concurrency", []string{"scan", "--snapshot-in", fixture, "--concurrency", "0"}},
 		{"missing snapshot file", []string{"scan", "--snapshot-in", "/nonexistent/snapshot.json"}},
+		// A repository that names no project left the filter empty, and an
+		// empty filter is not "that one repository", it is no filter at all —
+		// so the scan quietly covered the whole instance.
+		{"repository without a project", []string{"scan", "--url", "https://example.invalid", "--token", "t", "-r", "payments-api"}},
+		{"repository with no slug", []string{"scan", "--url", "https://example.invalid", "--token", "t", "-r", "PRJ/"}},
+		// Narrowing flags against a snapshot had nothing to act on and were
+		// ignored in silence: the report covered every repository in the file
+		// and looked exactly like the narrowed scan that had been asked for.
+		{"project against a snapshot", []string{"scan", "--snapshot-in", fixture, "-p", "PRJ"}},
+		{"repository against a snapshot", []string{"scan", "--snapshot-in", fixture, "-r", "PRJ/app"}},
 	}
 
 	for _, tc := range tests {

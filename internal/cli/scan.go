@@ -264,8 +264,30 @@ func validateScanOptions(opts *scanOptions) error {
 	if opts.concurrency < 1 {
 		return fmt.Errorf("--concurrency must be at least 1")
 	}
+	// Checked here as well as in the fetcher so it costs nothing to find out.
+	// The fetcher only reaches its own check after the preflight and the
+	// instance-level fetches, so a typo in a flag was answered by a network
+	// round trip instead of immediately.
+	for _, r := range opts.repositories {
+		key, slug, ok := strings.Cut(strings.TrimSpace(r), "/")
+		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(slug) == "" {
+			return fmt.Errorf("--repository %q must be PROJECT/slug, e.g. PLATFORM/payments-api", r)
+		}
+	}
 	if opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
 		return fmt.Errorf("--url is required (or set BITBUCKET_URL, or pass --snapshot-in to evaluate a saved snapshot)")
+	}
+
+	// --project and --repository narrow what is fetched from an instance.
+	// A snapshot has already been fetched, so they had nothing to act on and
+	// were ignored — but ignored in silence, which is the problem: the report
+	// that came back covered every repository in the file, carried the score
+	// for all of them, and looked exactly like the narrowed scan that had been
+	// asked for. Saying so is the difference between a wrong answer and a
+	// question.
+	if opts.snapshotIn != "" && (len(opts.projects) > 0 || len(opts.repositories) > 0) {
+		return fmt.Errorf("--project/--repository narrow what is fetched from an instance, so they cannot be combined with --snapshot-in\n" +
+			"the snapshot already holds a fixed set of repositories; re-capture with --project/--repository to narrow it")
 	}
 	return nil
 }

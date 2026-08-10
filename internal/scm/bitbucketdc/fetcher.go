@@ -39,6 +39,17 @@ type Fetcher struct {
 	// starts, and only read afterwards.
 	credentialsVerified bool
 
+	// orgAdmins is the instance-level administrator set, with groups already
+	// expanded. Instance administrators can administer every repository on the
+	// instance, so they belong in each repository's administrator set — a
+	// repository whose only administrators hold SYS_ADMIN is not a repository
+	// with no administrators.
+	//
+	// Written once in Fetch after fetchOrganization returns and before any
+	// repository goroutine starts, and only read afterwards, which is the same
+	// arrangement credentialsVerified relies on.
+	orgAdmins scm.EffectivePrincipals
+
 	warnMu   sync.Mutex
 	warnings []string
 	warnSeen map[string]bool
@@ -139,6 +150,9 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 		return nil, err
 	}
 	snapshot.Organization = org
+	// Captured before the repository goroutines start, so resolveAdmins can
+	// read it without synchronisation.
+	f.orgAdmins = org.EffectiveAdmins
 
 	projects, err := f.fetchProjects(ctx, opts)
 	if err != nil {
@@ -360,11 +374,14 @@ func (f *Fetcher) reportProgress(pos scanPosition, projectKey string, done, tota
 
 // fetchProjects resolves the target projects and their repositories.
 func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.Project, error) {
-	wantProjects, wantRepos := parseTargets(opts)
+	want, err := parseTargets(opts)
+	if err != nil {
+		return nil, err
+	}
 
 	var apiProjects []apiProject
-	if len(wantProjects) > 0 {
-		for _, key := range sortedKeys(wantProjects) {
+	if len(want.projects) > 0 {
+		for _, key := range want.keys() {
 			var p apiProject
 			if err := f.client.get(ctx, "/api/1.0/projects/"+url.PathEscape(key), nil, &p); err != nil {
 				return nil, fmt.Errorf("fetch project %s: %w", key, err)
@@ -388,9 +405,11 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 			Type:   ap.Type,
 			Public: ap.Public,
 		}
-		project.Permissions = f.fetchProjectPermissions(ctx, ap.Key)
+		perms, permsRead := f.fetchProjectPermissions(ctx, ap.Key)
+		project.Permissions = perms
+		parent := projectContext{perms: perms, permsRead: permsRead}
 
-		repos, err := f.fetchRepositories(ctx, ap, project.Permissions, wantRepos, scanPosition{project: i + 1, projects: len(apiProjects)})
+		repos, err := f.fetchRepositories(ctx, ap, parent, want, scanPosition{project: i + 1, projects: len(apiProjects)})
 		if err != nil {
 			return nil, err
 		}
@@ -400,10 +419,31 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 	return projects, nil
 }
 
+// projectContext is what a repository needs to know about the project above
+// it: the grant table, and whether that table could be read in full. The two
+// travel together because using one without the other is the bug this type
+// exists to prevent.
+type projectContext struct {
+	perms scm.Permissions
+	// permsRead is false when a project grant table came back unreadable, in
+	// which case every repository below it has an administrator set that is a
+	// lower bound rather than a count.
+	permsRead bool
+}
+
 // fetchProjectPermissions reads the project grant table and the default
 // permission handed to every licensed user.
-func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) scm.Permissions {
+//
+// The second return value reports whether the grant tables were read in full.
+// It is not decoration: a project administrator's grants apply to every
+// repository in the project, so a table that could not be read leaves each of
+// those repositories with an administrator set that is a lower bound. Without
+// this the tables came back empty and indistinguishable from a project that
+// genuinely grants nothing, and the repositories underneath reported a
+// confident FAIL built on a count nobody had been able to take.
+func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) (scm.Permissions, bool) {
 	perms := scm.Permissions{}
+	available := true
 	base := "/api/1.0/projects/" + url.PathEscape(key)
 
 	if users, err := getPaged[apiUserPermission](ctx, f.client, base+"/permissions/users", nil); err == nil {
@@ -417,8 +457,10 @@ func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) scm.P
 			})
 		}
 	} else if f.unreadable(err) {
+		available = false
 		f.warn("project %s user permissions are not readable (%v)", key, err)
 	} else {
+		available = false
 		f.warn("project %s user permissions failed: %v", key, err)
 	}
 
@@ -431,16 +473,18 @@ func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) scm.P
 			})
 		}
 	} else if f.unreadable(err) {
+		available = false
 		f.warn("project %s group permissions are not readable (%v)", key, err)
 	} else {
 		// Without this branch anything that is not a plain "not readable" —
 		// a 401, a transport failure, a malformed response — vanishes, and the
 		// permission table silently looks like it has no groups in it.
+		available = false
 		f.warn("project %s group permissions failed: %v", key, err)
 	}
 
 	perms.DefaultPermission, perms.DefaultPermissionKnown = f.fetchDefaultPermission(ctx, key)
-	return perms
+	return perms, available
 }
 
 // fetchDefaultPermission probes which blanket permission, if any, the project
@@ -464,7 +508,13 @@ func (f *Fetcher) fetchDefaultPermission(ctx context.Context, key string) (strin
 			continue
 		}
 		if resp.Permitted {
-			return perm, true
+			// known, not true: the walk goes from most permissive down, so a
+			// hit here is only the whole answer if every probe above it
+			// answered. If the PROJECT_ADMIN probe failed and PROJECT_WRITE
+			// says yes, the real default could still be PROJECT_ADMIN — and
+			// reporting PROJECT_WRITE as certain understates the grant with
+			// exactly the confidence it has not earned.
+			return perm, known
 		}
 	}
 	return "", known
@@ -472,7 +522,7 @@ func (f *Fetcher) fetchDefaultPermission(ctx context.Context, key string) (strin
 
 // fetchRepositories lists and then fully populates the repositories of one
 // project, bounded by the configured concurrency.
-func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, projectPerms scm.Permissions, wantRepos map[string]bool, pos scanPosition) ([]scm.Repository, error) {
+func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, parent projectContext, want targets, pos scanPosition) ([]scm.Repository, error) {
 	f.logf("listing repositories in %s", project.Key)
 	apiRepos, err := getPaged[apiRepository](ctx, f.client, "/api/1.0/projects/"+url.PathEscape(project.Key)+"/repos", nil)
 	if err != nil {
@@ -481,7 +531,7 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, pro
 
 	selected := make([]apiRepository, 0, len(apiRepos))
 	for _, r := range apiRepos {
-		if len(wantRepos) > 0 && !wantRepos[strings.ToLower(project.Key+"/"+r.Slug)] {
+		if !want.selects(project.Key, r.Slug) {
 			continue
 		}
 		if f.cfg.SkipArchivedRepositories && r.Archived {
@@ -509,7 +559,7 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, pro
 			}
 			defer func() { <-sem }()
 
-			repo, err := f.fetchRepository(ctx, project, r, projectPerms)
+			repo, err := f.fetchRepository(ctx, project, r, parent)
 			if err != nil {
 				errMu.Lock()
 				if firstErr == nil {
@@ -536,7 +586,7 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, pro
 // fetchRepository populates every setting a policy might read for one
 // repository. Sub-fetch failures are recorded, not propagated: one repository
 // with a missing add-on should not abort the scan.
-func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r apiRepository, projectPerms scm.Permissions) (scm.Repository, error) {
+func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r apiRepository, parent projectContext) (scm.Repository, error) {
 	full := project.Key + "/" + r.Slug
 	f.logf("scanning %s", full)
 
@@ -572,11 +622,11 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	f.fetchHooks(ctx, base, &repo)
 	f.fetchBranches(ctx, base, &repo)
 	f.fetchSecurityPolicy(ctx, base, &repo)
-	f.fetchRepositoryPermissions(ctx, base, projectPerms, &repo)
+	f.fetchRepositoryPermissions(ctx, base, parent, &repo)
 
 	repo.Permissions.PublicAccess = repo.Public
-	repo.Permissions.DefaultPermission = projectPerms.DefaultPermission
-	repo.Permissions.DefaultPermissionKnown = projectPerms.DefaultPermissionKnown
+	repo.Permissions.DefaultPermission = parent.perms.DefaultPermission
+	repo.Permissions.DefaultPermissionKnown = parent.perms.DefaultPermissionKnown
 
 	if err := ctx.Err(); err != nil {
 		return repo, err
@@ -895,8 +945,11 @@ func escapePath(p string) string {
 // fetchRepositoryPermissions reads the repository grant table and resolves the
 // effective administrator set, unioning repository and project grants and
 // expanding groups.
-func (f *Fetcher) fetchRepositoryPermissions(ctx context.Context, base string, projectPerms scm.Permissions, repo *scm.Repository) {
-	available := true
+func (f *Fetcher) fetchRepositoryPermissions(ctx context.Context, base string, parent projectContext, repo *scm.Repository) {
+	// The project half counts: a project administrator administers every
+	// repository in the project, so an unread project table leaves this
+	// repository's answer incomplete just as surely as an unread repository one.
+	available := parent.permsRead
 
 	if users, err := getPaged[apiUserPermission](ctx, f.client, base+"/permissions/users", nil); err == nil {
 		for _, up := range users {
@@ -927,14 +980,29 @@ func (f *Fetcher) fetchRepositoryPermissions(ctx context.Context, base string, p
 	}
 
 	repo.Available["permissions"] = available
-	repo.Admins = f.resolveAdmins(ctx, repo.Permissions, projectPerms, available)
+	repo.Admins = f.resolveAdmins(ctx, repo.Permissions, parent.perms, available)
 	repo.Available["admins"] = repo.Admins.Complete
 }
 
-// resolveAdmins unions repository REPO_ADMIN and project PROJECT_ADMIN grants,
-// expanding every admin group to its members.
+// resolveAdmins unions repository REPO_ADMIN, project PROJECT_ADMIN and
+// instance ADMIN/SYS_ADMIN grants, expanding every admin group to its members.
+//
+// The instance grants are the ones that used to be missing, and their absence
+// produced a confident wrong answer rather than a missing one: a repository
+// administered only by the instance's administrators — ordinary for a small
+// project — counted zero administrators, and CIS-1.3.7 reported "Only 0
+// administrator(s) can manage this repository". isAdminPermission has always
+// accepted ADMIN and SYS_ADMIN, values that can only come from the global
+// permission table, so the intent was there; the grants were not.
+//
+// Completeness now also depends on the instance grants being readable. That is
+// not a regression in coverage: CIS-1.3.7 decides PASS from a lower bound
+// before it consults completeness, so a repository that already has enough
+// administrators still passes. What changes is the case that was wrong — too
+// few administrators, instance grants unreadable — which becomes MANUAL
+// instead of a FAIL nobody could act on.
 func (f *Fetcher) resolveAdmins(ctx context.Context, repoPerms, projectPerms scm.Permissions, permsAvailable bool) scm.EffectivePrincipals {
-	admins := scm.EffectivePrincipals{Complete: permsAvailable}
+	admins := scm.EffectivePrincipals{Complete: permsAvailable && f.orgAdmins.Complete}
 	seen := map[string]bool{}
 	groupsSeen := map[string]bool{}
 
@@ -973,6 +1041,20 @@ func (f *Fetcher) resolveAdmins(ctx context.Context, repoPerms, projectPerms scm
 			if isAdminPermission(g.Permission) {
 				addGroup(g.Name)
 			}
+		}
+	}
+
+	// Instance administrators, already expanded by fetchOrganization. The users
+	// go in directly rather than through addGroup: expandPrincipals resolved
+	// the groups once for the whole instance, and re-expanding them per
+	// repository would repeat that work for every repository on the instance.
+	for _, name := range f.orgAdmins.Users {
+		addUser(name)
+	}
+	for _, name := range f.orgAdmins.Groups {
+		if !groupsSeen[name] {
+			groupsSeen[name] = true
+			admins.Groups = append(admins.Groups, name)
 		}
 	}
 
@@ -1030,10 +1112,19 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 	withAccess := map[string]bool{}
 	everyoneHasAccess := false
 
-	for _, a := range snapshot.Organization.Admins {
-		if a.Type == "user" {
-			withAccess[a.Name] = true
-		}
+	// EffectiveAdmins rather than Admins: the latter is the grant table as
+	// written, where an entry may be a group, and filtering it to Type ==
+	// "user" dropped everyone who holds instance administrator rights through
+	// one — which is how most instances grant them.
+	//
+	// The people dropped were not a marginal set. An instance administrator can
+	// read every repository on the instance, so they are the account with the
+	// most access on it; leaving them out of withAccess meant CIS-1.3.1 skipped
+	// them, and a dormant instance administrator is the single dormant account
+	// most worth finding. fetchOrganization has already expanded the groups, so
+	// the answer is sitting here ready to use.
+	for _, name := range snapshot.Organization.EffectiveAdmins.Users {
+		withAccess[name] = true
 	}
 
 	collect := func(perms scm.Permissions) {
@@ -1084,33 +1175,96 @@ func (f *Fetcher) daysSince(epoch int64) int {
 	return int(d.Hours() / 24)
 }
 
-// parseTargets normalizes the project and repository filters.
-func parseTargets(opts FetchOptions) (projects map[string]bool, repos map[string]bool) {
-	projects = map[string]bool{}
-	repos = map[string]bool{}
-	for _, p := range opts.Projects {
-		if p = strings.TrimSpace(p); p != "" {
-			projects[p] = true
-		}
-	}
-	for _, r := range opts.Repositories {
-		r = strings.TrimSpace(r)
-		key, _, ok := strings.Cut(r, "/")
-		if !ok || key == "" {
-			continue
-		}
-		repos[strings.ToLower(r)] = true
-		// Naming a repository implies scanning its project.
-		projects[key] = true
-	}
-	return projects, repos
+// targets is the resolved --project/--repository selection.
+//
+// Both flags are additive includes, and keeping them additive is the whole
+// point of the type. --project and --repository used to share one filter, so
+// `--project PLATFORM --repository OTHER/app` scanned no repository in
+// PLATFORM at all: naming any repository turned the filter on for every
+// project, and PLATFORM had no entry in it. The project was still fetched and
+// still appeared in the snapshot, just empty — so its controls did not report
+// MANUAL, they vanished, and the report looked like a clean scan of a project
+// nobody had looked at.
+type targets struct {
+	// projects is every project key to visit, keyed by its lowercased form.
+	// The value is the spelling the user gave, which is what goes in the
+	// request path and in error messages.
+	projects map[string]string
+	// wholeProjects holds the lowercased keys named by --project, which select
+	// every repository beneath them.
+	wholeProjects map[string]bool
+	// repositories holds lowercased "project/slug" entries from --repository.
+	repositories map[string]bool
 }
 
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// selects reports whether a repository is in scope.
+func (t targets) selects(projectKey, slug string) bool {
+	// No --repository at all: --project already narrowed the projects, and
+	// everything inside them is wanted.
+	if len(t.repositories) == 0 {
+		return true
+	}
+	if t.wholeProjects[strings.ToLower(projectKey)] {
+		return true
+	}
+	return t.repositories[strings.ToLower(projectKey+"/"+slug)]
+}
+
+// keys returns the project keys to fetch, in a stable order.
+func (t targets) keys() []string {
+	out := make([]string, 0, len(t.projects))
+	for lower := range t.projects {
+		out = append(out, lower)
 	}
 	sort.Strings(out)
+	for i, lower := range out {
+		out[i] = t.projects[lower]
+	}
 	return out
+}
+
+// parseTargets normalizes the project and repository filters.
+//
+// Comparison is case-insensitive because Bitbucket's REST paths are: `-p PRJ`
+// and `-r prj/app` name the same project, and treating them as two fetched it
+// twice, put it in the snapshot twice, and doubled every finding under it.
+func parseTargets(opts FetchOptions) (targets, error) {
+	t := targets{
+		projects:      map[string]string{},
+		wholeProjects: map[string]bool{},
+		repositories:  map[string]bool{},
+	}
+	addProject := func(key string) {
+		lower := strings.ToLower(key)
+		if _, seen := t.projects[lower]; !seen {
+			t.projects[lower] = key
+		}
+	}
+
+	for _, p := range opts.Projects {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		addProject(p)
+		t.wholeProjects[strings.ToLower(p)] = true
+	}
+
+	for _, r := range opts.Repositories {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		// Rejected rather than skipped. A silently dropped `--repository
+		// payments-api` left the repository filter empty, which does not mean
+		// "that one repository" — it means no filter, and the scan quietly
+		// covered the entire instance instead of the one repository asked for.
+		key, slug, ok := strings.Cut(r, "/")
+		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(slug) == "" {
+			return targets{}, fmt.Errorf("--repository %q must be PROJECT/slug", r)
+		}
+		t.repositories[strings.ToLower(r)] = true
+		// Naming a repository implies scanning its project.
+		addProject(key)
+	}
+	return t, nil
 }
