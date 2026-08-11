@@ -51,25 +51,203 @@ type firstRunResult struct {
 	token string
 }
 
+// The menu's options, by index. The demo is the default selection: the reader
+// this menu exists for is the one with nothing to type, and the default has to
+// serve exactly them.
+const (
+	optCredentials = iota
+	optDemo
+	optQuit
+)
+
 // promptFirstRun offers the choice on out and reads the answer from in. The
-// caller has already established that both ends are terminals; this function
-// still survives an in that is not one, because `scan < /dev/null` stats as a
-// character device and must fall through to the error, not hang.
-//
-// Enter alone runs the demo. That default is the point of the menu: the reader
-// with credentials to type has somewhere to type them, and the reader without
-// any gets shown what the tool produces instead of being asked again for what
-// they do not have.
+// caller has already established that both ends are terminals; a real one gets
+// the arrow-key selector, and anything else — including a stdin that merely
+// stats like a terminal, such as `scan < /dev/null` — falls through to a
+// numbered prompt whose immediate EOF becomes the guided error, not a hang.
 func promptFirstRun(in io.Reader, out io.Writer, color bool) (firstRunResult, error) {
 	p := console.Painter{Enabled: color}
 	w := console.Writer{W: out, P: p}
 
 	w.Line(console.Warn, "no instance configured — scan needs a Bitbucket URL and a credential")
 	w.Blank()
-	fmt.Fprintf(out, "  %s enter the URL and token now\n", p.Paint(console.Cyan, "1."))
-	fmt.Fprintf(out, "  %s show a sample report from the bundled example\n", p.Paint(console.Cyan, "2."))
-	fmt.Fprintf(out, "  %s quit\n", p.Paint(console.Cyan, "3."))
-	w.Blank()
+
+	options := []string{
+		"enter the URL and token now",
+		"show a sample report from the bundled example",
+		"quit",
+	}
+
+	choice := optQuit
+	if f, ok := in.(*os.File); ok && isTerminal(f) {
+		c, err := selectWithArrows(f, out, p, options, optDemo)
+		if err != nil {
+			// Raw mode was refused; the numbered prompt asks the same question.
+			c = selectByNumber(in, out, p, options)
+		}
+		choice = c
+	} else {
+		choice = selectByNumber(in, out, p, options)
+	}
+
+	switch choice {
+	case optCredentials:
+		return promptCredentials(in, out)
+	case optDemo:
+		return firstRunResult{demo: true}, nil
+	default:
+		return firstRunResult{}, errNoInstance()
+	}
+}
+
+// menuLine renders one option row. The pointer is the selection signal that
+// survives NO_COLOR — colour and weight only reinforce it — and the unselected
+// rows keep the same two-column lead so the text does not shift as the pointer
+// moves.
+func menuLine(p console.Painter, index int, text string, selected bool) string {
+	line := fmt.Sprintf("%d. %s", index+1, text)
+	if selected {
+		return p.Paint(console.Cyan+console.Bold, "❯ "+line)
+	}
+	return "  " + line
+}
+
+// selectWithArrows is the menu a real terminal gets: ↑/↓ (or j/k) move the
+// pointer with wrap-around, Enter takes the highlighted option, a digit jumps
+// straight to that option, and q or Esc backs out. Returns the chosen index,
+// or optQuit for backing out.
+//
+// The terminal goes raw so single keys arrive without a line buffer in the
+// way. Raw mode belongs to the terminal device rather than to one descriptor,
+// so output post-processing is off too: every line break written while the
+// selector runs must be a literal \r\n.
+func selectWithArrows(f *os.File, out io.Writer, p console.Painter, options []string, selected int) (int, error) {
+	fd := int(f.Fd())
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return 0, err
+	}
+	defer term.Restore(fd, oldState)
+
+	// Parked, the cursor would sit blinking wherever the last redraw left it.
+	fmt.Fprint(out, "\033[?25l")
+	defer fmt.Fprint(out, "\033[?25h")
+
+	hint := p.Paint(console.Dim, fmt.Sprintf("↑/↓ move · Enter select · 1-%d jump · q quit", len(options)))
+	rows := len(options) + 1
+
+	buf := make([]byte, 16)
+	for first := true; ; first = false {
+		if !first {
+			fmt.Fprintf(out, "\033[%dA", rows)
+		}
+		for i, opt := range options {
+			fmt.Fprintf(out, "\r\033[K%s\r\n", menuLine(p, i, opt, i == selected))
+		}
+		fmt.Fprintf(out, "\r\033[K%s\r\n", hint)
+
+		n, readErr := f.Read(buf)
+		if readErr != nil {
+			// Nobody on the other end after all: the same exit as q.
+			return optQuit, nil
+		}
+		// Every event in the read is handled, not just the first. A paste, a
+		// fast pty, or a held key can deliver "\x1b[B\r" in one read, and
+		// taking only the arrow would swallow the Enter behind it.
+		for _, key := range decodeMenuKeys(buf[:n]) {
+			switch key.kind {
+			case keyUp:
+				selected = (selected + len(options) - 1) % len(options)
+			case keyDown:
+				selected = (selected + 1) % len(options)
+			case keyEnter:
+				return selected, nil
+			case keyDigit:
+				if key.digit < len(options) {
+					return key.digit, nil
+				}
+			case keyQuit:
+				return optQuit, nil
+			}
+		}
+	}
+}
+
+// menuKeyKind classifies one key event inside the selector.
+type menuKeyKind int
+
+const (
+	keyNone menuKeyKind = iota
+	keyUp
+	keyDown
+	keyEnter
+	keyDigit
+	keyQuit
+)
+
+type menuKey struct {
+	kind menuKeyKind
+	// digit is the option index a typed digit names, when kind is keyDigit.
+	digit int
+}
+
+// decodeMenuKeys splits one terminal read into key events: three bytes for a
+// CSI escape sequence, one for everything else.
+func decodeMenuKeys(b []byte) []menuKey {
+	var keys []menuKey
+	for len(b) > 0 {
+		if b[0] == 0x1b && len(b) >= 3 && b[1] == '[' {
+			keys = append(keys, decodeMenuKey(b[:3]))
+			b = b[3:]
+			continue
+		}
+		keys = append(keys, decodeMenuKey(b[:1]))
+		b = b[1:]
+	}
+	return keys
+}
+
+func decodeMenuKey(b []byte) menuKey {
+	if len(b) == 0 {
+		return menuKey{kind: keyNone}
+	}
+	switch b[0] {
+	case '\r', '\n':
+		return menuKey{kind: keyEnter}
+	case 'q', 0x03, 0x04: // q, Ctrl-C, Ctrl-D
+		return menuKey{kind: keyQuit}
+	case 'k':
+		return menuKey{kind: keyUp}
+	case 'j':
+		return menuKey{kind: keyDown}
+	case 0x1b:
+		if len(b) >= 3 && b[1] == '[' {
+			switch b[2] {
+			case 'A':
+				return menuKey{kind: keyUp}
+			case 'B':
+				return menuKey{kind: keyDown}
+			}
+			// Some other CSI sequence — a right arrow, a function key.
+			return menuKey{kind: keyNone}
+		}
+		// Esc on its own.
+		return menuKey{kind: keyQuit}
+	}
+	if b[0] >= '1' && b[0] <= '9' {
+		return menuKey{kind: keyDigit, digit: int(b[0] - '1')}
+	}
+	return menuKey{kind: keyNone}
+}
+
+// selectByNumber is the same question asked without a terminal to draw on:
+// numbered options, one typed answer. Enter alone still lands on the demo, so
+// both selectors keep one default.
+func selectByNumber(in io.Reader, out io.Writer, p console.Painter, options []string) int {
+	for i, opt := range options {
+		fmt.Fprintf(out, "%s\n", menuLine(p, i, opt, false))
+	}
+	fmt.Fprintln(out)
 
 	// Three attempts, then the error. An unattended loop on a stdin that keeps
 	// producing garbage would spin forever asking a question nobody is there
@@ -80,18 +258,18 @@ func promptFirstRun(in io.Reader, out io.Writer, color bool) (firstRunResult, er
 		if err != nil {
 			// EOF: nobody is on the other end after all.
 			fmt.Fprintln(out)
-			return firstRunResult{}, errNoInstance()
+			return optQuit
 		}
 		switch strings.TrimSpace(choice) {
 		case "1":
-			return promptCredentials(in, out)
+			return optCredentials
 		case "", "2":
-			return firstRunResult{demo: true}, nil
+			return optDemo
 		case "3", "q":
-			return firstRunResult{}, errNoInstance()
+			return optQuit
 		}
 	}
-	return firstRunResult{}, errNoInstance()
+	return optQuit
 }
 
 func promptCredentials(in io.Reader, out io.Writer) (firstRunResult, error) {

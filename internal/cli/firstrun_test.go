@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/scm-bench/scm-bench/internal/console"
 )
 
 // The demo exists for the reader who has not configured anything yet, so it
@@ -200,6 +202,73 @@ func TestFirstRunPromptQuitPathsCarryTheGuidedError(t *testing.T) {
 				t.Errorf("quit error does not guide: %v", err)
 			}
 		})
+	}
+}
+
+// The selector's key decoding is pure, so the arrow-key behaviour is testable
+// without a pty: this is the contract between what a terminal sends and what
+// the pointer does.
+func TestDecodeMenuKeys(t *testing.T) {
+	for name, tc := range map[string]struct {
+		input string
+		want  []menuKeyKind
+	}{
+		"up arrow":          {"\x1b[A", []menuKeyKind{keyUp}},
+		"down arrow":        {"\x1b[B", []menuKeyKind{keyDown}},
+		"vim up":            {"k", []menuKeyKind{keyUp}},
+		"vim down":          {"j", []menuKeyKind{keyDown}},
+		"enter":             {"\r", []menuKeyKind{keyEnter}},
+		"newline":           {"\n", []menuKeyKind{keyEnter}},
+		"quit":              {"q", []menuKeyKind{keyQuit}},
+		"ctrl-c":            {"\x03", []menuKeyKind{keyQuit}},
+		"bare esc":          {"\x1b", []menuKeyKind{keyQuit}},
+		"right arrow idles": {"\x1b[C", []menuKeyKind{keyNone}},
+		"stray letter":      {"x", []menuKeyKind{keyNone}},
+		// One read can carry several events — a paste, a fast pty. Taking
+		// only the first would swallow the Enter behind the arrow.
+		"arrow then enter": {"\x1b[B\r", []menuKeyKind{keyDown, keyEnter}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			keys := decodeMenuKeys([]byte(tc.input))
+			if len(keys) != len(tc.want) {
+				t.Fatalf("decoded %d events, want %d", len(keys), len(tc.want))
+			}
+			for i, k := range keys {
+				if k.kind != tc.want[i] {
+					t.Errorf("event %d = kind %d, want %d", i, k.kind, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDecodeMenuKeysMapsDigitsToOptions(t *testing.T) {
+	keys := decodeMenuKeys([]byte("2"))
+	if len(keys) != 1 || keys[0].kind != keyDigit || keys[0].digit != 1 {
+		t.Errorf("typing 2 decoded to %+v, want the second option", keys)
+	}
+}
+
+// The pointer is the selection signal that has to survive NO_COLOR; colour
+// only reinforces it.
+func TestMenuLineMarksTheSelection(t *testing.T) {
+	plain := console.Painter{Enabled: false}
+
+	selected := menuLine(plain, 1, "show a sample report", true)
+	if !strings.Contains(selected, "❯") {
+		t.Errorf("selected line carries no pointer: %q", selected)
+	}
+	unselected := menuLine(plain, 0, "enter the URL", false)
+	if strings.Contains(unselected, "❯") {
+		t.Errorf("unselected line carries a pointer: %q", unselected)
+	}
+	if !strings.HasPrefix(unselected, "  1. ") {
+		t.Errorf("unselected line lost its column alignment: %q", unselected)
+	}
+	for _, l := range []string{selected, unselected} {
+		if strings.Contains(l, "\033[") {
+			t.Errorf("ANSI escapes with colour disabled: %q", l)
+		}
 	}
 }
 
