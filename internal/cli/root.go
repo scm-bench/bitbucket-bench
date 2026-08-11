@@ -34,6 +34,7 @@ rather than guessed at, and never affect the score.`,
 	}
 
 	root.AddCommand(newScanCommand())
+	root.AddCommand(newInitCommand())
 	root.AddCommand(newDiffCommand())
 	root.AddCommand(newListChecksCommand())
 	root.AddCommand(newVersionCommand())

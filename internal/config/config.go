@@ -10,12 +10,20 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the full evaluation configuration.
 type Config struct {
+	// Scan holds the settings that describe the deployment rather than any
+	// one run: how to reach the instance, how hard to drive it, and what its
+	// exit thresholds are. They used to be nine scan flags, which made every
+	// invocation restate facts about the instance that never change between
+	// runs. Excluded from the policy input (json:"-"): no rule reads them,
+	// and keeping them out leaves input.config byte-identical.
+	Scan Scan `yaml:"scan" json:"-"`
 	// Thresholds are the numeric knobs used by the policies.
 	Thresholds Thresholds `yaml:"thresholds" json:"thresholds"`
 	// SignatureHookKeys are lowercase substrings that identify a commit
@@ -43,6 +51,53 @@ type Config struct {
 	// Include, when non-empty, restricts the run to these check IDs.
 	Include []string `yaml:"include" json:"include"`
 }
+
+// Scan is the deployment-stable half of a scan's configuration.
+type Scan struct {
+	// FailOn exits 1 when a failure at or above this severity exists:
+	// high, medium, low, or none.
+	FailOn string `yaml:"failOn"`
+	// FailUnder exits 1 when the score is below it; 0 disables.
+	FailUnder int `yaml:"failUnder"`
+	// MaxManual exits 1 when more than this percent of controls need manual
+	// review; -1 disables. It defaults to off because how much of an
+	// instance a token can read is a property of the deployment, and a guess
+	// here would fail scans that are working as well as they can.
+	MaxManual int `yaml:"maxManual"`
+	// Concurrency is how many repositories to fetch in parallel.
+	Concurrency int `yaml:"concurrency"`
+	// Timeout bounds a single HTTP request, e.g. "30s".
+	Timeout Duration `yaml:"timeout"`
+	// MaxDuration abandons the scan after this long; 0 means no limit.
+	MaxDuration Duration `yaml:"maxDuration"`
+	// Insecure skips TLS certificate verification, for private CAs.
+	Insecure bool `yaml:"insecure"`
+	// AllowPlaintext permits an http:// URL, sending credentials in the
+	// clear.
+	AllowPlaintext bool `yaml:"allowPlaintext"`
+	// Progress is what to show while scanning: full, compact, or off.
+	Progress string `yaml:"progress"`
+}
+
+// Duration is time.Duration that reads YAML the way people write durations:
+// "30s", "2m", "1h30m". A bare number would be nanoseconds, which nobody
+// means, so it is rejected with the spelling that works.
+type Duration time.Duration
+
+func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return fmt.Errorf("a duration is a string like \"30s\" or \"5m\", got %s", value.Value)
+	}
+	v, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("parse duration %q: %w", s, err)
+	}
+	*d = Duration(v)
+	return nil
+}
+
+func (d Duration) Get() time.Duration { return time.Duration(d) }
 
 // Thresholds are the numeric policy knobs.
 type Thresholds struct {
@@ -72,6 +127,15 @@ type Thresholds struct {
 // specific, and common practice where it is not.
 func Default() Config {
 	return Config{
+		Scan: Scan{
+			FailOn:      "high",
+			FailUnder:   0,
+			MaxManual:   -1,
+			Concurrency: 8,
+			Timeout:     Duration(30 * time.Second),
+			MaxDuration: 0,
+			Progress:    "compact",
+		},
 		Thresholds: Thresholds{
 			MinApprovers:        2,
 			MinRepositoryAdmins: 2,
@@ -156,6 +220,32 @@ func Load(path string) (Config, error) {
 
 // Validate rejects thresholds that would make a policy meaningless.
 func (c Config) Validate() error {
+	// The scan section first. These were flag validations once; the checks
+	// move with the settings.
+	s := c.Scan
+	switch strings.ToLower(s.FailOn) {
+	case "high", "medium", "low", "none":
+	default:
+		return fmt.Errorf("scan.failOn %q: want high, medium, low or none", s.FailOn)
+	}
+	switch strings.ToLower(s.Progress) {
+	case "full", "compact", "off":
+	default:
+		return fmt.Errorf("scan.progress %q: want full, compact or off", s.Progress)
+	}
+	if s.Concurrency < 1 {
+		return fmt.Errorf("scan.concurrency must be at least 1, got %d", s.Concurrency)
+	}
+	if s.FailUnder < 0 || s.FailUnder > 100 {
+		return fmt.Errorf("scan.failUnder must be between 0 and 100, got %d", s.FailUnder)
+	}
+	if s.MaxManual < -1 || s.MaxManual > 100 {
+		return fmt.Errorf("scan.maxManual must be between 0 and 100, or -1 to disable, got %d", s.MaxManual)
+	}
+	if s.Timeout.Get() < 0 || s.MaxDuration.Get() < 0 {
+		return fmt.Errorf("scan.timeout and scan.maxDuration must not be negative")
+	}
+
 	// Every threshold is checked, not just the ones that looked risky.
 	//
 	// A negative threshold does not merely produce an odd number: it silently

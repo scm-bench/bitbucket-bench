@@ -17,7 +17,7 @@ import (
 // one. It evaluates the same sample TestBundledSnapshotStillEvaluates covers
 // from disk — this test is about the embedded copy reaching the same result.
 func TestDemoEvaluatesTheBundledExample(t *testing.T) {
-	stdout, stderr, code := run(t, "scan", "--demo", "-o", "json", "--fail-on", "none")
+	stdout, stderr, code := run(t, "scan", "--demo", "-o", "json", "-c", configWithFailOn(t, "none"))
 
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d\n%s", code, ExitOK, stderr)
@@ -51,7 +51,7 @@ func TestDemoEvaluatesTheBundledExample(t *testing.T) {
 // header names bitbucket.example.com, but nothing else would say the tool made
 // that instance up.
 func TestDemoTableIsMarkedAsExampleData(t *testing.T) {
-	stdout, _, _ := run(t, "scan", "--demo", "--fail-on", "none")
+	stdout, _, _ := run(t, "scan", "--demo", "-c", configWithFailOn(t, "none"))
 
 	if !strings.Contains(stdout, "EXAMPLE DATA") {
 		t.Errorf("table output carries no example-data banner:\n%s", stdout)
@@ -62,7 +62,7 @@ func TestDemoTableIsMarkedAsExampleData(t *testing.T) {
 // reader to discount everything below it.
 func TestRealScanCarriesNoExampleBanner(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
-	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
+	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))
 
 	if strings.Contains(stdout, "EXAMPLE DATA") {
 		t.Error("a snapshot scan was marked as example data")
@@ -104,7 +104,7 @@ func TestDemoIgnoresInheritedCredentials(t *testing.T) {
 	t.Setenv("BITBUCKET_URL", "https://stale.example.com")
 	t.Setenv("BITBUCKET_TOKEN", "stale")
 
-	stdout, _, code := run(t, "scan", "--demo", "-o", "json", "--fail-on", "none")
+	stdout, _, code := run(t, "scan", "--demo", "-o", "json", "-c", configWithFailOn(t, "none"))
 	if code != ExitOK {
 		t.Fatalf("exit code = %d; an exported BITBUCKET_URL must not break the demo", code)
 	}
@@ -220,7 +220,7 @@ func writeSavedInstance(t *testing.T, yaml string) {
 func TestScanUsesTheSavedInstance(t *testing.T) {
 	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
 
-	_, stderr, code := run(t, "scan", "--max-duration", "1ms")
+	_, stderr, code := run(t, "scan", "-c", configWithScan(t, "maxDuration: 1ms"))
 	if code != ExitError {
 		t.Fatalf("exit code = %d, want %d for an unreachable saved instance", code, ExitError)
 	}
@@ -234,7 +234,7 @@ func TestScanUsesTheSavedInstance(t *testing.T) {
 func TestSavedInstanceYieldsToExplicitConfiguration(t *testing.T) {
 	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
 
-	_, stderr, _ := run(t, "scan", "--url", "https://127.0.0.1:2", "--max-duration", "1ms")
+	_, stderr, _ := run(t, "scan", "--url", "https://127.0.0.1:2", "-c", configWithScan(t, "maxDuration: 1ms"))
 	if strings.Contains(stderr, "using saved instance") {
 		t.Errorf("a typed --url was overridden by the file:\n%s", stderr)
 	}
@@ -244,7 +244,7 @@ func TestSavedInstanceYieldsToExplicitConfiguration(t *testing.T) {
 func TestSavedInstanceDoesNotTouchTheDemo(t *testing.T) {
 	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
 
-	_, stderr, code := run(t, "scan", "--demo", "-o", "json", "--fail-on", "none")
+	_, stderr, code := run(t, "scan", "--demo", "-o", "json", "-c", configWithFailOn(t, "none"))
 	if code != ExitOK {
 		t.Fatalf("exit code = %d", code)
 	}

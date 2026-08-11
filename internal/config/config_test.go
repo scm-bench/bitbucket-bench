@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -221,5 +222,84 @@ func TestEveryThresholdIsValidated(t *testing.T) {
 		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": -1\n")); err == nil {
 			t.Errorf("thresholds.%s accepts -1; add it to Config.Validate", name)
 		}
+	}
+}
+
+func TestScanSectionLoadsAndValidates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg.yaml")
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	write("scan:\n  failOn: none\n  concurrency: 3\n  timeout: 5s\n  maxDuration: 2m\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Scan.FailOn != "none" || cfg.Scan.Concurrency != 3 {
+		t.Errorf("scan section did not load: %+v", cfg.Scan)
+	}
+	if cfg.Scan.Timeout.Get() != 5*time.Second || cfg.Scan.MaxDuration.Get() != 2*time.Minute {
+		t.Errorf("durations did not parse: %+v", cfg.Scan)
+	}
+	// Absent keys keep their defaults.
+	if cfg.Scan.Progress != "compact" || cfg.Scan.MaxManual != -1 {
+		t.Errorf("absent keys lost their defaults: %+v", cfg.Scan)
+	}
+
+	// The validations that moved here with the settings.
+	for _, tc := range []struct{ name, content string }{
+		{"bad failOn", "scan:\n  failOn: critical\n"},
+		{"bad progress", "scan:\n  progress: loud\n"},
+		{"zero concurrency", "scan:\n  concurrency: 0\n"},
+		{"failUnder out of range", "scan:\n  failUnder: 101\n"},
+		{"maxManual out of range", "scan:\n  maxManual: -2\n"},
+		{"bare-number duration", "scan:\n  timeout: 30\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			write(tc.content)
+			if _, err := Load(path); err == nil {
+				t.Errorf("Load accepted %q", tc.content)
+			}
+		})
+	}
+}
+
+func TestDiscoverPrefersTheWorkingDirectory(t *testing.T) {
+	userDir := t.TempDir()
+	t.Setenv("SCM_BENCH_CONFIG_DIR", userDir)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	// Nothing anywhere: no path, no error.
+	path, err := Discover()
+	if err != nil || path != "" {
+		t.Fatalf("Discover() = %q, %v; want none", path, err)
+	}
+
+	// User config alone is found...
+	userCfg := filepath.Join(userDir, "config.yaml")
+	if err := os.WriteFile(userCfg, []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != userCfg {
+		t.Errorf("Discover() = %q, want %q", path, userCfg)
+	}
+
+	// ...but the working directory wins, hidden name included.
+	if err := os.WriteFile(filepath.Join(work, ".scm-bench.yaml"), []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != ".scm-bench.yaml" {
+		t.Errorf("Discover() = %q, want the hidden working-directory file", path)
+	}
+	if err := os.WriteFile(filepath.Join(work, "scm-bench.yaml"), []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != "scm-bench.yaml" {
+		t.Errorf("Discover() = %q, want the visible name first", path)
 	}
 }

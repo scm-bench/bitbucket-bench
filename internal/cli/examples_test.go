@@ -19,7 +19,7 @@ const examplesDir = "../../examples"
 func TestBundledSnapshotStillEvaluates(t *testing.T) {
 	stdout, _, code := run(t, "scan",
 		"--snapshot-in", filepath.Join(examplesDir, "snapshot.json"),
-		"-o", "json", "--fail-on", "none")
+		"-o", "json", "-c", configWithFailOn(t, "none"))
 
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d\n%s", code, ExitOK, stdout)
@@ -76,7 +76,7 @@ func TestBundledConfigStillLoads(t *testing.T) {
 	_, stderr, code := run(t, "scan",
 		"--snapshot-in", filepath.Join(examplesDir, "snapshot.json"),
 		"-c", filepath.Join(examplesDir, "config.yaml"),
-		"-o", "json", "--fail-on", "none")
+		"-o", "json", "-c", configWithFailOn(t, "none"))
 
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d\n%s", code, ExitOK, stderr)

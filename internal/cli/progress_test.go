@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/scm-bench/scm-bench/internal/config"
 )
 
 // A redirected stream has no cursor to move, so carriage returns would pile up
@@ -115,9 +117,9 @@ func TestScanFailureNamesTheDeadline(t *testing.T) {
 	defer cancel()
 	<-ctx.Done()
 
-	opts := &scanOptions{maxDuration: 5 * time.Minute}
+	opts := &scanOptions{scan: config.Scan{MaxDuration: config.Duration(5 * time.Minute)}}
 	err := describeScanFailure(ctx, opts, context.DeadlineExceeded)
-	if err == nil || !strings.Contains(err.Error(), "--max-duration 5m0s") {
+	if err == nil || !strings.Contains(err.Error(), "scan.maxDuration 5m0s") {
 		t.Errorf("error = %v, want it to name the deadline", err)
 	}
 

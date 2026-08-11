@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/scm-bench/scm-bench/internal/config"
 	"github.com/scm-bench/scm-bench/internal/engine"
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
@@ -126,9 +127,29 @@ func run(t *testing.T, args ...string) (string, string, int) {
 	return stdout.String(), stderr.String(), ExitCode(err)
 }
 
+// configWithScan writes a config file with the given scan-section lines,
+// standing in for the retired scan flags.
+func configWithScan(t *testing.T, lines ...string) string {
+	t.Helper()
+	content := "scan:\n"
+	for _, l := range lines {
+		content += "  " + l + "\n"
+	}
+	path := filepath.Join(t.TempDir(), "scm-bench.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+func configWithFailOn(t *testing.T, failOn string) string {
+	t.Helper()
+	return configWithScan(t, "failOn: "+failOn)
+}
+
 func TestScanFromSnapshotProducesJSONReport(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
-	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "--fail-on", "none")
+	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "-c", configWithFailOn(t, "none"))
 
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d with --fail-on none", code, ExitOK)
@@ -173,10 +194,10 @@ func TestScanFromSnapshotProducesJSONReport(t *testing.T) {
 func TestFailOnSeverityDrivesExitCode(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 
-	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "--fail-on", "high"); code != ExitFindings {
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "-c", configWithFailOn(t, "high")); code != ExitFindings {
 		t.Errorf("exit code = %d, want %d for HIGH failures", code, ExitFindings)
 	}
-	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "--fail-on", "none"); code != ExitOK {
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "json", "-c", configWithFailOn(t, "none")); code != ExitOK {
 		t.Errorf("exit code = %d, want %d with --fail-on none", code, ExitOK)
 	}
 }
@@ -185,7 +206,7 @@ func TestScanWritesReportToFile(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	out := filepath.Join(t.TempDir(), "nested", "report.sarif")
 
-	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "sarif", "--output-file", out, "--fail-on", "none"); code != ExitOK {
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-o", "sarif", "--output-file", out, "-c", configWithFailOn(t, "none")); code != ExitOK {
 		t.Fatalf("exit code = %d", code)
 	}
 
@@ -240,7 +261,7 @@ func TestScanRoundTripsSnapshotOut(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	out := filepath.Join(t.TempDir(), "copy.json")
 
-	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "--snapshot-out", out, "-o", "json", "--fail-on", "none"); code != ExitOK {
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "--snapshot-out", out, "-o", "json", "-c", configWithFailOn(t, "none")); code != ExitOK {
 		t.Fatalf("exit code = %d", code)
 	}
 
@@ -269,8 +290,8 @@ func TestScanRejectsBadArguments(t *testing.T) {
 	}{
 		{"no url and no snapshot", []string{"scan"}},
 		{"unknown format", []string{"scan", "--snapshot-in", fixture, "-o", "yaml"}},
-		{"unknown fail-on", []string{"scan", "--snapshot-in", fixture, "--fail-on", "critical"}},
-		{"zero concurrency", []string{"scan", "--snapshot-in", fixture, "--concurrency", "0"}},
+		{"unknown fail-on in the config", []string{"scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "critical")}},
+		{"zero concurrency in the config", []string{"scan", "--snapshot-in", fixture, "-c", configWithScan(t, "concurrency: 0")}},
 		{"missing snapshot file", []string{"scan", "--snapshot-in", "/nonexistent/snapshot.json"}},
 		// A repository that names no project left the filter empty, and an
 		// empty filter is not "that one repository", it is no filter at all —
@@ -305,7 +326,7 @@ func TestScanRejectsSnapshotWithWrongSchemaVersion(t *testing.T) {
 
 func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
-	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
+	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))
 
 	// The summary leads, then the by-control overview, then the remediations
 	// and the line saying how to get the per-resource detail. "Branch
@@ -333,7 +354,7 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 
 func TestScanDetailsRestoresPerResourceSections(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
-	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details")
+	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"), "--details")
 
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d", code, ExitOK)
@@ -358,7 +379,7 @@ func flatten(s string) string { return strings.Join(strings.Fields(s), " ") }
 func TestScanDetailsFilter(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 
-	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details=CIS-1.1.15")
+	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"), "--details=CIS-1.1.15")
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d", code, ExitOK)
 	}
@@ -369,7 +390,7 @@ func TestScanDetailsFilter(t *testing.T) {
 	// The wording of the error is pinned by the report package's own tests;
 	// what matters here is that nothing rendered and the exit code says broken
 	// scan rather than clean one.
-	out, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details=bogus")
+	out, _, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"), "--details=bogus")
 	if code != ExitError {
 		t.Errorf("a filter matching nothing should exit %d, got %d", ExitError, code)
 	}
@@ -387,7 +408,7 @@ func TestScanDetailsFlagValidation(t *testing.T) {
 	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "--max-resources", "1"); code != ExitError {
 		t.Errorf("--max-resources without --details should be refused, got exit %d\n---\n%s", code, stderr)
 	}
-	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--max-resources", "1", "--details"); code != ExitOK {
+	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"), "--max-resources", "1", "--details"); code != ExitOK {
 		t.Errorf("--max-resources with --details should be accepted, got exit %d\n---\n%s", code, stderr)
 	}
 }
@@ -474,12 +495,11 @@ func TestRequestLogIsOffByDefaultAndOnWithVerbose(t *testing.T) {
 
 	// --snapshot-in makes no requests at all, so the flag wiring is what is
 	// under test here: which progress mode each invocation resolves to.
-	cmd := newScanCommand()
-	if got := cmd.Flags().Lookup("progress").DefValue; got != ProgressCompact {
-		t.Errorf("--progress defaults to %q, want %q — full is a wall of GET lines", got, ProgressCompact)
+	if got := config.Default().Scan.Progress; got != ProgressCompact {
+		t.Errorf("scan.progress defaults to %q, want %q — full is a wall of GET lines", got, ProgressCompact)
 	}
 
-	_, stderr, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
+	_, stderr, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))
 	if strings.Contains(stderr, "GET ") {
 		t.Errorf("the request log appeared without --verbose:\n%s", stderr)
 	}
@@ -557,18 +577,18 @@ func TestScanThresholds(t *testing.T) {
 		want int
 	}{
 		{"failures trip fail-on", []string{"scan", "--snapshot-in", normal}, ExitFindings},
-		{"fail-on none clears them", []string{"scan", "--snapshot-in", normal, "--fail-on", "none"}, ExitOK},
-		{"score below fail-under", []string{"scan", "--snapshot-in", normal, "--fail-on", "none", "--fail-under", "50"}, ExitFindings},
-		{"score above fail-under", []string{"scan", "--snapshot-in", normal, "--fail-on", "none", "--fail-under", "20"}, ExitOK},
+		{"fail-on none clears them", []string{"scan", "--snapshot-in", normal, "-c", configWithFailOn(t, "none")}, ExitOK},
+		{"score below failUnder", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "failOn: none", "failUnder: 50")}, ExitFindings},
+		{"score above failUnder", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "failOn: none", "failUnder: 20")}, ExitOK},
 
 		// The pathology, and the only thing that catches it.
 		{"blind scan passes by default", []string{"scan", "--snapshot-in", blind}, ExitOK},
-		{"fail-under cannot catch a blind scan", []string{"scan", "--snapshot-in", blind, "--fail-under", "100"}, ExitOK},
-		{"max-manual catches it", []string{"scan", "--snapshot-in", blind, "--max-manual", "50"}, ExitFindings},
-		{"max-manual generous enough", []string{"scan", "--snapshot-in", blind, "--max-manual", "90"}, ExitOK},
+		{"failUnder cannot catch a blind scan", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "failUnder: 100")}, ExitOK},
+		{"maxManual catches it", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 50")}, ExitFindings},
+		{"maxManual generous enough", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 90")}, ExitOK},
 
-		{"fail-under out of range", []string{"scan", "--snapshot-in", normal, "--fail-under", "101"}, ExitError},
-		{"max-manual out of range", []string{"scan", "--snapshot-in", normal, "--max-manual", "-2"}, ExitError},
+		{"failUnder out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "failUnder: 101")}, ExitError},
+		{"maxManual out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "maxManual: -2")}, ExitError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, code := run(t, tc.args...); code != tc.want {
@@ -580,7 +600,7 @@ func TestScanThresholds(t *testing.T) {
 
 func scoreOf(t *testing.T, snapshotPath string) int {
 	t.Helper()
-	out, _, _ := run(t, "scan", "--snapshot-in", snapshotPath, "-o", "json", "--fail-on", "none")
+	out, _, _ := run(t, "scan", "--snapshot-in", snapshotPath, "-o", "json", "-c", configWithFailOn(t, "none"))
 	var rep struct {
 		Score struct {
 			Value int `json:"value"`
@@ -602,7 +622,7 @@ func TestPolicyErrorsFailTheScan(t *testing.T) {
 		Score:  engine.Score{Value: 100, Passed: 1},
 		Errors: []string{"CIS-1.1.15 on PRJ/app: policy produced no result"},
 	}
-	err := exitStatus(rep, &scanOptions{failOn: "high", maxManual: -1})
+	err := exitStatus(rep, &scanOptions{scan: config.Scan{FailOn: "high", MaxManual: -1}})
 	if err == nil {
 		t.Fatal("exitStatus returned nil for a report carrying policy errors")
 	}
@@ -701,5 +721,134 @@ func scanOptionsFrom(t *testing.T, cmd *cobra.Command) *scanOptions {
 func TestBothCredentialKindsTypedIsRejected(t *testing.T) {
 	if _, _, code := run(t, "scan", "--url", "https://example.invalid", "--token", "t", "--username", "alice"); code != ExitError {
 		t.Errorf("exit code = %d, want %d", code, ExitError)
+	}
+}
+
+// The retired flags answer with directions, not cobra's bare "unknown flag":
+// muscle memory and old pipelines both deserve to be told where the setting
+// went.
+func TestMovedFlagsAreAnsweredWithTheConfigKey(t *testing.T) {
+	// The error text travels in the returned error — the root command
+	// silences cobra's own printing and main renders it — so it is read
+	// from Execute directly rather than from the captured stderr.
+	execute := func(args ...string) error {
+		root := NewRootCommand()
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs(args)
+		return root.Execute()
+	}
+
+	fixture := writeSnapshotFixture(t)
+	err := execute("scan", "--snapshot-in", fixture, "--fail-on", "none")
+	if err == nil {
+		t.Fatal("a retired flag was accepted")
+	}
+	for _, want := range []string{"scan.failOn", "scm-bench init"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q: %v", want, err)
+		}
+	}
+
+	// A genuinely unknown flag keeps cobra's own message.
+	if err := execute("scan", "--no-such-flag"); err == nil || strings.Contains(err.Error(), "moved to the config file") {
+		t.Errorf("an unknown flag was claimed to have moved: %v", err)
+	}
+}
+
+// An unadorned scan finds the project's config on its own and says so; an
+// explicit --config wins over anything discoverable.
+func TestScanDiscoversTheWorkingDirectoryConfig(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "scm-bench.yaml"), []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Chdir(dir)
+
+	_, stderr, code := run(t, "scan", "--snapshot-in", fixture)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d via the discovered failOn: none\n%s", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "using config scm-bench.yaml") {
+		t.Errorf("stderr never says which config was discovered:\n%s", stderr)
+	}
+
+	// --config beats discovery: the working directory says none, the named
+	// file says high, and high is what must decide the exit code.
+	_, stderr, code = run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "high"))
+	if code != ExitFindings {
+		t.Errorf("exit code = %d, want %d from the explicit config", code, ExitFindings)
+	}
+	if strings.Contains(stderr, "using config scm-bench.yaml") {
+		t.Errorf("an explicit --config still triggered discovery:\n%s", stderr)
+	}
+}
+
+// The user-level config is the fallback when the working directory has none.
+func TestScanDiscoversTheUserConfig(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+	t.Chdir(t.TempDir()) // an empty working directory
+
+	// SCM_BENCH_CONFIG_DIR is pinned by TestMain; config.yaml inside it is
+	// the user-level file.
+	path := filepath.Join(os.Getenv("SCM_BENCH_CONFIG_DIR"), "config.yaml")
+	if err := os.WriteFile(path, []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	_, stderr, code := run(t, "scan", "--snapshot-in", fixture)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d via the user config\n%s", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "using config "+path) {
+		t.Errorf("stderr never names the user config:\n%s", stderr)
+	}
+}
+
+func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	_, stderr, code := run(t, "init")
+	if code != ExitOK {
+		t.Fatalf("exit code = %d\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "wrote scm-bench.yaml") {
+		t.Errorf("init never says what it wrote:\n%s", stderr)
+	}
+	raw, err := os.ReadFile("scm-bench.yaml")
+	if err != nil {
+		t.Fatalf("the template was not written: %v", err)
+	}
+	for _, want := range []string{"scan:", "failOn: high", "concurrency: 8", "#thresholds:"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("template is missing %q", want)
+		}
+	}
+
+	// The template must load cleanly and reproduce the defaults exactly —
+	// otherwise init writes a file that silently changes behaviour.
+	cfg, err := config.Load("scm-bench.yaml")
+	if err != nil {
+		t.Fatalf("the template does not load: %v", err)
+	}
+	if def := config.Default(); cfg.Scan != def.Scan {
+		t.Errorf("template scan section = %+v, want the defaults %+v", cfg.Scan, def.Scan)
+	}
+
+	// Refuse the second run: a config that changes how an audit judges an
+	// instance is not something scaffolding should replace.
+	if err := os.WriteFile("scm-bench.yaml", []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if _, _, code := run(t, "init"); code != ExitError {
+		t.Errorf("exit code = %d, want %d for an existing file", code, ExitError)
+	}
+	raw, _ = os.ReadFile("scm-bench.yaml")
+	if !strings.Contains(string(raw), "failOn: none") {
+		t.Error("init overwrote an existing config")
 	}
 }

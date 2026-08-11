@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -73,18 +72,13 @@ type scanOptions struct {
 	showPassed     bool
 	details        []string
 	maxResources   int
-	failOn         string
-	failUnder      int
-	maxManual      int
 	noColor        bool
 	verbose        bool
-	insecure       bool
-	allowPlaintext bool
-	concurrency    int
-	timeout        time.Duration
-	maxDuration    time.Duration
-	progress       string
 	noRemediations bool
+
+	// The deployment-stable settings, filled from the config file's scan
+	// section rather than flags: they describe the instance, not the run.
+	scan config.Scan
 
 	snapshotIn  string
 	snapshotOut string
@@ -123,10 +117,16 @@ sections to what is named.
 
 Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
-Three thresholds drive exit 1, and they answer different questions:
-  --fail-on      are there failures this severe?
-  --fail-under   is the score acceptable?
-  --max-manual   did the scan see enough to have an opinion at all?
+The settings that describe the deployment rather than any one run — exit
+thresholds, transport, concurrency, progress — live in the config file's scan
+section rather than in flags. Run ` + "`scm-bench init`" + ` to write a commented
+scm-bench.yaml; scan finds it in the working directory (or the user config
+directory) without --config being typed.
+
+Three of those settings drive exit 1, and they answer different questions:
+  scan.failOn      are there failures this severe?
+  scan.failUnder   is the score acceptable?
+  scan.maxManual   did the scan see enough to have an opinion at all?
 
 The last one matters because controls that could not be evaluated are excluded
 from the score rather than counted against it: a token that can read very
@@ -149,7 +149,7 @@ so.`,
 
 	f.BoolVar(&opts.demo, "demo", false, "evaluate the bundled example instead of an instance, to see what a report looks like")
 
-	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file overriding the default thresholds")
+	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file; found automatically as ./scm-bench.yaml or in the user config directory")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
@@ -158,27 +158,47 @@ so.`,
 	// needs a sentinel to allow the bare form; "all" is stripped by the parser.
 	f.Lookup("details").NoOptDefVal = "all"
 	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "with --details: how many resources get a table of their own; 0 means every one")
-	f.StringVar(&opts.failOn, "fail-on", "high", "exit 1 when a failure at or above this severity exists: high, medium, low, none")
-	f.IntVar(&opts.failUnder, "fail-under", 0, "exit 1 when the score is below this; 0 disables")
-	// Defaults to off, because how much of an instance a token can read is a
-	// property of the deployment, and a guess here would fail scans that are
-	// working as well as they can. -1 rather than 0 is the off switch, since 0
-	// is the strictest setting a user could reasonably want.
-	f.IntVar(&opts.maxManual, "max-manual", -1, "exit 1 when more than this percent of controls need manual review; -1 disables")
 	f.BoolVar(&opts.noColor, "no-color", false, "disable ANSI colour")
 	f.BoolVarP(&opts.verbose, "verbose", "v", false, "log fetch progress to stderr")
-	f.BoolVar(&opts.insecure, "insecure", false, "skip TLS certificate verification (for private CAs)")
-	f.BoolVar(&opts.allowPlaintext, "allow-plaintext", false, "permit an http:// URL, sending credentials in the clear")
-	f.IntVar(&opts.concurrency, "concurrency", 8, "how many repositories to fetch in parallel")
-	f.DurationVar(&opts.timeout, "timeout", 30*time.Second, "per-request HTTP timeout")
-	f.DurationVar(&opts.maxDuration, "max-duration", 0, "abandon the scan after this long; 0 means no limit")
-	f.StringVar(&opts.progress, "progress", ProgressCompact, "what to show while scanning: full (every request), compact (one line), off (only the closing audit line)")
 	f.BoolVar(&opts.noRemediations, "no-remediations", false, "omit the remediation section from the table report")
 
 	f.StringVar(&opts.snapshotIn, "snapshot-in", "", "evaluate this snapshot file instead of contacting the instance")
 	f.StringVar(&opts.snapshotOut, "snapshot-out", "", "write the captured snapshot to this file")
 
+	// The nine flags that used to live here describe the deployment, not the
+	// run, and moved to the config file's scan section. Someone typing one
+	// from muscle memory or an old pipeline gets told where it went instead
+	// of cobra's bare "unknown flag".
+	cmd.SetFlagErrorFunc(movedFlagError)
+
 	return cmd
+}
+
+// movedFlags maps the retired scan flags to their config keys.
+var movedFlags = map[string]string{
+	"fail-on":         "scan.failOn",
+	"fail-under":      "scan.failUnder",
+	"max-manual":      "scan.maxManual",
+	"concurrency":     "scan.concurrency",
+	"timeout":         "scan.timeout",
+	"max-duration":    "scan.maxDuration",
+	"insecure":        "scan.insecure",
+	"allow-plaintext": "scan.allowPlaintext",
+	"progress":        "scan.progress",
+}
+
+// movedFlagError upgrades "unknown flag" for a retired flag into directions:
+// the config key it became, and the command that writes a config to put it
+// in. Anything else passes through untouched.
+func movedFlagError(cmd *cobra.Command, err error) error {
+	msg := err.Error()
+	for flag, key := range movedFlags {
+		if strings.Contains(msg, "--"+flag) {
+			return fmt.Errorf("--%s moved to the config file as %s\n"+
+				"run `scm-bench init` to create scm-bench.yaml, or add the key to the file --config names", flag, key)
+		}
+	}
+	return err
 }
 
 func runScan(cmd *cobra.Command, opts *scanOptions) error {
@@ -202,6 +222,31 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 		opts.baseURL, opts.token, opts.username, opts.password = "", "", "", ""
 	}
+
+	// The config comes first, because nearly everything after reads it: the
+	// scan section carries what used to be nine flags. An explicit --config
+	// wins; otherwise the file is discovered — the project's scm-bench.yaml
+	// in the working directory, then the user's config.yaml — and named on
+	// stderr, because a scan whose thresholds quietly came from a file is a
+	// scan whose exit code makes no sense.
+	configPath := opts.configPath
+	if configPath == "" {
+		discovered, err := config.Discover()
+		if err != nil {
+			return err
+		}
+		if discovered != "" {
+			configPath = discovered
+			stderr := cmd.ErrOrStderr()
+			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
+				Line(console.Info, "using config %s", discovered)
+		}
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	opts.scan = cfg.Scan
 
 	// Before asking anybody anything: an instance saved by an earlier run's
 	// menu answers the question silently. It only fills what is absent —
@@ -272,28 +317,24 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// A whole-scan deadline is opt-in. How long is too long depends entirely on
 	// how big the instance is, and a default guess would turn a legitimately
 	// long scan of a large instance into a failure.
-	if opts.maxDuration > 0 {
+	if opts.scan.MaxDuration.Get() > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.maxDuration)
+		ctx, cancel = context.WithTimeout(ctx, opts.scan.MaxDuration.Get())
 		defer cancel()
-	}
-
-	cfg, err := config.Load(opts.configPath)
-	if err != nil {
-		return err
 	}
 
 	// The tracer exists even when nothing is shown: its closing line is an
 	// account of what the token was used for, and that is worth having in a
 	// CI log too.
 	stderr := cmd.ErrOrStderr()
-	shown := strings.ToLower(opts.progress)
+	shown := strings.ToLower(opts.scan.Progress)
 	// --verbose is what asks for the request log. The default is one
 	// self-overwriting line, because a list of every GET is a description of
 	// what the tool did, and the person running a benchmark wants to know what
 	// it found — the requests are only interesting when something is wrong,
-	// which is exactly when --verbose gets typed.
-	if opts.verbose && !cmd.Flags().Changed("progress") {
+	// which is exactly when --verbose gets typed. It wins over the config's
+	// progress setting: the file is ambient, the flag was typed just now.
+	if opts.verbose {
 		shown = ProgressFull
 	}
 	if !isTerminal(stderr) && shown == ProgressFull {
@@ -415,25 +456,8 @@ func resolveCredentials(cmd *cobra.Command, opts *scanOptions) {
 }
 
 func validateScanOptions(opts *scanOptions) error {
-	switch strings.ToLower(opts.failOn) {
-	case "high", "medium", "low", "none":
-	default:
-		return fmt.Errorf("unknown --fail-on %q; want high, medium, low or none", opts.failOn)
-	}
-	switch strings.ToLower(opts.progress) {
-	case ProgressFull, ProgressCompact, ProgressOff:
-	default:
-		return fmt.Errorf("unknown --progress %q; want full, compact or off", opts.progress)
-	}
-	if opts.concurrency < 1 {
-		return fmt.Errorf("--concurrency must be at least 1")
-	}
-	if opts.failUnder < 0 || opts.failUnder > 100 {
-		return fmt.Errorf("--fail-under must be between 0 and 100, got %d", opts.failUnder)
-	}
-	if opts.maxManual < -1 || opts.maxManual > 100 {
-		return fmt.Errorf("--max-manual must be between 0 and 100, or -1 to disable, got %d", opts.maxManual)
-	}
+	// The scan section's own checks (failOn, progress, concurrency, …) run in
+	// config.Validate, where the settings now live.
 	// Checked here as well as in the fetcher so it costs nothing to find out.
 	// The fetcher only reaches its own check after the preflight and the
 	// instance-level fetches, so a typo in a flag was answered by a network
@@ -487,10 +511,10 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Token:          opts.token,
 		Username:       opts.username,
 		Password:       opts.password,
-		Timeout:        opts.timeout,
-		Concurrency:    opts.concurrency,
-		Insecure:       opts.insecure,
-		AllowPlaintext: opts.allowPlaintext,
+		Timeout:        opts.scan.Timeout.Get(),
+		Concurrency:    opts.scan.Concurrency,
+		Insecure:       opts.scan.Insecure,
+		AllowPlaintext: opts.scan.AllowPlaintext,
 		OnRequest: func(e bitbucketdc.RequestEvent) {
 			trace.record(e)
 			progress.tick()
@@ -514,7 +538,7 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 	return fetcher.Fetch(ctx, bitbucketdc.FetchOptions{
 		Projects:         opts.projects,
 		Repositories:     opts.repositories,
-		Concurrency:      opts.concurrency,
+		Concurrency:      opts.scan.Concurrency,
 		ToolVersion:      Version,
 		Progress:         progress.callback(),
 		OnRepositoryDone: trace.repositoryDone,
@@ -525,9 +549,9 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 // The bare error is whatever request happened to be in flight, which reads as a
 // network problem rather than the limit the operator chose.
 func describeScanFailure(ctx context.Context, opts *scanOptions, err error) error {
-	if opts.maxDuration > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("scan abandoned after --max-duration %s: %w\n"+
-			"raise or drop --max-duration, or narrow the scan with --project/--repository", opts.maxDuration, err)
+	if opts.scan.MaxDuration.Get() > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("scan abandoned after scan.maxDuration %s: %w\n"+
+			"raise or drop scan.maxDuration in the config, or narrow the scan with --project/--repository", opts.scan.MaxDuration.Get(), err)
 	}
 	return err
 }
@@ -621,9 +645,9 @@ func hasNoColorEnv() bool { return os.Getenv("NO_COLOR") != "" }
 // The three conditions answer three different questions, and a scan can pass
 // the first while failing the others:
 //
-//   - --fail-on: are there failures this bad?
-//   - --fail-under: is the score acceptable?
-//   - --max-manual: did the scan actually see enough to have an opinion?
+//   - scan.failOn: are there failures this bad?
+//   - scan.failUnder: is the score acceptable?
+//   - scan.maxManual: did the scan actually see enough to have an opinion?
 //
 // The last one exists because MANUAL is excluded from both sides of the score,
 // which is right in itself and perverse in aggregate: the fewer settings a
@@ -645,32 +669,32 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 		}
 	}
 
-	if opts.maxManual >= 0 {
+	if opts.scan.MaxManual >= 0 {
 		decidable := rep.Score.Passed + rep.Score.Failed + rep.Score.Manual
 		if decidable > 0 {
 			percent := rep.Score.Manual * 100 / decidable
-			if percent > opts.maxManual {
+			if percent > opts.scan.MaxManual {
 				return &exitCodeError{
 					code: ExitFindings,
-					msg: fmt.Sprintf("%d%% of controls need manual review (--max-manual %d%%); the scan could not see enough to judge this instance\n"+
-						"grant the token more read access, or raise --max-manual if this is expected",
-						percent, opts.maxManual),
+					msg: fmt.Sprintf("%d%% of controls need manual review (scan.maxManual %d%%); the scan could not see enough to judge this instance\n"+
+						"grant the token more read access, or raise scan.maxManual if this is expected",
+						percent, opts.scan.MaxManual),
 				}
 			}
 		}
 	}
 
-	if opts.failUnder > 0 && rep.Score.Value < opts.failUnder {
+	if opts.scan.FailUnder > 0 && rep.Score.Value < opts.scan.FailUnder {
 		return &exitCodeError{
 			code: ExitFindings,
-			msg:  fmt.Sprintf("score %d is below --fail-under %d", rep.Score.Value, opts.failUnder),
+			msg:  fmt.Sprintf("score %d is below scan.failUnder %d", rep.Score.Value, opts.scan.FailUnder),
 		}
 	}
 
-	if !strings.EqualFold(opts.failOn, "none") && rep.HasFailureAtOrAbove(opts.failOn) {
+	if !strings.EqualFold(opts.scan.FailOn, "none") && rep.HasFailureAtOrAbove(opts.scan.FailOn) {
 		return &exitCodeError{
 			code: ExitFindings,
-			msg:  failureSummary(rep, opts.failOn),
+			msg:  failureSummary(rep, opts.scan.FailOn),
 		}
 	}
 	return nil
