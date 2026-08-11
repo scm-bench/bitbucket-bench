@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -85,15 +84,19 @@ func TestLoadInstanceRejectsUnknownKeys(t *testing.T) {
 }
 
 // SCM_BENCH_CONFIG_DIR is both the pipeline's pin and the test suite's
-// isolation, so it has to actually win over the platform directory.
+// isolation, so it has to actually win over the platform directory. The
+// expectation is built with filepath.Join rather than a literal, because the
+// separator is the platform's — a hard-coded /pinned/elsewhere passed on Unix
+// and failed on Windows without testing anything different.
 func TestInstancePathHonoursTheOverride(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", "/pinned/elsewhere")
+	dir := t.TempDir()
+	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
 
 	path, err := InstancePath()
 	if err != nil {
 		t.Fatalf("path: %v", err)
 	}
-	if !strings.HasPrefix(path, "/pinned/elsewhere") {
-		t.Errorf("path = %q ignores SCM_BENCH_CONFIG_DIR", path)
+	if want := filepath.Join(dir, "instance.yaml"); path != want {
+		t.Errorf("path = %q, want %q", path, want)
 	}
 }
