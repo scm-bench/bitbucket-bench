@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -83,6 +84,8 @@ type scanOptions struct {
 
 	snapshotIn  string
 	snapshotOut string
+	// last renders the previous scan's cached snapshot instead of fetching.
+	last bool
 
 	// logMu serializes progress output: the fetcher scans repositories
 	// concurrently and calls the log callback from each goroutine.
@@ -115,6 +118,14 @@ The table report is an overview aggregated by control: one row per failed
 control, however many resources it failed on. --details expands it to one
 section per resource; --details=<resource|control>[,...] narrows those
 sections to what is named.
+
+Each network scan also leaves its snapshot behind (0600, under the user
+config directory), so the next question does not cost another scan:
+` + "`scan --last --details`" + ` expands the previous scan's findings without
+contacting the instance, and any report option works the same way. The
+snapshot is the same map of weak points the report is — scan.cache: false
+in the config keeps it off disk, and deleting the cache directory forgets
+what has been kept.
 
 Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
@@ -167,6 +178,7 @@ so.`,
 
 	f.StringVar(&opts.snapshotIn, "snapshot-in", "", "evaluate this snapshot file instead of contacting the instance")
 	f.StringVar(&opts.snapshotOut, "snapshot-out", "", "write the captured snapshot to this file")
+	f.BoolVar(&opts.last, "last", false, "render the previous scan's cached snapshot instead of contacting the instance")
 
 	// The nine flags that used to live here describe the deployment, not the
 	// run, and moved to the config file's scan section. Someone typing one
@@ -218,11 +230,36 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		// would look exactly like the scan that was asked for and not be it.
 		// Flags merely filled in from the environment do not count — an
 		// exported BITBUCKET_URL must not make the demo argue.
-		for _, name := range []string{"url", "token", "username", "password", "project", "repository", "snapshot-in"} {
+		for _, name := range []string{"url", "token", "username", "password", "project", "repository", "snapshot-in", "last"} {
 			if cmd.Flags().Changed(name) {
 				return fmt.Errorf("--demo evaluates the bundled example, so --%s has nothing to act on; drop one of them", name)
 			}
 		}
+		opts.baseURL, opts.token, opts.username, opts.password = "", "", "", ""
+	}
+
+	// --last replays the previous scan from its cached snapshot, so every
+	// flag that shapes a fresh capture has nothing to act on and is refused
+	// rather than ignored, for the demo's reason. Only typed flags count:
+	// an exported BITBUCKET_URL must not make --last argue. From here on it
+	// is exactly --snapshot-in pointed at the cache, and inherits its rules —
+	// no credentials needed, --project/--repository refused, exit thresholds
+	// applied.
+	if opts.last {
+		for _, name := range []string{"url", "token", "username", "password", "project", "repository", "snapshot-in"} {
+			if cmd.Flags().Changed(name) {
+				return fmt.Errorf("--last renders the previous scan's cached snapshot, so --%s has nothing to act on; drop one of them", name)
+			}
+		}
+		path, err := config.LatestSnapshotCache()
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			return fmt.Errorf("no cached snapshot to render: --last replays the previous scan, and none has been cached yet\n" +
+				"scan the instance first; its snapshot is kept automatically unless the config sets scan.cache: false")
+		}
+		opts.snapshotIn = path
 		opts.baseURL, opts.token, opts.username, opts.password = "", "", "", ""
 	}
 
@@ -368,6 +405,20 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return describeScanFailure(ctx, opts, err)
 	}
 
+	// A replayed snapshot must say how old it is, prominently and every time:
+	// the report below looks exactly like a fresh scan, and its one real
+	// difference from one is the capture time. Past a day it becomes a
+	// warning — old enough that "current state" is now a guess.
+	if opts.last {
+		w := console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}
+		age := time.Since(snapshot.Metadata.GeneratedAt)
+		if age > staleSnapshotAge {
+			w.Line(console.Warn, "rendering the snapshot of %s captured %s ago — scan again for current state", snapshot.Metadata.BaseURL, humanAge(age))
+		} else {
+			w.Line(console.Info, "rendering the snapshot of %s captured %s ago", snapshot.Metadata.BaseURL, humanAge(age))
+		}
+	}
+
 	// Only now, with the fetch behind it, is the interactively entered
 	// instance worth remembering: a credential saved before it worked would
 	// replay its typo on every following run. A failure to write is a warning
@@ -387,6 +438,24 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			return err
 		}
 		logf(cmd, opts, "snapshot written to %s", opts.snapshotOut)
+	}
+
+	// A network scan's snapshot is kept for --last — 0600, like every other
+	// copy of an instance's posture this tool writes; scan.cache: false in
+	// the config keeps it off disk. Replays and the demo are excluded: one
+	// would only rewrite what it just read, the other would let --last pass
+	// off the bundled example as somebody's instance. The write is named on
+	// stderr because data appearing on disk unannounced is how a cache
+	// becomes a leak; a failure is a warning for saveInstance's reason — the
+	// scan in hand succeeded.
+	if !opts.demo && opts.snapshotIn == "" && opts.scan.Cache {
+		if path, err := config.SnapshotCachePath(opts.baseURL); err != nil {
+			emit(cmd, opts, console.Warn, "could not cache the snapshot: %v", err)
+		} else if err := writeSnapshot(path, snapshot); err != nil {
+			emit(cmd, opts, console.Warn, "could not cache the snapshot: %v", err)
+		} else {
+			logf(cmd, opts, "snapshot cached for --last (%s)", path)
+		}
 	}
 
 	eng, err := engine.New(ctx, cfg, snapshot.Metadata.Platform)
@@ -583,6 +652,25 @@ func parseSnapshot(raw []byte, source string) (*scm.Snapshot, error) {
 		return nil, fmt.Errorf("%s does not record which platform it came from", source)
 	}
 	return &snapshot, nil
+}
+
+// staleSnapshotAge is when a replayed snapshot's age line turns into a
+// warning: past a day, treating it as current state is a guess.
+const staleSnapshotAge = 24 * time.Hour
+
+// humanAge renders a snapshot's age at the precision the decision needs:
+// seconds are noise, and past two days so are hours.
+func humanAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "under a minute"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func writeSnapshot(path string, snapshot *scm.Snapshot) error {

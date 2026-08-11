@@ -78,6 +78,12 @@ type Scan struct {
 	AllowPlaintext bool `yaml:"allowPlaintext"`
 	// Progress is what to show while scanning: full, compact, or off.
 	Progress string `yaml:"progress"`
+	// Cache keeps each network scan's snapshot (0600, under the user config
+	// directory) so `scan --last` can re-render it — --details, another
+	// format, new thresholds — without contacting the instance again. The
+	// snapshot is a map of the instance's weak points, which is why this is
+	// a config key at all: false keeps it off disk.
+	Cache bool `yaml:"cache"`
 }
 
 // Duration is time.Duration that reads YAML the way people write durations:
@@ -136,6 +142,7 @@ func Default() Config {
 			Timeout:     Duration(30 * time.Second),
 			MaxDuration: 0,
 			Progress:    "compact",
+			Cache:       true,
 		},
 		Thresholds: Thresholds{
 			MinApprovers:        2,
