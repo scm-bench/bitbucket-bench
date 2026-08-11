@@ -306,11 +306,11 @@ func TestUnreadIsDistinctFromManualInTheStatusColumn(t *testing.T) {
 func TestUnreadControlsAreLeftOutOfTheRemediations(t *testing.T) {
 	out := renderReport(t, reportWithUnreadableResource(t, "1.1.15", "1.1.16"), Options{Format: FormatTable})
 
-	remediations := strings.Index(out, "Remediations (")
-	if remediations < 0 {
-		t.Fatalf("no remediations section\n---\n%s", out)
+	review := strings.Index(out, "Manual review (")
+	if review < 0 {
+		t.Fatalf("no manual review section\n---\n%s", out)
 	}
-	tail := out[remediations:]
+	tail := out[review:]
 	for _, unwanted := range []string{"Branch permissions -> 1.1.15", "Branch permissions -> 1.1.16"} {
 		if strings.Contains(tail, unwanted) {
 			t.Errorf("an unread control was given a remediation: %q\n---\n%s", unwanted, tail)
@@ -319,8 +319,12 @@ func TestUnreadControlsAreLeftOutOfTheRemediations(t *testing.T) {
 	if !strings.Contains(tail, "Enforce MFA at the IdP") {
 		t.Errorf("the control that does need a person lost its remediation\n---\n%s", tail)
 	}
-	if !strings.Contains(out, "Remediations (1)") {
-		t.Errorf("remediations should count only the controls that have one\n---\n%s", out)
+	if !strings.Contains(out, "Manual review (1)") {
+		t.Errorf("the section should count only the controls that have an entry\n---\n%s", out)
+	}
+	// With nothing failed there is no fix section at all.
+	if strings.Contains(out, "Remediations (") {
+		t.Errorf("no control failed, so no Remediations section should print\n---\n%s", out)
 	}
 }
 
@@ -1490,3 +1494,109 @@ func TestWideTerminalKeepsLongTitlesOnOneLine(t *testing.T) {
 		t.Errorf("a 79-character title should fit on one line at COLUMNS=140\n---\n%s", out)
 	}
 }
+
+// The SCORE line counts findings; the Findings table has one row per control;
+// the process exits saying "N controls failed". This is the line that lets a
+// reader reconcile them, worded exactly as the exit line words it.
+func TestSummaryBridgesControlsAndFindings(t *testing.T) {
+	out := renderReport(t, reportWithRepeatedFinding(t, 4), Options{Format: FormatTable})
+	if !strings.Contains(out, "1 control failed across 4 findings") {
+		t.Errorf("no control/finding bridge line\n---\n%s", out)
+	}
+
+	// One control failing once: "across 1 finding" would be noise.
+	single := render(t, Options{Format: FormatTable})
+	if !strings.Contains(single, "1 control failed") || strings.Contains(single, "across 1 finding") {
+		t.Errorf("the bridge line should skip the redundant across-clause\n---\n%s", single)
+	}
+
+	// Nothing failed: no line.
+	clean := reportWithRepeatedFinding(t, 1)
+	clean.Findings[0].Status = engine.StatusPass
+	clean.Score = engine.Compute(clean.Findings)
+	if out := renderReport(t, clean, Options{Format: FormatTable}); strings.Contains(out, "control") && strings.Contains(out, "failed across") {
+		t.Errorf("a clean report printed a failure bridge\n---\n%s", out)
+	}
+}
+
+func TestCoverageLineCountsFindings(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+	if !strings.Contains(out, "scored 2 of 3 findings") {
+		t.Errorf("the coverage line should count findings, not controls\n---\n%s", out)
+	}
+}
+
+// The scan's own blind spot is a finding about the token, and it gets a fix
+// like any other: without it the report's biggest caveat is the one problem
+// it never says how to solve.
+func TestUnreadableWarningsCarryAFix(t *testing.T) {
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{
+		"global user permissions are not readable (GET /x: 401 nope); rules will report MANUAL",
+	}
+	out := renderReport(t, rep, Options{Format: FormatTable})
+	if !containsText(out, "fix: rerun with a token that has administrator read access") {
+		t.Errorf("unreadable warnings got no fix line\n---\n%s", out)
+	}
+
+	// A warning that is not about access gets no access advice.
+	rep.Metadata.Warnings = []string{"the scan covered 0 repositories"}
+	out = renderReport(t, rep, Options{Format: FormatTable})
+	if containsText(out, "administrator read access") {
+		t.Errorf("a non-access warning was answered with token advice\n---\n%s", out)
+	}
+}
+
+// Fixes and judgements are different asks, so they get different sections —
+// in both layouts.
+func TestRemediationsSplitFixesFromManualReview(t *testing.T) {
+	for _, details := range []bool{false, true} {
+		out := render(t, Options{Format: FormatTable, Details: details})
+		fixes := strings.Index(out, "Remediations (1)")
+		review := strings.Index(out, "Manual review (1)")
+		if fixes < 0 || review < 0 {
+			t.Fatalf("details=%v: expected both sections\n---\n%s", details, out)
+		}
+		if fixes > review {
+			t.Errorf("details=%v: fixes should come before manual review\n---\n%s", details, out)
+		}
+		// The failed control is in the first section, the manual one in the second.
+		between := out[fixes:review]
+		if !strings.Contains(between, "CIS-1.1.15") || strings.Contains(between, "CIS-1.3.5") {
+			t.Errorf("details=%v: controls landed in the wrong sections\n---\n%s", details, out)
+		}
+	}
+}
+
+// A control failing on every repository, whose remediation names a
+// project-level variant, says so in one line: it is the single move that
+// fixes the whole row, and slimming the paragraphs had cost exactly this.
+func TestFullSweepPointsAtTheProjectLevelSetting(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 4)
+	for i := range rep.Findings {
+		rep.Findings[i].Remediation = "Enable the check at Repository settings. Set the same at Project settings to cover the project."
+	}
+	rep.Score = engine.Compute(rep.Findings)
+	out := flattened(renderReport(t, rep, Options{Format: FormatTable}))
+	if !strings.Contains(out, "Failing on all 4 repositories — setting it once at Project settings covers them together.") {
+		t.Errorf("a full sweep with a project-level variant got no pointer\n---\n%s", out)
+	}
+
+	// A partial failure keeps the plain line: the project-wide move would
+	// also touch repositories that pass.
+	rep.Findings[3].Status = engine.StatusPass
+	rep.Score = engine.Compute(rep.Findings)
+	if out := flattened(renderReport(t, rep, Options{Format: FormatTable})); strings.Contains(out, "setting it once at Project settings") {
+		t.Errorf("a partial failure was given the full-sweep advice\n---\n%s", out)
+	}
+
+	// A remediation with no project-level variant gets no invented one.
+	rep = reportWithRepeatedFinding(t, 4) // "Repository settings -> Branch permissions"
+	if out := flattened(renderReport(t, rep, Options{Format: FormatTable})); strings.Contains(out, "setting it once at Project settings") {
+		t.Errorf("advice was invented for a control with no project-level variant\n---\n%s", out)
+	}
+}
+
+// flattened collapses all whitespace to single spaces, so a phrase can be
+// found no matter where the renderer wrapped it.
+func flattened(s string) string { return strings.Join(strings.Fields(stripANSI(s)), " ") }

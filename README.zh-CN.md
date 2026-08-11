@@ -286,8 +286,9 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
 SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      13 controls failed
       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-      scored 28 of 47 controls (59%); 19 could not be evaluated
+      scored 28 of 47 findings (59%); 19 could not be evaluated
 
 Report Summary
 
@@ -341,7 +342,10 @@ Scan warnings
   - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
     not permitted to access this resource); administrator counts are lower bounds
 
-Remediations (17)
+  fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
+       not see.
+
+Remediations (13)
 
   CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
               checks.
@@ -350,7 +354,14 @@ Remediations (17)
               permissions.
               https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-... 每条规则一行修法，下面跟着厂商文档链接 ...
+... 每条失败的规则一行修法，下面跟着厂商文档链接 ...
+
+Manual review (4)
+
+  CIS-1.3.5   Require MFA in the IdP, then disable direct login at Administration -> Authentication.
+              https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html
+
+... API 判定不了、需要人来确认的规则 ...
 
 Details: rerun with --details for per-resource findings and full remediation steps, or
 --details=<resource|control>[,...] to filter; -o json for the full report.
@@ -359,10 +370,14 @@ Details: rerun with --details for per-resource findings and full remediation ste
 上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
 下的真实输出，只在标了 `...` 的地方做了省略。
 
-汇总放在最前，因为终端是从上往下读的。`scored N of M` 这一行值得在看分数之前先读：
-无法判定的规则不进入分数的分子，也不进入分母 —— 单看每一条规则这是对的，合起来却有
-误导性，因为分母被缩小了，于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的
-分数。`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
+汇总放在最前，因为终端是从上往下读的。这里有两套计数交汇，第二行就是它们之间的桥：
+分数按 *finding*（一条规则对一个资源）计，而下面的 Findings 表和结尾的退出行按
+*规则* 计 —— 顶部的 "13 failed" 和它下面的 "13 controls failed" 是同一事实的两面
+（更大的扫描会写成 "6 controls failed across 23 findings"）。`scored N of M findings`
+这一行值得在看分数之前先读：无法判定的 finding 不进入分数的分子，也不进入分母 ——
+单看每一条规则这是对的，合起来却有误导性，因为分母被缩小了，于是一个读不到多少东西的
+token 反而能从很小的样本里得出很高的分数。`--max-manual` 就是把这种情况变成一次失败的
+运行，而不是一份好看的报告。
 
 **总览按规则聚合，因为同一个配置错误铺在五十个仓库上是一个问题，不是五十个。**
 每行是一条规则；`Resources` 列说明它铺得多广（`1/3`：在被评估的三个资源中的一个上失败），
@@ -391,10 +406,14 @@ scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪
 印出「怎么改设置」等于在说反话。JSON 与 SARIF 里两者都是 `MANUAL`，因为那才是规则返回的东西。
 
 **总览里的 Remediations 一条只占一行**：一句话修法，下面用暗色跟着厂商文档链接
-（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。完整段落 ——
-设置路径、项目级的等价做法、配置项名称 —— 在 `--details` 里打印，且其各节中每条
-发现的 `Finding` 单元格还带着证据和一行 `fix:`。`--no-remediations` 在两种布局下
-都能整段去掉。
+（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。它分成两节，
+因为两类条目要的东西不同：`Remediations` 是配置错了、怎么改；`Manual review` 是
+API 判定不了、需要人来确认 —— 混成一个清单会把十条读成十个坏东西，其实坏的只有六个。
+在**所有**仓库上都失败、且修法有项目级变体的规则，会在它那一行里直说
+（"Failing on all 4 repositories — setting it once at Project settings covers them
+together"），因为那是一步修完整行的动作。完整段落 —— 设置路径、项目级的等价做法、
+配置项名称 —— 在 `--details` 里打印，且其各节中每条发现的 `Finding` 单元格还带着
+证据和一行 `fix:`。`--no-remediations` 在两种布局下都能把两节一起去掉。
 
 宽度在 stdout 是终端时来自终端本身；导出的 `COLUMNS` 可以覆盖它，管道、重定向与
 `--output-file` 得到 80。无论来源如何都夹在 60–160 之间。上限约束的是散文：弹性表格列
