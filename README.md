@@ -808,7 +808,13 @@ two test suites and how to cut a release are all in
 
 **v0.2** — CIS 1.2.2 (repository creation limits, once the Project Creator
 interpretation is settled), default reviewers as a partial CIS-1.1.6 signal,
-per-project policy overrides.
+and per-project policy overrides.
+
+**Under consideration** — `--details` without a rescan, via an automatic
+snapshot cache. The blocker is not code: it means keeping a map of an
+instance's weak points on disk by default, and that trade deserves a decision
+rather than a feature flag. Until then, `--snapshot-out` / `--snapshot-in` is
+the manual form of the same thing.
 
 **Later** — GitHub Enterprise and GitLab fetchers. The snapshot schema is already
 platform-neutral, and controls declare which platforms they apply to, so this is
