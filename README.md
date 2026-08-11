@@ -323,8 +323,9 @@ the whole scan:
 scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
 SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      13 controls failed
       weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-      scored 28 of 47 controls (59%); 19 could not be evaluated
+      scored 28 of 47 findings (59%); 19 could not be evaluated
 
 Report Summary
 
@@ -378,7 +379,10 @@ Scan warnings
   - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
     not permitted to access this resource); administrator counts are lower bounds
 
-Remediations (17)
+  fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
+       not see.
+
+Remediations (13)
 
   CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
               checks.
@@ -387,7 +391,14 @@ Remediations (17)
               permissions.
               https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-... one one-line fix per control, with the vendor's doc page underneath ...
+... one one-line fix per failed control, with the vendor's doc page underneath ...
+
+Manual review (4)
+
+  CIS-1.3.5   Require MFA in the IdP, then disable direct login at Administration -> Authentication.
+              https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html
+
+... the controls no API can decide, where the ask is a person's judgement ...
 
 Details: rerun with --details for per-resource findings and full remediation steps, or
 --details=<resource|control>[,...] to filter; -o json for the full report.
@@ -396,12 +407,18 @@ Details: rerun with --details for per-resource findings and full remediation ste
 That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
 at `COLUMNS=100`, abbreviated only where a line is marked `...`.
 
-The summary leads because a terminal is read from its top. The `scored N of M`
-line is worth reading before the score above it: controls that could not be
-evaluated are excluded from both sides of the fraction, which is right for any
-single control and misleading in aggregate, since a token that can read very
-little produces a high score from a small sample. `--max-manual` turns that into
-a failed run rather than a good-looking one.
+The summary leads because a terminal is read from its top. Two countings meet
+here and the second line is the bridge between them: the score counts
+*findings* — one control against one resource — while the Findings table below
+and the closing exit line count *controls*, so "13 failed" up top and "13
+controls failed" beneath it are the same fact seen from both sides (on a
+larger scan it reads "6 controls failed across 23 findings"). The
+`scored N of M findings` line is worth reading before the score above it:
+findings that could not be evaluated are excluded from both sides of the
+fraction, which is right for any single control and misleading in aggregate,
+since a token that can read very little produces a high score from a small
+sample. `--max-manual` turns that into a failed run rather than a good-looking
+one.
 
 **The overview aggregates by control, because one misconfiguration across fifty
 repositories is one problem, not fifty.** Each row is a control; the `Resources`
@@ -443,10 +460,18 @@ is what the control returned.
 **Remediations are one line each in the overview**: the one-sentence fix, with
 the vendor's documentation page dim underneath it (the generic CIS benchmark
 landing page is on every control and identifies none of them, so it never
-earns a line). The full paragraphs — settings paths, project-wide variants,
-config keys — print with `--details`, and in its sections each finding's
-`Finding` cell also carries the evidence and the one-line `fix:` beside the
-verdict. `--no-remediations` drops the section entirely in both layouts.
+earns a line). They come in two sections, because the entries ask for two
+different things: `Remediations` is settings that are wrong and how to change
+them, `Manual review` is controls no API can decide, where the ask is a
+person's judgement — one undivided list read as ten broken things when six
+were. A control failing on **every** repository whose remediation has a
+project-level variant says so in its line ("Failing on all 4 repositories —
+setting it once at Project settings covers them together"), because that is
+the single move that fixes the whole row. The full paragraphs — settings
+paths, project-wide variants, config keys — print with `--details`, and in
+its sections each finding's `Finding` cell also carries the evidence and the
+one-line `fix:` beside the verdict. `--no-remediations` drops both sections
+in both layouts.
 
 Width comes from the terminal itself when stdout is one; an exported `COLUMNS`
 overrides it, and pipes, redirects and `--output-file` get 80. Whatever the

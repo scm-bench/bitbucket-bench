@@ -90,7 +90,7 @@ func writeTable(w io.Writer, rep *engine.Report, opts Options) error {
 	// next to the symptom instead of above the table that hides it.
 	writeWarnings(w, rep, p, width)
 	if !opts.NoRemediations {
-		writeRemediationSummaries(w, rep.Findings, p, width)
+		writeRemediationSummaries(w, rep, p, width)
 	}
 	writeHint(w, p, width)
 	return nil
@@ -201,6 +201,19 @@ func writeSummary(w io.Writer, rep *engine.Report, p painter, width int) {
 		line(w, "      %s", painted)
 	}
 
+	// The bridge between the two countings this page uses. The line above
+	// counts findings — one control against one resource — and the Findings
+	// table below has one row per control; a reader meeting "23 failed" over
+	// a ten-row table cannot reconcile them without this. Worded exactly as
+	// the process's closing line words it, so top and bottom agree.
+	if controls := failedControls(rep.Findings); controls > 0 {
+		text := fmt.Sprintf("%s failed", console.Pluralize(controls, "control"))
+		if s.Failed > controls {
+			text += fmt.Sprintf(" across %s", console.Pluralize(s.Failed, "finding"))
+		}
+		summaryLine(w, p, width, ansiDim, text)
+	}
+
 	summaryLine(w, p, width, ansiDim, fmt.Sprintf(
 		"weighted %d/%d (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)",
 		s.EarnedWeight, s.TotalWeight,
@@ -222,9 +235,22 @@ func writeSummary(w io.Writer, rep *engine.Report, p painter, width int) {
 			colour = ansiYellow
 		}
 		summaryLine(w, p, width, colour, fmt.Sprintf(
-			"scored %d of %d controls (%d%%); %d could not be evaluated",
+			"scored %d of %d findings (%d%%); %d could not be evaluated",
 			scored, decidable, coverage, s.Manual))
 	}
+}
+
+// failedControls counts the distinct controls with at least one failure —
+// the number the closing exit line reports, restated here so the report's
+// first numbers and its last one use the same arithmetic.
+func failedControls(findings []engine.Finding) int {
+	seen := map[string]bool{}
+	for _, f := range findings {
+		if f.Status == engine.StatusFail {
+			seen[f.CheckID] = true
+		}
+	}
+	return len(seen)
 }
 
 // summaryLine writes one indented, wrapped line of the summary block.
@@ -465,7 +491,12 @@ func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 		// reads before the forensics. Wrapping happens before painting, per
 		// the rule everywhere else here: escapes are width the reader never
 		// sees.
+		unreadable := false
 		for _, warning := range rep.Metadata.Warnings {
+			// Both phrasings the fetcher uses for an access refusal.
+			if strings.Contains(warning, "not readable") || strings.Contains(warning, "could not be expanded") {
+				unreadable = true
+			}
 			depth := 0
 			for i, l := range console.Wrap(warning, width-4) {
 				prefix := "  - "
@@ -476,6 +507,15 @@ func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 				painted, depth = dimParens(p, l, depth)
 				line(w, "%s%s", prefix, painted)
 			}
+		}
+		// The failed controls all carry a fix; the scan's own blind spot is a
+		// finding about the token and deserves one too. Without this line the
+		// report's biggest caveat — how much went unevaluated — is the one
+		// problem it never says how to solve.
+		if unreadable {
+			blank(w)
+			prose(w, width, "  fix: ", 7,
+				"rerun with a token that has administrator read access, so the scan can evaluate what it could not see.")
 		}
 	}
 	if len(rep.Errors) > 0 {
@@ -652,20 +692,25 @@ func findingCell(f engine.Finding) string {
 // the verdict. Controls that merely went unread are left out — their settings
 // are not known to be wrong, and printing how to change them would say
 // otherwise.
+//
+// Two sections, because the entries ask for two different things:
+// "Remediations" is settings that are wrong and how to change them; "Manual
+// review" is controls no API can decide, where the ask is a person's
+// judgement. One undivided list read as ten broken things when six were.
 func writeRemediations(w io.Writer, findings []engine.Finding, p painter, width int) {
 	ordered := remediationOrder(findings)
 	if len(ordered) == 0 {
 		return
 	}
-
+	fails, manuals := splitRemediations(ordered)
 	idWidth := remediationIDWidth(ordered)
-	blank(w)
-	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("Remediations (%d)", len(ordered))))
-	blank(w)
-	for _, f := range ordered {
+
+	full := func(f engine.Finding) {
 		id := f.CheckID + strings.Repeat(" ", idWidth-len(f.CheckID))
 		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, f.Remediation)
 	}
+	writeRemediationSection(w, p, "Remediations", fails, full)
+	writeRemediationSection(w, p, "Manual review", manuals, full)
 }
 
 // writeRemediationSummaries is the overview's counterpart: one line per
@@ -673,20 +718,27 @@ func writeRemediations(w io.Writer, findings []engine.Finding, p painter, width 
 // with the vendor's documentation page dim underneath it. The full paragraphs
 // are a --details away; ten of them was most of the report by weight, read by
 // someone who had not yet decided which control to act on.
-func writeRemediationSummaries(w io.Writer, findings []engine.Finding, p painter, width int) {
-	ordered := remediationOrder(findings)
+func writeRemediationSummaries(w io.Writer, rep *engine.Report, p painter, width int) {
+	ordered := remediationOrder(rep.Findings)
 	if len(ordered) == 0 {
 		return
 	}
-
+	fails, manuals := splitRemediations(ordered)
 	idWidth := remediationIDWidth(ordered)
-	blank(w)
-	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("Remediations (%d)", len(ordered))))
-	blank(w)
 	pad := strings.Repeat(" ", idWidth+4)
-	for _, f := range ordered {
+	sweeps := fullSweeps(rep.Findings)
+
+	slim := func(f engine.Finding) {
 		id := f.CheckID + strings.Repeat(" ", idWidth-len(f.CheckID))
-		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, fixLine(f))
+		text := fixLine(f)
+		// A control failing on every repository, whose full remediation
+		// names a project-level variant, gets that variant's one-line form
+		// here: it is the single move that fixes the whole row, and slimming
+		// the paragraph had cost exactly this advice.
+		if n := sweeps[f.CheckID]; n > 1 && strings.Contains(f.Remediation, "Project settings") {
+			text += fmt.Sprintf(" Failing on all %d repositories — setting it once at Project settings covers them together.", n)
+		}
+		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, text)
 		// The link is one unbreakable token, printed whole even past the
 		// width — the same policy writeHeader applies to the base URL, and
 		// what Wrap would do with it anyway.
@@ -694,6 +746,47 @@ func writeRemediationSummaries(w io.Writer, findings []engine.Finding, p painter
 			line(w, "%s%s", pad, p.paint(ansiDim, ref))
 		}
 	}
+	writeRemediationSection(w, p, "Remediations", fails, slim)
+	writeRemediationSection(w, p, "Manual review", manuals, slim)
+}
+
+func writeRemediationSection(w io.Writer, p painter, heading string, entries []engine.Finding, entry func(engine.Finding)) {
+	if len(entries) == 0 {
+		return
+	}
+	blank(w)
+	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("%s (%d)", heading, len(entries))))
+	blank(w)
+	for _, f := range entries {
+		entry(f)
+	}
+}
+
+// splitRemediations divides the ordered controls by what they ask of the
+// reader: a changed setting, or a judgement.
+func splitRemediations(ordered []engine.Finding) (fails, manuals []engine.Finding) {
+	for _, f := range ordered {
+		if f.Status == engine.StatusFail {
+			fails = append(fails, f)
+		} else {
+			manuals = append(manuals, f)
+		}
+	}
+	return fails, manuals
+}
+
+// fullSweeps maps CheckID to the repository count for controls that failed on
+// every repository they were evaluated against — the shape where one
+// project-level setting fixes the whole row. Instance-level controls and
+// partial rows are absent.
+func fullSweeps(findings []engine.Finding) map[string]int {
+	sweeps := map[string]int{}
+	for _, t := range tallyControls(findings, false) {
+		if t.status == statusFail && !t.instance && t.applicable > 1 && t.affected == t.applicable {
+			sweeps[t.checkID] = t.applicable
+		}
+	}
+	return sweeps
 }
 
 // remediationOrder picks the controls the remediation sections list: FAIL or
