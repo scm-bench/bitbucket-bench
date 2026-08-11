@@ -133,12 +133,13 @@ const (
 // Width reports how wide a rendered line may be.
 //
 // It reads COLUMNS rather than asking the kernel for the window size. The ioctl
-// is not portable across the three operating systems this ships on, and
-// golang.org/x/term is not worth adding to a supply chain security tool for one
-// integer — the same trade already made for terminal detection in the CLI. The
-// cost is that an unexported COLUMNS gets 80, which is the right answer for a
-// pipe and a safe one for a terminal; a reader who wants their full window can
-// export it.
+// is not portable across the three operating systems this ships on, and though
+// golang.org/x/term has since arrived as a dependency (the CLI's first-run
+// prompt reads the token through it), asking it for a size would tie this
+// package to a file descriptor when its callers hold io.Writers. The cost is
+// that an unexported COLUMNS gets 80, which is the right answer for a pipe and
+// a safe one for a terminal; a reader who wants their full window can export
+// it.
 func Width() int {
 	w := fallbackWidth
 	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {

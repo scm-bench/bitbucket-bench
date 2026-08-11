@@ -108,11 +108,21 @@ scm-bench scan -o sarif --output-file report.sarif
 > 每条规则的判定文字是规则自己生成的，换一种语言不是加一张字符串表，而是在二十条规则里
 > 各复制一份消息拼装逻辑。半套翻译——标题是一种语言、发现描述是另一种——比不翻译更难读。
 
-手边没有实例？内置样例快照可以直接跑通所有输出格式：
+手边没有实例？二进制里内置了样例，一个参数就能看到第一份报告：
 
 ```bash
-scm-bench scan --snapshot-in examples/snapshot.json
+scm-bench scan --demo
 ```
+
+在终端里什么都不配置直接运行 `scm-bench scan`，它会交互式地给出同样的选择：现在输入
+URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` 的形式存在仓库里，
+从源码检出运行时也可以用 `--snapshot-in` 评估它。
+
+如果你选择输入 URL 和 token，scan 会**询问**（而不是自作主张）是否在它们被验证可用
+之后保存下来，让之后的扫描什么都不用再输。保存位置是用户配置目录下的
+`instance.yaml`（Linux 上是 `~/.config/scm-bench/`；`SCM_BENCH_CONFIG_DIR` 可改写
+位置），权限 `0600`——token 是一份活的凭据。手敲的 `--url` 或导出的 `BITBUCKET_URL`
+永远优先于这个文件，并且每次用到它的扫描都会在 stderr 上说明。删掉文件即忘记。
 
 仓库是并发抓取的——`--concurrency`（默认 8）限制同时抓取的数量，实例负载高时把它调低是
 比较客气的做法。`--timeout` 限制单个请求（默认 30s）；`--max-duration` 限制整次扫描，
@@ -500,11 +510,12 @@ scm-bench scan --snapshot-in snapshot.json -o sarif --fail-on high
 
 对归档快照重跑策略，还能看出换了阈值之后结论会如何变化，而不必再碰实例一次。
 
-快照以 `0600` 写入：它是一份精确描述实例薄弱点的地图。报告同样如此。
+快照以 `0600` 写入：它是一份精确描述实例薄弱点的地图。报告同样如此，保存的
+`instance.yaml` 更是如此——它装的是一份活的凭据，是同一条理由的最强版本。
 
 这是 Unix 权限位，只在类 Unix 系统上生效——Windows 没有对应的位，Go 只把它映射成只读属性，
 文件真正的访问控制来自它从所在目录继承的 ACL。在 Windows 上，请把快照和报告放到一个本身
-已经受限的位置。
+已经受限的位置，保存 token 之前更要三思。
 
 ### 捕捉姿态回退
 

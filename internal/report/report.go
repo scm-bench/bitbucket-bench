@@ -42,6 +42,11 @@ type Options struct {
 	NoRemediations bool
 	// ToolVersion is stamped into SARIF.
 	ToolVersion string
+	// Notice, when set, leads the table output as a banner the eye cannot
+	// miss. The demo scan uses it to mark the report as example data. The
+	// machine formats ignore it: their metadata already names the instance,
+	// and a consumer of JSON is not skimming.
+	Notice string
 }
 
 // DefaultMaxResources is how many resources get a table. Zero means all of

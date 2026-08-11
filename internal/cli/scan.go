@@ -62,6 +62,11 @@ type scanOptions struct {
 	projects     []string
 	repositories []string
 
+	demo bool
+	// saveInstance remembers the interactively entered URL and token once the
+	// scan proves they work.
+	saveInstance bool
+
 	configPath     string
 	format         string
 	outputPath     string
@@ -104,6 +109,12 @@ dormant accounts); without it those report MANUAL instead of failing.
 Credentials may be supplied by flag or environment:
   BITBUCKET_URL, BITBUCKET_TOKEN, BITBUCKET_USERNAME, BITBUCKET_PASSWORD
 
+No instance yet? --demo evaluates a sample bundled into the binary, so you can
+see what a report looks like before configuring anything. Run bare on a
+terminal, scan offers the same choice interactively — and can save the URL and
+token you enter (0600, under your user config directory, or SCM_BENCH_CONFIG_DIR)
+so later scans need nothing. Delete the file to forget it.
+
 Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
 Three thresholds drive exit 1, and they answer different questions:
@@ -129,6 +140,8 @@ so.`,
 
 	f.StringSliceVarP(&opts.projects, "project", "p", nil, "project key to scan; repeatable, defaults to all")
 	f.StringSliceVarP(&opts.repositories, "repository", "r", nil, "repository to scan as PROJECT/slug; repeatable")
+
+	f.BoolVar(&opts.demo, "demo", false, "evaluate the bundled example instead of an instance, to see what a report looks like")
 
 	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file overriding the default thresholds")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
@@ -165,6 +178,69 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 
 	resolveCredentials(cmd, opts)
+
+	if opts.demo {
+		// A typed flag that the demo would silently ignore is refused, for the
+		// same reason --project is refused against --snapshot-in: the report
+		// would look exactly like the scan that was asked for and not be it.
+		// Flags merely filled in from the environment do not count — an
+		// exported BITBUCKET_URL must not make the demo argue.
+		for _, name := range []string{"url", "token", "username", "password", "project", "repository", "snapshot-in"} {
+			if cmd.Flags().Changed(name) {
+				return fmt.Errorf("--demo evaluates the bundled example, so --%s has nothing to act on; drop one of them", name)
+			}
+		}
+		opts.baseURL, opts.token, opts.username, opts.password = "", "", "", ""
+	}
+
+	// Before asking anybody anything: an instance saved by an earlier run's
+	// menu answers the question silently. It only fills what is absent —
+	// a typed flag or an exported variable always wins, and its token is not
+	// used over any credential arriving another way. The stderr line is what
+	// keeps this debuggable: a scan that silently picks up a credential from
+	// disk is a scan whose authentication failures make no sense.
+	if !opts.demo && opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
+		inst, path, err := config.LoadInstance()
+		if err != nil {
+			return err
+		}
+		if inst.URL != "" {
+			opts.baseURL = inst.URL
+			if strings.TrimSpace(opts.token) == "" && strings.TrimSpace(opts.username) == "" {
+				opts.token = inst.Token
+			}
+			stderr := cmd.ErrOrStderr()
+			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
+				Line(console.Info, "using saved instance %s (%s)", inst.URL, path)
+		}
+	}
+
+	// Nothing configured, but a person present: offer the menu instead of the
+	// error. Both ends must be terminals — a redirected stderr means the
+	// question would go somewhere nobody is reading, and a redirected stdin
+	// means nobody typed this invocation interactively. The stdin file check
+	// keeps `scan < /dev/null` out via readLine's immediate EOF.
+	if !opts.demo && opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
+		stderr := cmd.ErrOrStderr()
+		if in, ok := cmd.InOrStdin().(*os.File); ok && isTerminal(in) && isTerminal(stderr) {
+			res, err := promptFirstRun(in, stderr, useProgressColor(opts, stderr))
+			if err != nil {
+				return err
+			}
+			if res.demo {
+				opts.demo = true
+			} else {
+				opts.baseURL = res.url
+				opts.token = res.token
+				opts.saveInstance = res.save
+				// The prompt collected a token, so basic-auth values inherited
+				// from the environment must not be left to conflict with it.
+				if res.token != "" {
+					opts.username, opts.password = "", ""
+				}
+			}
+		}
+	}
 
 	if err := validateScanOptions(opts); err != nil {
 		return err
@@ -206,6 +282,14 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// the request log, because "more detail" should never mean less.
 	trace := newTracer(stderr, useProgressColor(opts, stderr), shown == ProgressFull)
 
+	// Said on stderr as well as in the table's banner, because with stdout
+	// redirected the banner travels with the file and this line stays on the
+	// terminal — each reaches a reader the other cannot.
+	if opts.demo {
+		console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
+			Line(console.Info, "evaluating the bundled example; pass --url to scan your own instance")
+	}
+
 	progress := newProgressWriter(stderr, shown == ProgressCompact && !opts.verbose)
 
 	snapshot, err := obtainSnapshot(ctx, cmd, opts, cfg, trace, progress)
@@ -215,6 +299,20 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 	if err != nil {
 		return describeScanFailure(ctx, opts, err)
+	}
+
+	// Only now, with the fetch behind it, is the interactively entered
+	// instance worth remembering: a credential saved before it worked would
+	// replay its typo on every following run. A failure to write is a warning
+	// rather than an error — the scan in hand succeeded, and refusing to
+	// report it over a bookkeeping problem would cost more than it protects.
+	if opts.saveInstance {
+		w := console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}
+		if path, err := config.SaveInstance(config.Instance{URL: opts.baseURL, Token: opts.token}); err != nil {
+			w.Line(console.Warn, "could not save the instance: %v", err)
+		} else {
+			w.Line(console.Info, "saved to %s; delete the file to forget it", path)
+		}
 	}
 
 	if opts.snapshotOut != "" {
@@ -240,14 +338,18 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// The report is rendered into memory first so a write failure cannot leave
 	// a half-written file that looks like a complete report.
 	var buf bytes.Buffer
-	if err := report.Write(&buf, rep, report.Options{
+	reportOpts := report.Options{
 		Format:         opts.format,
 		Color:          useColor(opts, out),
 		ShowPassed:     opts.showPassed,
 		MaxResources:   opts.maxResources,
 		NoRemediations: opts.noRemediations,
 		ToolVersion:    Version,
-	}); err != nil {
+	}
+	if opts.demo {
+		reportOpts.Notice = demoNotice
+	}
+	if err := report.Write(&buf, rep, reportOpts); err != nil {
 		closeOut()
 		return err
 	}
@@ -322,8 +424,8 @@ func validateScanOptions(opts *scanOptions) error {
 		opts.snapshotIn == "" {
 		return fmt.Errorf("--token and --username were both given; use one or the other")
 	}
-	if opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
-		return fmt.Errorf("--url is required (or set BITBUCKET_URL, or pass --snapshot-in to evaluate a saved snapshot)")
+	if !opts.demo && opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
+		return errNoInstance()
 	}
 
 	// --project and --repository narrow what is fetched from an instance.
@@ -342,6 +444,9 @@ func validateScanOptions(opts *scanOptions) error {
 
 // obtainSnapshot either reads a saved snapshot or captures a fresh one.
 func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, cfg config.Config, trace *tracer, progress *progressWriter) (*scm.Snapshot, error) {
+	if opts.demo {
+		return demoSnapshot()
+	}
 	if opts.snapshotIn != "" {
 		return readSnapshot(opts.snapshotIn)
 	}
@@ -398,16 +503,23 @@ func readSnapshot(path string) (*scm.Snapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read snapshot %s: %w", path, err)
 	}
+	return parseSnapshot(raw, "snapshot "+path)
+}
+
+// parseSnapshot decodes and sanity-checks snapshot bytes, wherever they came
+// from — a file on disk, or the sample compiled into the binary. source names
+// the origin in errors.
+func parseSnapshot(raw []byte, source string) (*scm.Snapshot, error) {
 	var snapshot scm.Snapshot
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
-		return nil, fmt.Errorf("parse snapshot %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
 	if snapshot.SchemaVersion != scm.SchemaVersion {
-		return nil, fmt.Errorf("snapshot %s has schema version %q, but this build reads version %q",
-			path, snapshot.SchemaVersion, scm.SchemaVersion)
+		return nil, fmt.Errorf("%s has schema version %q, but this build reads version %q",
+			source, snapshot.SchemaVersion, scm.SchemaVersion)
 	}
 	if snapshot.Metadata.Platform == "" {
-		return nil, fmt.Errorf("snapshot %s does not record which platform it came from", path)
+		return nil, fmt.Errorf("%s does not record which platform it came from", source)
 	}
 	return &snapshot, nil
 }

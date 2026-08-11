@@ -52,6 +52,7 @@ func writeTable(w io.Writer, rep *engine.Report, opts Options) error {
 	width := console.Width()
 
 	writeHeader(w, rep, p, width)
+	writeNotice(w, p, width, opts.Notice)
 	writeSummary(w, rep, p, width)
 	writeReportSummary(w, rep, p, width, opts)
 	writeWarnings(w, rep, p, width)
@@ -107,6 +108,20 @@ func writeHeader(w io.Writer, rep *engine.Report, p painter, width int) {
 	line(w, "%s %s", name, m.ToolVersion)
 	line(w, "%s", m.BaseURL)
 	line(w, "%s", p.paint(ansiDim, "scanned "+stamp))
+}
+
+// writeNotice renders Options.Notice directly under the header, bold and
+// yellow: the one thing a reader must take in before believing anything the
+// tables below say. Yellow because the tag vocabulary already uses it for
+// "needs a person's judgement", which is exactly what a caveat is.
+func writeNotice(w io.Writer, p painter, width int, text string) {
+	if text == "" {
+		return
+	}
+	blank(w)
+	for _, l := range console.Wrap(text, width) {
+		line(w, "%s", p.paint(ansiBold+ansiYellow, l))
+	}
 }
 
 // fits reports whether the uncoloured form of a line stays inside the width.
