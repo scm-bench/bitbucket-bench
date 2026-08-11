@@ -494,6 +494,7 @@ scan:
   maxManual: -1          # 无法判定的规则超过该百分比即退出 1；-1 关闭
   concurrency: 8         # 并发抓取仓库数
   timeout: 30s           # 单请求超时；maxDuration 限制整次扫描
+  cache: true            # 留存快照供 --last 复用；false 则不落盘
 
 thresholds:
   minApprovers: 2        # CIS-1.1.3
@@ -606,6 +607,28 @@ scm-bench scan --snapshot-in snapshot.json -o sarif
 文件真正的访问控制来自它从所在目录继承的 ACL。在 Windows 上，请把快照和报告放到一个本身
 已经受限的位置，保存 token 之前更要三思。
 
+### 追问，不必再扫一次
+
+总览通常会引出下一个问题——到底是*哪些*仓库没过 CIS-1.1.3？——回答它不该再让实例付出
+一次扫描的代价。因此每次联网扫描都会自动留下它的快照（`0600`，每个实例主机一个文件，
+放在用户配置目录的 `cache/` 下），`--last` 重新渲染最近的那份：
+
+```bash
+scm-bench scan                     # 总览；快照顺手留了下来
+scm-bench scan --last --details    # 展开它，完全不碰实例
+scm-bench scan --last -o json      # 或者换一种格式再问一遍
+```
+
+`--last` 运行会在 stderr 上说明快照来自哪个实例、多久之前——超过一天会升级为警告，
+因为把它当作当前状态已经是猜测——退出阈值也照常生效。塑造一次全新抓取的 flag
+（`--url`、`--project`、`--snapshot-in` 等）与它同用会被拒绝，理由一如既往：产出的报告
+会和那些 flag 描述的扫描看起来一模一样，实际却不是。演示模式永远不会写入缓存，
+所以 `--last` 不可能把内置示例冒充成你的实例。
+
+缓存和报告是同一份薄弱点地图，也用同一个 `0600` 保护（目录 `0700`）。如果它压根就
+不该存在，配置里 `scan.cache: false` 让此后的快照全部不落盘，删掉缓存目录就忘掉已有的；
+`--snapshot-out` 依然是显式形式，用于自己决定快照落在哪里。
+
 ### 捕捉姿态回退
 
 分数要当趋势线看，而趋势需要两个点。`diff` 比较两份快照并报告变化：
@@ -697,10 +720,6 @@ Bitbucket REST  ──►   fetcher   ──►  snapshot.json  ──►   Rego
 
 **v0.2** —— CIS 1.2.2（仓库创建限制，待 Project Creator 判定口径确定后）、
 把 default reviewers 作为 CIS-1.1.6 的部分信号、项目级策略覆盖。
-
-**考虑中** —— 免重扫的 `--details`，通过自动快照缓存实现。卡点不在代码：它意味着
-默认把一份实例薄弱点地图落在磁盘上，这个取舍值得一个正式决定，而不是一个功能开关。
-在那之前，`--snapshot-out` / `--snapshot-in` 就是同一件事的手动形式。
 
 **之后** —— GitHub Enterprise 与 GitLab 的 fetcher。快照 schema 本就是平台中立的，
 规则也声明了适用平台，所以这基本只是「再写一个 fetcher」的工作量。

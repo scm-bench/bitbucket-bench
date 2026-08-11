@@ -576,6 +576,7 @@ scan:
   maxManual: -1          # exit 1 when this % of controls went unevaluated; -1 off
   concurrency: 8         # parallel repository fetches
   timeout: 30s           # per-request bound; maxDuration bounds the whole scan
+  cache: true            # keep each scan's snapshot for --last; false keeps it off disk
 
 thresholds:
   minApprovers: 2        # CIS-1.1.3
@@ -705,6 +706,34 @@ comes from the ACL it inherits from its directory. On Windows, put snapshots
 and reports somewhere already restricted, and think twice before saving the
 token there at all.
 
+### Asking the follow-up without another scan
+
+The overview usually raises the next question — *which* repositories fail
+CIS-1.1.3? — and answering it should not cost the instance another scan. Every
+network scan therefore leaves its snapshot behind automatically (`0600`, one
+file per instance host, in `cache/` under the user config directory), and
+`--last` re-renders the most recent one:
+
+```bash
+scm-bench scan                     # the overview; the snapshot is kept on the way out
+scm-bench scan --last --details    # expand it, without touching the instance
+scm-bench scan --last -o json      # or re-ask in another format
+```
+
+A `--last` run says on stderr which instance the snapshot came from and how
+old it is — with a warning past a day, when treating it as current state
+becomes a guess — and applies exit thresholds like any other run. Flags that
+shape a fresh capture (`--url`, `--project`, `--snapshot-in`, …) are refused
+alongside it, for the usual reason: the report would look exactly like the
+scan they describe and not be it. The demo never populates the cache, so
+`--last` cannot pass the bundled example off as your instance.
+
+The cache is the same map of weak points the report is, kept under the same
+`0600` (its directory `0700`). If it should not exist at all, `scan.cache:
+false` in the config keeps every future snapshot off disk, and deleting the
+cache directory forgets what is already there; `--snapshot-out` remains the
+explicit form, for choosing where a snapshot lands.
+
 ### Catching regressions
 
 A score is a trend line, and a trend needs two points. `diff` compares two
@@ -809,12 +838,6 @@ two test suites and how to cut a release are all in
 **v0.2** — CIS 1.2.2 (repository creation limits, once the Project Creator
 interpretation is settled), default reviewers as a partial CIS-1.1.6 signal,
 and per-project policy overrides.
-
-**Under consideration** — `--details` without a rescan, via an automatic
-snapshot cache. The blocker is not code: it means keeping a map of an
-instance's weak points on disk by default, and that trade deserves a decision
-rather than a feature flag. Until then, `--snapshot-out` / `--snapshot-in` is
-the manual form of the same thing.
 
 **Later** — GitHub Enterprise and GitLab fetchers. The snapshot schema is already
 platform-neutral, and controls declare which platforms they apply to, so this is

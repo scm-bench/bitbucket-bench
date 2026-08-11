@@ -47,6 +47,11 @@ scan:
   # What to show while scanning: full (every request), compact (one line),
   # or off (only the closing audit line).
   progress: compact
+  # Keep each scan's snapshot (0600, under the user config directory) so
+  # scan --last can re-render it — say, with --details — without another
+  # scan. The snapshot maps the instance's weak points; false keeps it off
+  # disk.
+  cache: true
 
 # Numeric knobs the policies read. Uncomment to change.
 #thresholds:

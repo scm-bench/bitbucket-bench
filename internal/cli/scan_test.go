@@ -873,3 +873,147 @@ func TestSetOverridesConfigForOneRun(t *testing.T) {
 		t.Errorf("exit code = %d, want %d for an unknown key", code, ExitError)
 	}
 }
+
+// seedSnapshotCache plants a snapshot in the --last cache, exactly as a
+// finished network scan would have left it. The caller must have pinned
+// SCM_BENCH_CONFIG_DIR to a fresh directory first.
+func seedSnapshotCache(t *testing.T, baseURL string, mutate func(*scm.Snapshot)) string {
+	t.Helper()
+	fixture := writeSnapshotWith(t, mutate)
+	raw, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	path, err := config.SnapshotCachePath(baseURL)
+	if err != nil {
+		t.Fatalf("cache path: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	return path
+}
+
+// executeErr runs the CLI for its error, for tests about the message rather
+// than the report.
+func executeErr(t *testing.T, args ...string) error {
+	t.Helper()
+	root := NewRootCommand()
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetIn(strings.NewReader(""))
+	root.SetArgs(args)
+	return root.Execute()
+}
+
+func TestScanLastRendersTheCachedSnapshot(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	seedSnapshotCache(t, "https://bitbucket.example.com", func(s *scm.Snapshot) {
+		s.Metadata.GeneratedAt = time.Now().Add(-30 * time.Minute)
+	})
+
+	stdout, stderr, code := run(t, "scan", "--last", "-o", "json", "-c", configWithFailOn(t, "none"))
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stdout, "PRJ/app") {
+		t.Errorf("the report does not cover the cached snapshot's repository:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "captured 30m ago") {
+		t.Errorf("stderr does not state the snapshot's age: %q", stderr)
+	}
+	if strings.Contains(stderr, "scan again for current state") {
+		t.Errorf("a half-hour-old snapshot was warned about as stale: %q", stderr)
+	}
+}
+
+func TestScanLastWarnsWhenTheSnapshotIsStale(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	// The fixture's GeneratedAt is fixed in the past, well over the
+	// staleness threshold.
+	seedSnapshotCache(t, "https://bitbucket.example.com", nil)
+
+	_, stderr, code := run(t, "scan", "--last", "-o", "json", "-c", configWithFailOn(t, "none"))
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "scan again for current state") {
+		t.Errorf("an old snapshot came with no staleness warning: %q", stderr)
+	}
+}
+
+func TestScanLastPicksTheNewestCache(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	older := seedSnapshotCache(t, "https://old.example.com", func(s *scm.Snapshot) {
+		s.Metadata.BaseURL = "https://old.example.com"
+	})
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(older, past, past); err != nil {
+		t.Fatalf("age cache file: %v", err)
+	}
+	seedSnapshotCache(t, "https://new.example.com", func(s *scm.Snapshot) {
+		s.Metadata.BaseURL = "https://new.example.com"
+	})
+
+	_, stderr, code := run(t, "scan", "--last", "-o", "json", "-c", configWithFailOn(t, "none"))
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "https://new.example.com") {
+		t.Errorf("--last did not render the most recent scan: %q", stderr)
+	}
+}
+
+func TestScanLastWithNothingCached(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+
+	err := executeErr(t, "scan", "--last")
+	if err == nil {
+		t.Fatal("--last with an empty cache did not error")
+	}
+	for _, want := range []string{"none has been cached yet", "scan.cache"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q: %v", want, err)
+		}
+	}
+}
+
+func TestScanLastRefusesCaptureFlags(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	fixture := writeSnapshotFixture(t)
+	cases := [][]string{
+		{"--url", "https://bitbucket.example.com"},
+		{"--token", "t"},
+		{"--project", "PRJ"},
+		{"--snapshot-in", fixture},
+	}
+	for _, extra := range cases {
+		err := executeErr(t, append([]string{"scan", "--last"}, extra...)...)
+		if err == nil || !strings.Contains(err.Error(), "--last renders") {
+			t.Errorf("--last with %s: err = %v, want the has-nothing-to-act-on refusal", extra[0], err)
+		}
+	}
+
+	if err := executeErr(t, "scan", "--demo", "--last"); err == nil || !strings.Contains(err.Error(), "--last has nothing to act on") {
+		t.Errorf("--demo --last: err = %v, want the demo refusal", err)
+	}
+}
+
+// The demo must never populate the cache: --last would then pass off the
+// bundled example as somebody's instance. A replayed snapshot is excluded
+// for a quieter reason — it would only rewrite what it just read.
+func TestScanDemoAndReplayLeaveNoCache(t *testing.T) {
+	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+
+	if _, _, code := run(t, "scan", "--demo", "-c", configWithFailOn(t, "none")); code != ExitOK {
+		t.Fatalf("demo exit code = %d, want %d", code, ExitOK)
+	}
+	fixture := writeSnapshotFixture(t)
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none")); code != ExitOK {
+		t.Fatalf("replay exit code = %d, want %d", code, ExitOK)
+	}
+
+	if path, err := config.LatestSnapshotCache(); err != nil || path != "" {
+		t.Errorf("cache after demo and replay: path = %q, err = %v; want none", path, err)
+	}
+}
