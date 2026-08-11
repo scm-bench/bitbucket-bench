@@ -28,6 +28,13 @@ type controlTally struct {
 	// and the fraction should say so).
 	affected   int
 	applicable int
+	// affectedNames are the resources behind affected, in report order, so a
+	// partial row can say which ones instead of leaving the reader to guess
+	// from a fraction.
+	affectedNames []string
+	// instance marks a control evaluated against the instance itself; its
+	// row says so instead of showing a 1/1 that names no repository.
+	instance bool
 }
 
 // tallyControls aggregates findings by control for the overview table.
@@ -56,22 +63,29 @@ func tallyControls(findings []engine.Finding, showPassed bool) []controlTally {
 			})
 		}
 		out[i].applicable++
+		if f.Resource == engine.InstanceResourceName {
+			out[i].instance = true
+		}
 		switch {
 		case f.Status == engine.StatusFail:
 			if out[i].status != statusFail {
 				out[i].status = statusFail
 				out[i].affected = 0
+				out[i].affectedNames = nil
 			}
 			out[i].affected++
+			out[i].affectedNames = append(out[i].affectedNames, f.Resource)
 		case unread(f):
 			// Denominator only.
 		case f.Status == engine.StatusManual:
 			if out[i].status == "" || out[i].status == statusPass {
 				out[i].status = statusManual
 				out[i].affected = 0
+				out[i].affectedNames = nil
 			}
 			if out[i].status == statusManual {
 				out[i].affected++
+				out[i].affectedNames = append(out[i].affectedNames, f.Resource)
 			}
 		case f.Status == engine.StatusPass:
 			if out[i].status == "" {
@@ -143,12 +157,12 @@ func writeFindingsOverview(w io.Writer, rep *engine.Report, p painter, width int
 				t.checkID,
 				t.severity,
 				t.status,
-				fmt.Sprintf("%d/%d", t.affected, t.applicable),
-				t.title,
+				resourcesCell(t),
+				titleCell(t),
 			})
 		}
 		console.RenderTable(w, width, cols, rows)
-		for _, l := range console.Wrap("Resources: how many are in this state / how many the control was evaluated against.", width) {
+		for _, l := range console.Wrap("Resources: how many are in this state / how many the control was evaluated against; 'instance' is the Bitbucket instance itself.", width) {
 			line(w, "%s", p.paint(ansiDim, l))
 		}
 	}
@@ -164,6 +178,69 @@ func writeFindingsOverview(w io.Writer, rep *engine.Report, p painter, width int
 			line(w, "%s", p.paint(ansiYellow, l))
 		}
 	}
+}
+
+// resourcesCell is the row's spread. An instance-level control says so by
+// name: its 1/1 named no repository, which is exactly the kind of row a
+// reader tries and fails to match to one.
+func resourcesCell(t controlTally) string {
+	if t.instance {
+		return "instance"
+	}
+	return fmt.Sprintf("%d/%d", t.affected, t.applicable)
+}
+
+// maxNamedResources caps how many resources a partial row names before
+// summarising the rest; past a handful the list stops being read and starts
+// being skipped.
+const maxNamedResources = 4
+
+// titleCell is the control's title, and — when the control caught only some
+// of its resources — a second line naming which ones, in the Finding column's
+// "· " idiom. A full sweep needs no list: the fraction already says all.
+func titleCell(t controlTally) string {
+	if t.instance || t.affected == 0 || t.affected >= t.applicable {
+		return t.title
+	}
+	var label string
+	switch t.status {
+	case statusFail:
+		label = "failing"
+	case statusManual:
+		label = "needs review"
+	default:
+		return t.title
+	}
+	names := shortNames(t.affectedNames)
+	if extra := len(names) - maxNamedResources; extra > 0 {
+		names = append(names[:maxNamedResources], fmt.Sprintf("+%d more", extra))
+	}
+	return t.title + "\n· " + label + ": " + strings.Join(names, ", ")
+}
+
+// shortNames drops the project prefix when every name shares it — inside one
+// project the prefix is pure repetition — and leaves full names alone the
+// moment two projects mix.
+func shortNames(names []string) []string {
+	prefix := ""
+	for i, n := range names {
+		key, _, ok := strings.Cut(n, "/")
+		if !ok {
+			return names
+		}
+		if i == 0 {
+			prefix = key
+			continue
+		}
+		if key != prefix {
+			return names
+		}
+	}
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = strings.TrimPrefix(n, prefix+"/")
+	}
+	return out
 }
 
 // unreadSummary folds every unread finding into one clause, or "" when

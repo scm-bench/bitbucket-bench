@@ -390,9 +390,9 @@ func TestReportSummaryRanksResourcesWorstFirst(t *testing.T) {
 // Nothing may run past the width, at any width, whatever the escape sequences
 // would have measured.
 func TestEveryLineFitsTheTerminalWidth(t *testing.T) {
-	for _, columns := range []string{"60", "80", "100", "300"} {
+	for _, columns := range []string{"60", "80", "100", "140", "300"} {
 		t.Setenv("COLUMNS", columns)
-		limit := min(max(atoi(t, columns), 60), 120)
+		limit := min(max(atoi(t, columns), 60), 160)
 
 		for _, colour := range []bool{false, true} {
 			for _, details := range []bool{false, true} {
@@ -1395,5 +1395,98 @@ func TestOptionsWidthOverridesEnvironment(t *testing.T) {
 		if n := utf8.RuneCountInString(stripANSI(l)); n > 60 {
 			t.Errorf("line is %d columns despite Width 60: %q", n, l)
 		}
+	}
+}
+
+// An instance-level control's 1/1 named no repository, which is exactly the
+// row a reader tries and fails to match to one. It says "instance" instead.
+func TestOverviewInstanceRowSaysInstance(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+
+	cells := tableCells(out)
+	sawInstance := false
+	for _, c := range cells {
+		if c == "instance" {
+			sawInstance = true
+		}
+	}
+	if !sawInstance {
+		t.Errorf("no 'instance' Resources cell for the organization-level control\n---\n%s", out)
+	}
+	// And the legend explains the word.
+	if !containsText(out, "'instance': the Bitbucket instance itself") {
+		t.Errorf("the legend does not explain the instance row\n---\n%s", out)
+	}
+}
+
+// A partial row names the resources it caught, so 3/4 answers "which three"
+// without a rerun. A full sweep needs no list — the fraction already says all.
+func TestOverviewPartialRowNamesTheAffected(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 4)
+	rep.Findings[3].Status = engine.StatusPass // three failing, one passing
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "· failing: repo-00, repo-01, repo-02") {
+		t.Errorf("the partial row does not name its resources (project prefix dropped)\n---\n%s", out)
+	}
+	if containsText(out, "PRJ/repo-00,") {
+		t.Errorf("names within one project should drop the shared prefix\n---\n%s", out)
+	}
+
+	// Full sweep: no list.
+	full := renderReport(t, reportWithRepeatedFinding(t, 4), Options{Format: FormatTable})
+	if strings.Contains(stripANSI(full), "failing:") {
+		t.Errorf("a 4/4 row should not list resources\n---\n%s", full)
+	}
+}
+
+// Past a handful the list stops being read, so it caps and counts the rest.
+func TestOverviewNamedResourcesAreCapped(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 8)
+	rep.Findings[7].Status = engine.StatusPass // seven failing of eight
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "+3 more") {
+		t.Errorf("the resource list should cap at %d names\n---\n%s", maxNamedResources, out)
+	}
+}
+
+// A true-manual control across some resources says what it needs, not that it
+// failed.
+func TestOverviewPartialManualRowSaysNeedsReview(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 3)
+	for i := range rep.Findings {
+		rep.Findings[i].Status = engine.StatusManual
+		rep.Findings[i].Automated = false
+	}
+	rep.Findings[2].Status = engine.StatusPass
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "· needs review: repo-00, repo-01") {
+		t.Errorf("the partial manual row does not name its resources\n---\n%s", out)
+	}
+}
+
+// The ceiling exists for prose; tables stop at their natural width. What it
+// must clear is the longest control title on one line, which needs 128
+// columns of frame.
+func TestWideTerminalKeepsLongTitlesOnOneLine(t *testing.T) {
+	t.Setenv("COLUMNS", "140")
+	title := "Ensure any change to code receives approval of two strongly authenticated users"
+	rep := reportWithRepeatedFinding(t, 1)
+	rep.Findings[0].Title = title
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	found := false
+	for _, l := range strings.Split(stripANSI(out), "\n") {
+		if strings.Contains(l, title) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a 79-character title should fit on one line at COLUMNS=140\n---\n%s", out)
 	}
 }

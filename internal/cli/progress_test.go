@@ -40,6 +40,8 @@ func TestProgressDisabledReturnsNothing(t *testing.T) {
 // to tolerate it rather than the caller having to check.
 func TestNilProgressWriterIsInert(t *testing.T) {
 	var p *progressWriter
+	p.start()
+	p.tick()
 	p.update("something")
 	p.clear()
 	if cb := p.callback(); cb != nil {
@@ -142,11 +144,77 @@ func TestProgressPadsByDisplayWidthNotBytes(t *testing.T) {
 	buf.Reset()
 	p.update("done")
 
+	// The rendered line carries the spinner prefix, so the expected padding is
+	// the rune difference between the two full renders.
 	out := buf.String()
-	padding := strings.Count(out, " ") - strings.Count("done", " ")
-	if want := utf8.RuneCountInString(long) - utf8.RuneCountInString("done"); padding != want {
+	rendered := progressLine(spinnerFrame(0), "done", 0)
+	padding := utf8.RuneCountInString(out) - 1 - utf8.RuneCountInString(rendered) // 1 for the \r
+	want := utf8.RuneCountInString(progressLine(spinnerFrame(0), long, 0)) - utf8.RuneCountInString(rendered)
+	if padding != want {
 		t.Errorf("padded %d columns, want %d: byte length over-counts multi-byte runes", padding, want)
 	}
+}
+
+// The rotor and the request counter are what make a silent phase legible: the
+// line exists from the first moment, and the number keeps moving even while
+// the phase text does not.
+func TestProgressLineCarriesSpinnerAndRequestCount(t *testing.T) {
+	if got, want := progressLine('|', "scanning", 0), "| scanning"; got != want {
+		t.Errorf("progressLine = %q, want %q (no counter before the first request)", got, want)
+	}
+	if got, want := progressLine('/', "scanning · PRJ 1/4 repositories", 37), "/ scanning · PRJ 1/4 repositories · 37 requests"; got != want {
+		t.Errorf("progressLine = %q, want %q", got, want)
+	}
+	// Four frames, then round again.
+	frames := ""
+	for i := range 5 {
+		frames += string(spinnerFrame(i))
+	}
+	if frames != `|/-\|` {
+		t.Errorf("spinner frames = %q", frames)
+	}
+}
+
+// start draws immediately — the point is that something is visible before the
+// first repository completes — and clear stops the ticker and erases.
+func TestProgressStartDrawsImmediatelyAndClearStops(t *testing.T) {
+	var buf syncBuffer
+	p := &progressWriter{out: &buf}
+
+	p.start()
+	if !strings.Contains(buf.String(), "scanning") {
+		t.Errorf("start did not draw: %q", buf.String())
+	}
+	p.tick()
+	p.clear()
+	if out := buf.String(); !strings.HasSuffix(out, "\r") {
+		t.Errorf("clear should end having blanked the line, got %q", out)
+	}
+	// Idempotent: a second clear after the ticker is gone must not hang or write.
+	before := buf.String()
+	p.clear()
+	if buf.String() != before {
+		t.Error("a second clear wrote output")
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the ticker goroutine and the test to
+// share.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // os.DevNull is a character device, so `scm-bench scan > /dev/null` looked like

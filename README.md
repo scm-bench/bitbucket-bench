@@ -143,7 +143,9 @@ on how big the instance is.
 
 ### Watching the scan
 
-By default a scan shows one self-overwriting progress line and then the report.
+By default a scan shows one self-overwriting progress line — a spinner, the
+current phase, and a live count of completed requests, visible from the first
+moment so a slow instance never looks like a hung one — and then the report.
 The request log is **`--verbose`**: a list of every `GET` describes what the
 tool did, and what you came for is what it found. The requests matter when
 something looks wrong, which is exactly when you type `--verbose`:
@@ -340,6 +342,8 @@ Report Summary
 Legend:
 - '-': none in this state
 - 'Unread': the scan could not read what the control asks about
+- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
+  per-repository
 
 Findings
 
@@ -348,24 +352,24 @@ Findings
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
 │            │          │        │           │ strongly authenticated users                        │
+│            │          │        │           │ · failing: legacy-billing                           │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
 │            │          │        │           │ code                                                │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.15 │ HIGH     │ FAIL   │       1/3 │ Ensure pushing or merging of new code is restricted │
-│            │          │        │           │ to trusted users                                    │
+│            │          │        │           │ · failing: legacy-billing                           │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 
 ... one row per failed control, severity descending ...
 
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.3.5  │ HIGH     │ MANUAL │       1/1 │ Ensure multi-factor authentication is enforced for  │
+│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
 │            │          │        │           │ the organization                                    │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
 │            │          │        │           │ or configuration                                    │
 └────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
-Resources: how many are in this state / how many the control was evaluated against.
+Resources: how many are in this state / how many the control was evaluated against; 'instance' is
+the Bitbucket instance itself.
 
 13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
@@ -402,11 +406,15 @@ a failed run rather than a good-looking one.
 **The overview aggregates by control, because one misconfiguration across fifty
 repositories is one problem, not fifty.** Each row is a control; the `Resources`
 column says how far it has spread (`1/3`: failing on one of the three resources
-it was evaluated against). Findings the scan could not read collapse into the
-single sentence under the table — they share one cause, and the scan warnings
-directly below it state that cause once instead of once per control per
-resource. Report Summary is the other axis: every resource, worst first, so the
-instance's shape is visible in both directions before any detail is.
+it was evaluated against), and a partial row names which ones on a `· failing:`
+line under the title — up to four, then `+N more` — so a fraction never leaves
+you guessing. Controls that apply to the instance itself rather than to any
+repository say `instance` in that column. Findings the scan could not read
+collapse into the single sentence under the table — they share one cause, and
+the scan warnings directly below it state that cause once instead of once per
+control per resource. Report Summary is the other axis: every resource, worst
+first, so the instance's shape is visible in both directions before any detail
+is.
 
 **`--details` is where the per-resource detail lives.** Bare, it renders one
 section per resource in the shape trivy uses — a `Control | Severity | Status |
@@ -442,10 +450,12 @@ verdict. `--no-remediations` drops the section entirely in both layouts.
 
 Width comes from the terminal itself when stdout is one; an exported `COLUMNS`
 overrides it, and pipes, redirects and `--output-file` get 80. Whatever the
-source, it is clamped to 60–120 — past 120 a line stops being comfortable to
-read regardless of how wide the window is. Nothing ever exceeds that width — a
-border that wraps stops reading as a border — so a long settings path is
-broken at the column edge rather than pushing the frame out of true.
+source, it is clamped to 60–160. The ceiling constrains prose: a flexed table
+column never grows past its content, so on a wide terminal a table stops at
+its natural width — wide enough for the longest control title on one line —
+rather than sprawling. Nothing ever exceeds that width — a border that wraps
+stops reading as a border — so a long settings path is broken at the column
+edge rather than pushing the frame out of true.
 
 Colour is reinforcement only, so nothing is lost when output is piped,
 redirected, or run with `NO_COLOR` set. `--details=<value>` filters the table;

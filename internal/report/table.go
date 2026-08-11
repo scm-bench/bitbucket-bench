@@ -428,13 +428,14 @@ func writeReportSummary(w io.Writer, rep *engine.Report, p painter, width int, o
 
 	console.RenderTable(w, width, cols, rows)
 
-	// A legend, because a dash and the word UNREAD are both things the table
-	// invents. Everything else in it is a word the rest of the tool already
-	// uses.
+	// A legend, because a dash, the word UNREAD and the resource named
+	// "instance" are all things the report invents. Everything else in it is
+	// a word the rest of the tool already uses.
 	line(w, "%s", p.paint(ansiDim, "Legend:"))
 	for _, entry := range []string{
 		"'-': none in this state",
 		"'Unread': the scan could not read what the control asks about",
+		"'instance': the Bitbucket instance itself — controls that are organization-wide rather than per-repository",
 	} {
 		for i, l := range console.Wrap(entry, width-2) {
 			prefix := "- "

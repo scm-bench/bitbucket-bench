@@ -122,14 +122,17 @@ func Tags() []Tag { return []Tag{Pass, Fail, Warn, Info} }
 // unconfigured terminal all are; the ceiling is where a line stops being
 // comfortable to read regardless of how wide the window is.
 //
-// The ceiling is 120 rather than the 100 prose wants, because a table spends
-// part of every line on borders and padding and then divides what is left
-// between its columns. At 100 the two prose columns of a finding get about
-// thirty each, which wraps almost every sentence twice.
+// The ceiling constrains prose, not tables: a flexed column never grows past
+// its content, so on a wide terminal a table stops at its natural width
+// rather than sprawling. What the ceiling has to be wide enough for is a
+// table's longest single-line cell — the longest control title needs 128
+// columns of frame to sit on one line — and what it has to be narrow enough
+// for is a wrapped remediation staying scannable under its hanging indent.
+// 160 clears the first and has not yet hurt the second.
 const (
 	fallbackWidth = 80
 	minWidth      = 60
-	maxWidth      = 120
+	maxWidth      = 160
 )
 
 // Width reports how wide a rendered line may be, from the environment alone.

@@ -130,7 +130,9 @@ URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` �
 
 ### 看着它扫
 
-默认情况下，一次扫描只显示一行原地刷新的进度，然后是报告。请求日志归 **`--verbose`** 管：
+默认情况下，一次扫描显示一行原地刷新的进度 —— 转轮、当前阶段和已完成请求的实时计数，
+从第一刻起就可见，慢的实例不会看起来像卡死的实例 —— 然后是报告。请求日志归
+**`--verbose`** 管：
 逐条列出每个 `GET` 描述的是「工具做了什么」，而你要看的是「它发现了什么」。请求只在事情看起来
 不对劲时才重要，而那正是你会敲 `--verbose` 的时候：
 
@@ -303,6 +305,8 @@ Report Summary
 Legend:
 - '-': none in this state
 - 'Unread': the scan could not read what the control asks about
+- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
+  per-repository
 
 Findings
 
@@ -311,24 +315,24 @@ Findings
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
 │            │          │        │           │ strongly authenticated users                        │
+│            │          │        │           │ · failing: legacy-billing                           │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
 │            │          │        │           │ code                                                │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.15 │ HIGH     │ FAIL   │       1/3 │ Ensure pushing or merging of new code is restricted │
-│            │          │        │           │ to trusted users                                    │
+│            │          │        │           │ · failing: legacy-billing                           │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 
 ... 每条失败的规则一行，严重度降序 ...
 
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.3.5  │ HIGH     │ MANUAL │       1/1 │ Ensure multi-factor authentication is enforced for  │
+│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
 │            │          │        │           │ the organization                                    │
 ├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
 │ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
 │            │          │        │           │ or configuration                                    │
 └────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
-Resources: how many are in this state / how many the control was evaluated against.
+Resources: how many are in this state / how many the control was evaluated against; 'instance' is
+the Bitbucket instance itself.
 
 13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
@@ -361,7 +365,9 @@ Details: rerun with --details for per-resource findings and full remediation ste
 分数。`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
 
 **总览按规则聚合，因为同一个配置错误铺在五十个仓库上是一个问题，不是五十个。**
-每行是一条规则；`Resources` 列说明它铺得多广（`1/3`：在被评估的三个资源中的一个上失败）。
+每行是一条规则；`Resources` 列说明它铺得多广（`1/3`：在被评估的三个资源中的一个上失败），
+部分命中的行会在标题下用 `· failing:` 点名是哪几个 —— 最多四个，超出记 `+N more` ——
+分数不会让你去猜。作用于实例本身而非任何仓库的规则，该列直接写 `instance`。
 扫描读不到的发现折叠成表格下面那一句话 —— 它们共享同一个成因，而紧随其后的扫描告警把
 成因只讲一次，而不是每条规则每个资源各讲一遍。Report Summary 是另一条轴：所有资源，
 最差的排最前 —— 实例的整体形状在任何细节之前，两个方向都先看得到。
@@ -391,8 +397,9 @@ scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪
 都能整段去掉。
 
 宽度在 stdout 是终端时来自终端本身；导出的 `COLUMNS` 可以覆盖它，管道、重定向与
-`--output-file` 得到 80。无论来源如何都夹在 60–120 之间 —— 超过 120 之后，无论窗口
-多宽，一行都不再舒服可读。任何一行都不会超出这个宽度 —— 折了行的边框就不再像边框 ——
+`--output-file` 得到 80。无论来源如何都夹在 60–160 之间。上限约束的是散文：弹性表格列
+从不超出内容的自然宽度，所以宽终端上表格会停在自然宽度 —— 足够让最长的规则标题单行
+显示 —— 而不是摊开。任何一行都不会超出这个宽度 —— 折了行的边框就不再像边框 ——
 所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
 
 颜色只是强化，所以输出被管道、重定向或设置了 `NO_COLOR` 时什么都不会丢。

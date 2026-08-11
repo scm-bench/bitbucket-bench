@@ -477,6 +477,11 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		return readSnapshot(opts.snapshotIn)
 	}
 
+	// Only the network path gets the spinner: a snapshot or the demo is done
+	// before a rotor could finish a turn, and starting it here rather than in
+	// runScan keeps that knowledge in one place.
+	progress.start()
+
 	client, err := bitbucketdc.NewClient(bitbucketdc.Options{
 		BaseURL:        opts.baseURL,
 		Token:          opts.token,
@@ -486,7 +491,10 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Concurrency:    opts.concurrency,
 		Insecure:       opts.insecure,
 		AllowPlaintext: opts.allowPlaintext,
-		OnRequest:      trace.record,
+		OnRequest: func(e bitbucketdc.RequestEvent) {
+			trace.record(e)
+			progress.tick()
+		},
 		Logf: func(format string, args ...any) {
 			logf(cmd, opts, format, args...)
 		},
