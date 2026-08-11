@@ -307,17 +307,88 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none")
 
-	// The summary leads, then a table per resource, then the remediations.
-	// "Branch permissions" is the remediation text, which has to survive being
-	// moved out of the tables into its own section.
-	for _, want := range []string{"SCORE", "10 failed", "Report Summary", "PRJ/app", "Total: ", "Remediations (", "Branch permissions"} {
+	// The summary leads, then the by-control overview, then the remediations
+	// and the line saying how to get the per-resource detail. "Branch
+	// permissions" is in the one-line fix, which is all the overview prints
+	// of a remediation.
+	for _, want := range []string{"SCORE", "10 failed", "Report Summary", "PRJ/app", "Findings", "Remediations (", "Branch permissions", "--details"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}
 	}
+	// The per-resource sections and the full remediation paragraphs are
+	// --details territory. Wrapping can split a phrase across lines, so the
+	// paragraph is looked for in the flattened text.
+	if strings.Contains(stdout, "Total: ") {
+		t.Errorf("the default output should be the overview, not per-resource sections\n---\n%s", stdout)
+	}
+	if strings.Contains(flatten(stdout), "Add restriction: select the default branch") {
+		t.Errorf("the full remediation paragraph leaked into the overview\n---\n%s", stdout)
+	}
 	// Colour is off when stdout is not a terminal.
 	if strings.Contains(stdout, "\033[") {
 		t.Error("ANSI escapes leaked into non-terminal output")
+	}
+}
+
+func TestScanDetailsRestoresPerResourceSections(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details")
+
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d", code, ExitOK)
+	}
+	// Per-resource sections, and the remediation paragraphs at full length.
+	// The paragraph is matched against flattened text because wrapping may
+	// split it anywhere.
+	for _, want := range []string{"PRJ/app", "Total: "} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("--details output is missing %q\n---\n%s", want, stdout)
+		}
+	}
+	if !strings.Contains(flatten(stdout), "Add restriction: select the default branch") {
+		t.Errorf("--details output is missing the full remediation paragraph\n---\n%s", stdout)
+	}
+}
+
+// flatten collapses all whitespace to single spaces, so a phrase can be found
+// no matter where the renderer wrapped it.
+func flatten(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func TestScanDetailsFilter(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+
+	stdout, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details=CIS-1.1.15")
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d", code, ExitOK)
+	}
+	if !strings.Contains(stdout, "Total: ") {
+		t.Errorf("the named control got no section\n---\n%s", stdout)
+	}
+
+	// The wording of the error is pinned by the report package's own tests;
+	// what matters here is that nothing rendered and the exit code says broken
+	// scan rather than clean one.
+	out, _, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--details=bogus")
+	if code != ExitError {
+		t.Errorf("a filter matching nothing should exit %d, got %d", ExitError, code)
+	}
+	if strings.Contains(out, "SCORE") {
+		t.Errorf("a rejected filter still rendered a report\n---\n%s", out)
+	}
+}
+
+func TestScanDetailsFlagValidation(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+
+	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "--details", "-o", "json"); code != ExitError {
+		t.Errorf("--details with -o json should be refused, got exit %d\n---\n%s", code, stderr)
+	}
+	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "--max-resources", "1"); code != ExitError {
+		t.Errorf("--max-resources without --details should be refused, got exit %d\n---\n%s", code, stderr)
+	}
+	if _, stderr, code := run(t, "scan", "--snapshot-in", fixture, "--fail-on", "none", "--max-resources", "1", "--details"); code != ExitOK {
+		t.Errorf("--max-resources with --details should be accepted, got exit %d\n---\n%s", code, stderr)
 	}
 }
 

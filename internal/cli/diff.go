@@ -112,6 +112,7 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 	if err := diff.Write(&buf, result, diff.Options{
 		Format: opts.format,
 		Color:  useDiffColor(opts, out),
+		Width:  console.WidthFor(out),
 	}); err != nil {
 		closeOut()
 		return err

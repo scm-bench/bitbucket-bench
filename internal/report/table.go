@@ -33,33 +33,66 @@ func (p painter) paint(code, s string) string {
 	return code + s + ansiReset
 }
 
-// writeTable renders the report as trivy does: a summary of every resource
-// first, then one section per resource, each a table of what that resource got
-// wrong.
+// writeTable renders the report in one of two layouts.
 //
-// Grouping by resource rather than by control is a trade with a name. A control
-// that fails identically across fifty repositories appears fifty times, once in
-// each repository's table, where grouping by control would have read it as the
-// single misconfiguration it is. What is bought is the question a reader
-// actually arrives with — "what is wrong with *my* repository" — answered
-// without reading anything about anybody else's.
+// The default is an overview: the score, the per-resource summary, then one
+// Findings table aggregated by control, so a control that fails identically
+// across fifty repositories reads as the single misconfiguration it is —
+// one row saying 50/50 — instead of appearing once in each of fifty tables.
+// Findings the scan could not read collapse to a single sentence pointing at
+// the scan warnings that explain them.
 //
-// The full remediation stays out of the tables and keeps its own section at the
-// end. Each fix is a paragraph naming a settings path, and a paragraph does not
-// belong in a cell; the one-line form rides in the Finding column instead.
+// Options.Details flips to the per-resource layout, trivy's shape: one
+// section per resource, each a table of what that resource got wrong. That
+// answers the other question a reader arrives with — "what is wrong with *my*
+// repository" — without reading anything about anybody else's, and
+// Options.DetailFilters narrows it to the resources or controls named.
+//
+// The full remediation stays out of the tables in both layouts and keeps its
+// own section at the end. Each fix is a paragraph naming a settings path, and
+// a paragraph does not belong in a cell; the one-line form rides in the
+// Finding column instead.
 func writeTable(w io.Writer, rep *engine.Report, opts Options) error {
 	p := painter{enabled: opts.Color}
-	width := console.Width()
+	width := opts.Width
+	if width == 0 {
+		width = console.Width()
+	}
+
+	if opts.Details {
+		// Parsed before anything is written, so a filter that matches nothing
+		// is an error and not a report that looks clean.
+		filter, err := parseDetailFilters(opts.DetailFilters, rep.Findings)
+		if err != nil {
+			return err
+		}
+		filtered := filterFindings(rep.Findings, filter)
+
+		writeHeader(w, rep, p, width)
+		writeNotice(w, p, width, opts.Notice)
+		writeSummary(w, rep, p, width)
+		writeReportSummary(w, rep, p, width, opts)
+		writeWarnings(w, rep, p, width)
+		writeResourceSections(w, filtered, p, width, opts)
+		if !opts.NoRemediations {
+			writeRemediations(w, filtered, p, width)
+		}
+		return nil
+	}
 
 	writeHeader(w, rep, p, width)
 	writeNotice(w, p, width, opts.Notice)
 	writeSummary(w, rep, p, width)
 	writeReportSummary(w, rep, p, width, opts)
+	writeFindingsOverview(w, rep, p, width, opts)
+	// After the findings rather than before them: the overview's unread
+	// sentence points here, and on a one-screen report the cause should sit
+	// next to the symptom instead of above the table that hides it.
 	writeWarnings(w, rep, p, width)
-	writeResourceSections(w, rep, p, width, opts)
 	if !opts.NoRemediations {
-		writeRemediations(w, rep, p, width)
+		writeRemediationSummaries(w, rep.Findings, p, width)
 	}
+	writeHint(w, p, width)
 	return nil
 }
 
@@ -395,13 +428,14 @@ func writeReportSummary(w io.Writer, rep *engine.Report, p painter, width int, o
 
 	console.RenderTable(w, width, cols, rows)
 
-	// A legend, because a dash and the word UNREAD are both things the table
-	// invents. Everything else in it is a word the rest of the tool already
-	// uses.
+	// A legend, because a dash, the word UNREAD and the resource named
+	// "instance" are all things the report invents. Everything else in it is
+	// a word the rest of the tool already uses.
 	line(w, "%s", p.paint(ansiDim, "Legend:"))
 	for _, entry := range []string{
 		"'-': none in this state",
 		"'Unread': the scan could not read what the control asks about",
+		"'instance': the Bitbucket instance itself — controls that are organization-wide rather than per-repository",
 	} {
 		for i, l := range console.Wrap(entry, width-2) {
 			prefix := "- "
@@ -415,17 +449,33 @@ func writeReportSummary(w io.Writer, rep *engine.Report, p painter, width int, o
 
 // writeWarnings reports on the scan itself rather than on the instance.
 //
-// It comes before the findings because it is what decides how much of them to
-// believe. A 403 that cost the scan a whole repository explains a column of
-// UNREAD further down, and printing that explanation after them meant the
-// reader met the symptom several screens before the cause.
+// It is what decides how much of the findings to believe. In the detail
+// layout it comes before them: a 403 that cost the scan a whole repository
+// explains a column of UNREAD several screens further down, and the reader
+// should meet the cause before the symptom. The overview is one screen, so
+// there it sits directly under the sentence that summarises the unread
+// findings and points here.
 func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 	if len(rep.Metadata.Warnings) > 0 {
 		blank(w)
 		line(w, "%s", p.paint(ansiBold+ansiYellow, "Scan warnings"))
 		blank(w)
+		// One bullet per warning, with the parenthesised cause — the API path
+		// and status a warning carries in brackets — dimmed, so the conclusion
+		// reads before the forensics. Wrapping happens before painting, per
+		// the rule everywhere else here: escapes are width the reader never
+		// sees.
 		for _, warning := range rep.Metadata.Warnings {
-			prose(w, width, "  ", 2, warning)
+			depth := 0
+			for i, l := range console.Wrap(warning, width-4) {
+				prefix := "  - "
+				if i > 0 {
+					prefix = "    "
+				}
+				var painted string
+				painted, depth = dimParens(p, l, depth)
+				line(w, "%s%s", prefix, painted)
+			}
 		}
 	}
 	if len(rep.Errors) > 0 {
@@ -438,21 +488,61 @@ func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 	}
 }
 
-// writeResourceSections is the body of the report: one heading, one total and
-// one table per resource, in trivy's shape.
-func writeResourceSections(w io.Writer, rep *engine.Report, p painter, width int, opts Options) {
-	tallies := tallyResources(rep.Findings)
+// dimParens paints the parenthesised spans of one already-wrapped line dim.
+// depth carries an open span across the wrapped lines of a single warning —
+// the caller resets it to zero between warnings, so an unbalanced bracket
+// dims at most to its own warning's end. Identity when colour is off.
+func dimParens(p painter, s string, depth int) (string, int) {
+	var out, seg strings.Builder
+	flush := func(dim bool) {
+		if seg.Len() == 0 {
+			return
+		}
+		if dim {
+			out.WriteString(p.paint(ansiDim, seg.String()))
+		} else {
+			out.WriteString(seg.String())
+		}
+		seg.Reset()
+	}
+	for _, r := range s {
+		switch {
+		case r == '(':
+			if depth == 0 {
+				flush(false)
+			}
+			depth++
+			seg.WriteRune(r)
+		case r == ')' && depth > 0:
+			seg.WriteRune(r)
+			depth--
+			if depth == 0 {
+				flush(true)
+			}
+		default:
+			seg.WriteRune(r)
+		}
+	}
+	flush(depth > 0)
+	return out.String(), depth
+}
+
+// writeResourceSections is the body of the detail layout: one heading, one
+// total and one table per resource, in trivy's shape. It draws only the
+// findings it is handed, which is how --details filtering narrows it.
+func writeResourceSections(w io.Writer, findings []engine.Finding, p painter, width int, opts Options) {
+	tallies := tallyResources(findings)
 
 	byResource := map[string][]engine.Finding{}
-	for _, f := range rep.Findings {
+	for _, f := range findings {
 		byResource[f.Resource] = append(byResource[f.Resource], f)
 	}
 
 	shown := 0
 	skipped := 0
 	for _, t := range tallies {
-		findings := selectForSection(byResource[t.name], opts.ShowPassed)
-		if len(findings) == 0 {
+		selected := selectForSection(byResource[t.name], opts.ShowPassed)
+		if len(selected) == 0 {
 			continue
 		}
 		if opts.MaxResources > 0 && shown >= opts.MaxResources {
@@ -460,7 +550,7 @@ func writeResourceSections(w io.Writer, rep *engine.Report, p painter, width int
 			continue
 		}
 		shown++
-		writeResourceSection(w, p, width, t, findings)
+		writeResourceSection(w, p, width, t, selected)
 	}
 
 	if skipped > 0 {
@@ -562,10 +652,56 @@ func findingCell(f engine.Finding) string {
 // the verdict. Controls that merely went unread are left out — their settings
 // are not known to be wrong, and printing how to change them would say
 // otherwise.
-func writeRemediations(w io.Writer, rep *engine.Report, p painter, width int) {
+func writeRemediations(w io.Writer, findings []engine.Finding, p painter, width int) {
+	ordered := remediationOrder(findings)
+	if len(ordered) == 0 {
+		return
+	}
+
+	idWidth := remediationIDWidth(ordered)
+	blank(w)
+	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("Remediations (%d)", len(ordered))))
+	blank(w)
+	for _, f := range ordered {
+		id := f.CheckID + strings.Repeat(" ", idWidth-len(f.CheckID))
+		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, f.Remediation)
+	}
+}
+
+// writeRemediationSummaries is the overview's counterpart: one line per
+// control — the one-sentence fix that already rides in the detail tables —
+// with the vendor's documentation page dim underneath it. The full paragraphs
+// are a --details away; ten of them was most of the report by weight, read by
+// someone who had not yet decided which control to act on.
+func writeRemediationSummaries(w io.Writer, findings []engine.Finding, p painter, width int) {
+	ordered := remediationOrder(findings)
+	if len(ordered) == 0 {
+		return
+	}
+
+	idWidth := remediationIDWidth(ordered)
+	blank(w)
+	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("Remediations (%d)", len(ordered))))
+	blank(w)
+	pad := strings.Repeat(" ", idWidth+4)
+	for _, f := range ordered {
+		id := f.CheckID + strings.Repeat(" ", idWidth-len(f.CheckID))
+		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, fixLine(f))
+		// The link is one unbreakable token, printed whole even past the
+		// width — the same policy writeHeader applies to the base URL, and
+		// what Wrap would do with it anyway.
+		if ref := referenceLine(f.References); ref != "" {
+			line(w, "%s%s", pad, p.paint(ansiDim, ref))
+		}
+	}
+}
+
+// remediationOrder picks the controls the remediation sections list: FAIL or
+// MANUAL, not merely unread, once per control, in report order.
+func remediationOrder(findings []engine.Finding) []engine.Finding {
 	seen := map[string]bool{}
 	var ordered []engine.Finding
-	for _, f := range rep.Findings {
+	for _, f := range findings {
 		if f.Status != engine.StatusFail && f.Status != engine.StatusManual {
 			continue
 		}
@@ -575,22 +711,43 @@ func writeRemediations(w io.Writer, rep *engine.Report, p painter, width int) {
 		seen[f.CheckID] = true
 		ordered = append(ordered, f)
 	}
-	if len(ordered) == 0 {
-		return
-	}
+	return ordered
+}
 
+func remediationIDWidth(ordered []engine.Finding) int {
 	idWidth := 0
 	for _, f := range ordered {
 		if n := len(f.CheckID); n > idWidth {
 			idWidth = n
 		}
 	}
+	return idWidth
+}
 
-	blank(w)
-	line(w, "%s", p.paint(ansiBold, fmt.Sprintf("Remediations (%d)", len(ordered))))
-	blank(w)
-	for _, f := range ordered {
-		id := f.CheckID + strings.Repeat(" ", idWidth-len(f.CheckID))
-		prose(w, width, "  "+p.paint(ansiCyan+ansiBold, id)+"  ", idWidth+4, f.Remediation)
+// fixLine is the one-line remediation. Every bundled control carries a
+// FixSummary; the fallbacks cover a control that does not, cutting the full
+// remediation at its first sentence rather than printing the paragraph the
+// summary layout exists to avoid.
+func fixLine(f engine.Finding) string {
+	if f.FixSummary != "" {
+		return f.FixSummary
 	}
+	if head, _, ok := strings.Cut(f.Remediation, ". "); ok {
+		return head + "."
+	}
+	return f.Remediation
+}
+
+// referenceLine picks the one link worth a line: the first reference that is
+// not the generic CIS benchmark landing page. Every control carries that page
+// and it identifies none of them, so a control with nothing else gets no link
+// rather than a decorative one. SARIF keeps using References[0] as helpURI;
+// this choice is about what a person scans, not what a tool ingests.
+func referenceLine(refs []string) string {
+	for _, r := range refs {
+		if !strings.Contains(r, "cisecurity.org") {
+			return r
+		}
+	}
+	return ""
 }

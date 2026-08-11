@@ -143,7 +143,9 @@ on how big the instance is.
 
 ### Watching the scan
 
-By default a scan shows one self-overwriting progress line and then the report.
+By default a scan shows one self-overwriting progress line — a spinner, the
+current phase, and a live count of completed requests, visible from the first
+moment so a slow instance never looks like a hung one — and then the report.
 The request log is **`--verbose`**: a list of every `GET` describes what the
 tool did, and what you came for is what it found. The requests matter when
 something looks wrong, which is exactly when you type `--verbose`:
@@ -313,8 +315,9 @@ decide whether a result is acceptable.
 
 ## Output formats
 
-**`table`** (default) — the score, then a summary of every resource, then one
-table per resource, in the shape trivy uses:
+**`table`** (default) — an overview built to fit a screen: the score, a summary
+of every resource, then one `Findings` table aggregated **by control** across
+the whole scan:
 
 ```
 scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
@@ -339,42 +342,59 @@ Report Summary
 Legend:
 - '-': none in this state
 - 'Unread': the scan could not read what the control asks about
+- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
+  per-repository
+
+Findings
+
+┌────────────┬──────────┬────────┬───────────┬─────────────────────────────────────────────────────┐
+│  Control   │ Severity │ Status │ Resources │                        Title                        │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
+│            │          │        │           │ strongly authenticated users                        │
+│            │          │        │           │ · failing: legacy-billing                           │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
+│            │          │        │           │ code                                                │
+│            │          │        │           │ · failing: legacy-billing                           │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+
+... one row per failed control, severity descending ...
+
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
+│            │          │        │           │ the organization                                    │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
+│            │          │        │           │ or configuration                                    │
+└────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
+Resources: how many are in this state / how many the control was evaluated against; 'instance' is
+the Bitbucket instance itself.
+
+13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
 Scan warnings
 
-  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
-  permitted to access this resource); administrator counts are lower bounds
-
-PLAT/legacy-billing (repository)
-
-Total: 13 (LOW: 4, MEDIUM: 5, HIGH: 4)
-
-┌────────────┬──────────┬────────┬────────────────────────────────┬────────────────────────────────┐
-│  Control   │ Severity │ Status │             Title              │            Finding             │
-├────────────┼──────────┼────────┼────────────────────────────────┼────────────────────────────────┤
-│ CIS-1.1.3  │ HIGH     │ FAIL   │ Ensure any change to code      │ Pull requests require 0        │
-│            │          │        │ receives approval of two       │ approval(s); at least 2        │
-│            │          │        │ strongly authenticated users   │ independent approvals are      │
-│            │          │        │                                │ needed.                        │
-│            │          │        │                                │ · requiredApprovers = 0        │
-│            │          │        │                                │ fix: Set "Minimum approvals"   │
-│            │          │        │                                │ to at least 2 at Repository    │
-│            │          │        │                                │ settings -> Pull requests ->   │
-│            │          │        │                                │ Merge checks.                  │
-└────────────┴──────────┴────────┴────────────────────────────────┴────────────────────────────────┘
-
-... one more table per resource ...
+  - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
+    not permitted to access this resource); administrator counts are lower bounds
 
 Remediations (17)
 
-  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
-              set it to at least 2. ...
+  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+              checks.
+              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
+              permissions.
+              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
+
+... one one-line fix per control, with the vendor's doc page underneath ...
+
+Details: rerun with --details for per-resource findings and full remediation steps, or
+--details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
 That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
-at `COLUMNS=100`, abbreviated only where a line is marked `...`. The counts are of
-findings — one control against one resource — which is why they add up to more
-than the twenty controls `list-checks` reports.
+at `COLUMNS=100`, abbreviated only where a line is marked `...`.
 
 The summary leads because a terminal is read from its top. The `scored N of M`
 line is worth reading before the score above it: controls that could not be
@@ -383,15 +403,34 @@ single control and misleading in aggregate, since a token that can read very
 little produces a high score from a small sample. `--max-manual` turns that into
 a failed run rather than a good-looking one.
 
-**Report Summary is the navigation.** Grouping the body by resource answers "what
-is wrong with *my* repository" without reading about anybody else's, and says
-nothing about how one compares to another. The summary is that comparison —
-every resource, worst first — so the instance's shape is visible before any of
-the detail is.
+**The overview aggregates by control, because one misconfiguration across fifty
+repositories is one problem, not fifty.** Each row is a control; the `Resources`
+column says how far it has spread (`1/3`: failing on one of the three resources
+it was evaluated against), and a partial row names which ones on a `· failing:`
+line under the title — up to four, then `+N more` — so a fraction never leaves
+you guessing. Controls that apply to the instance itself rather than to any
+repository say `instance` in that column. Findings the scan could not read
+collapse into the single sentence under the table — they share one cause, and
+the scan warnings directly below it state that cause once instead of once per
+control per resource. Report Summary is the other axis: every resource, worst
+first, so the instance's shape is visible in both directions before any detail
+is.
 
-Scan warnings come before the tables rather than after them, because they are
-what decides how much of the report to believe: a 403 that cost the scan a whole
-repository explains a column of `UNREAD` further down.
+**`--details` is where the per-resource detail lives.** Bare, it renders one
+section per resource in the shape trivy uses — a `Control | Severity | Status |
+Title | Finding` table with the evidence and one-line fix in each cell, scan
+warnings moved above the sections so cause still precedes symptom. With values,
+it narrows the sections: `--details=PLAT/legacy-billing` matches resources by
+case-insensitive substring, `--details=CIS-1.1.9` (or `1.1.9`) matches a
+control exactly, and mixing kinds intersects them. The `=` is required when
+passing values; a value that matches nothing is an error rather than a
+quietly clean-looking report. The remediation section narrows with the filter.
+
+```bash
+scm-bench scan --details                      # every resource, every finding
+scm-bench scan --details=payments-api         # one repository's full verdict
+scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # two controls, wherever they land
+```
 
 **`UNREAD` and `MANUAL` are both `MANUAL` underneath, split by cause.** `UNREAD`
 is what *this run* could not read; `MANUAL` is a control *no API can answer*
@@ -401,20 +440,26 @@ saw is not known to be misconfigured, and printing how to change its settings
 would say otherwise. The JSON and the SARIF say `MANUAL` for both, because that
 is what the control returned.
 
-Each finding's `Finding` cell carries what the resource does, the evidence behind
-it, and a one-line `fix:` — the first move, and where. The full remediation
-paragraph lives in a section of its own at the end, as prose: those paragraphs
-name settings paths, project-wide variants and config keys, and a paragraph in a
-table cell is a column of three-word lines. `--no-remediations` drops the section
-entirely; the one-line fixes stay.
+**Remediations are one line each in the overview**: the one-sentence fix, with
+the vendor's documentation page dim underneath it (the generic CIS benchmark
+landing page is on every control and identifies none of them, so it never
+earns a line). The full paragraphs — settings paths, project-wide variants,
+config keys — print with `--details`, and in its sections each finding's
+`Finding` cell also carries the evidence and the one-line `fix:` beside the
+verdict. `--no-remediations` drops the section entirely in both layouts.
 
-Tables wrap to `COLUMNS`, clamped to 60–120 and defaulting to 80 when it is not
-exported. Nothing ever exceeds that width — a border that wraps stops reading as
-a border — so a long settings path is broken at the column edge rather than
-pushing the frame out of true.
+Width comes from the terminal itself when stdout is one; an exported `COLUMNS`
+overrides it, and pipes, redirects and `--output-file` get 80. Whatever the
+source, it is clamped to 60–160. The ceiling constrains prose: a flexed table
+column never grows past its content, so on a wide terminal a table stops at
+its natural width — wide enough for the longest control title on one line —
+rather than sprawling. Nothing ever exceeds that width — a border that wraps
+stops reading as a border — so a long settings path is broken at the column
+edge rather than pushing the frame out of true.
 
 Colour is reinforcement only, so nothing is lost when output is piped,
-redirected, or run with `NO_COLOR` set. Filtering is a job for the JSON:
+redirected, or run with `NO_COLOR` set. `--details=<value>` filters the table;
+anything more surgical is a job for the JSON:
 
 ```bash
 scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
@@ -427,10 +472,12 @@ carry a fixed-width `[INFO]`/`[WARN]`/`[FAIL]`/`[PASS]` tag, because they are re
 interleaved with other programs' output and have no table to belong to. The
 report on stdout does not.
 
-`--max-resources` caps how many resources get a table of their own (`0`, the
-default, gives every one of them a table). When it bites, the report says how
-many it withheld; every resource still appears in Report Summary. It affects only
-this format: `json` and `sarif` always carry the full set.
+`--max-resources` caps how many resources get a `--details` section of their
+own (`0`, the default, gives every one of them a section); the overview draws
+no per-resource sections, so it is only accepted alongside `--details`. When it
+bites, the report says how many it withheld; every resource still appears in
+Report Summary. It affects only this format: `json` and `sarif` always carry
+the full set.
 
 Passing and not-applicable controls are summarised but not listed, since a
 report is a list of things to do. `--show-passed` lists them too, which is what

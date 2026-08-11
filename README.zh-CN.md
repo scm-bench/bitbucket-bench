@@ -130,7 +130,9 @@ URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` �
 
 ### 看着它扫
 
-默认情况下，一次扫描只显示一行原地刷新的进度，然后是报告。请求日志归 **`--verbose`** 管：
+默认情况下，一次扫描显示一行原地刷新的进度 —— 转轮、当前阶段和已完成请求的实时计数，
+从第一刻起就可见，慢的实例不会看起来像卡死的实例 —— 然后是报告。请求日志归
+**`--verbose`** 管：
 逐条列出每个 `GET` 描述的是「工具做了什么」，而你要看的是「它发现了什么」。请求只在事情看起来
 不对劲时才重要，而那正是你会敲 `--verbose` 的时候：
 
@@ -277,8 +279,8 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 ## 输出格式
 
-**`table`**（默认）—— 分数在最前，然后是所有资源的汇总表，再是每个资源一张表，
-形态取自 trivy：
+**`table`**（默认）—— 一份为一屏设计的总览：分数在最前，然后是所有资源的汇总表，
+再是一张**按规则聚合**的 `Findings` 表，覆盖整次扫描：
 
 ```
 scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
@@ -303,68 +305,105 @@ Report Summary
 Legend:
 - '-': none in this state
 - 'Unread': the scan could not read what the control asks about
+- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
+  per-repository
+
+Findings
+
+┌────────────┬──────────┬────────┬───────────┬─────────────────────────────────────────────────────┐
+│  Control   │ Severity │ Status │ Resources │                        Title                        │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
+│            │          │        │           │ strongly authenticated users                        │
+│            │          │        │           │ · failing: legacy-billing                           │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
+│            │          │        │           │ code                                                │
+│            │          │        │           │ · failing: legacy-billing                           │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+
+... 每条失败的规则一行，严重度降序 ...
+
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
+│            │          │        │           │ the organization                                    │
+├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
+│ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
+│            │          │        │           │ or configuration                                    │
+└────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
+Resources: how many are in this state / how many the control was evaluated against; 'instance' is
+the Bitbucket instance itself.
+
+13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
 Scan warnings
 
-  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
-  permitted to access this resource); administrator counts are lower bounds
-
-PLAT/legacy-billing (repository)
-
-Total: 13 (LOW: 4, MEDIUM: 5, HIGH: 4)
-
-┌────────────┬──────────┬────────┬────────────────────────────────┬────────────────────────────────┐
-│  Control   │ Severity │ Status │             Title              │            Finding             │
-├────────────┼──────────┼────────┼────────────────────────────────┼────────────────────────────────┤
-│ CIS-1.1.3  │ HIGH     │ FAIL   │ Ensure any change to code      │ Pull requests require 0        │
-│            │          │        │ receives approval of two       │ approval(s); at least 2        │
-│            │          │        │ strongly authenticated users   │ independent approvals are      │
-│            │          │        │                                │ needed.                        │
-│            │          │        │                                │ · requiredApprovers = 0        │
-│            │          │        │                                │ fix: Set "Minimum approvals"   │
-│            │          │        │                                │ to at least 2 at Repository    │
-│            │          │        │                                │ settings -> Pull requests ->   │
-│            │          │        │                                │ Merge checks.                  │
-└────────────┴──────────┴────────┴────────────────────────────────┴────────────────────────────────┘
-
-... 每个资源一张表 ...
+  - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
+    not permitted to access this resource); administrator counts are lower bounds
 
 Remediations (17)
 
-  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
-              set it to at least 2. ...
+  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+              checks.
+              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
+              permissions.
+              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
+
+... 每条规则一行修法，下面跟着厂商文档链接 ...
+
+Details: rerun with --details for per-resource findings and full remediation steps, or
+--details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
 上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
-下的真实输出，只在标了 `...` 的地方做了省略。计数的单位是 finding —— 一条规则对一个资源，
-所以它们加起来会多于 `list-checks` 报出的 20 条规则。
+下的真实输出，只在标了 `...` 的地方做了省略。
 
 汇总放在最前，因为终端是从上往下读的。`scored N of M` 这一行值得在看分数之前先读：
 无法判定的规则不进入分数的分子，也不进入分母 —— 单看每一条规则这是对的，合起来却有
 误导性，因为分母被缩小了，于是一个读不到多少东西的 token 反而能从很小的样本里得出很高的
 分数。`--max-manual` 就是把这种情况变成一次失败的运行，而不是一份好看的报告。
 
-**Report Summary 是导航。** 正文按资源分组，能在不读别人家仓库的前提下回答「我这个仓库
-哪里有问题」，但说不出各个资源之间怎么比。汇总表就是那份比较 —— 所有资源，最差的排最前 ——
-让实例的整体形状在任何细节之前先出现。
+**总览按规则聚合，因为同一个配置错误铺在五十个仓库上是一个问题，不是五十个。**
+每行是一条规则；`Resources` 列说明它铺得多广（`1/3`：在被评估的三个资源中的一个上失败），
+部分命中的行会在标题下用 `· failing:` 点名是哪几个 —— 最多四个，超出记 `+N more` ——
+分数不会让你去猜。作用于实例本身而非任何仓库的规则，该列直接写 `instance`。
+扫描读不到的发现折叠成表格下面那一句话 —— 它们共享同一个成因，而紧随其后的扫描告警把
+成因只讲一次，而不是每条规则每个资源各讲一遍。Report Summary 是另一条轴：所有资源，
+最差的排最前 —— 实例的整体形状在任何细节之前，两个方向都先看得到。
 
-扫描告警排在表格之前而不是之后，因为它决定了这份报告有多少可信：一个让扫描丢掉整个仓库的
-403，正是下面那一列 `UNREAD` 的原因。
+**逐资源的细节在 `--details` 里。** 不带值时，按 trivy 的形态渲染每个资源一节 ——
+`Control | Severity | Status | Title | Finding` 表格，每格里带证据和一行修复；扫描告警
+移回各节之前，让原因仍然先于症状出现。带值时收窄范围：`--details=PLAT/legacy-billing`
+按大小写不敏感的子串匹配资源，`--details=CIS-1.1.9`（或 `1.1.9`）精确匹配规则，
+两类混用时取交集。带值时必须用 `=`；一个什么都没匹配上的值是一次报错，而不是一份
+看起来很干净的报告。修复建议一节会随过滤一起收窄。
+
+```bash
+scm-bench scan --details                      # 所有资源、所有发现
+scm-bench scan --details=payments-api         # 一个仓库的完整判定
+scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪个仓库
+```
 
 **`UNREAD` 与 `MANUAL` 底层都是 `MANUAL`，按成因拆开。** `UNREAD` 是**这次运行**读不到的
 东西；`MANUAL` 是**任何 API 都答不了**的规则（metadata 里 `automated: false`），无论 token
 多好都需要人来判断。只有后者会给出修复建议：一条扫描根本没看到的规则，并不能说它配错了，
 印出「怎么改设置」等于在说反话。JSON 与 SARIF 里两者都是 `MANUAL`，因为那才是规则返回的东西。
 
-每条发现的 `Finding` 单元格里装着这个资源的实际状况、支撑它的证据，以及一行 `fix:` ——
-第一步动作，以及在哪里做。完整的修复段落独立成节放在末尾，仍是散文：那些段落写的是设置路径、
-项目级的等价做法和配置项名称，而一个段落塞进表格单元格就是一列三词一行的东西。
-`--no-remediations` 可以整段去掉；一行的 `fix:` 仍然保留。
+**总览里的 Remediations 一条只占一行**：一句话修法，下面用暗色跟着厂商文档链接
+（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。完整段落 ——
+设置路径、项目级的等价做法、配置项名称 —— 在 `--details` 里打印，且其各节中每条
+发现的 `Finding` 单元格还带着证据和一行 `fix:`。`--no-remediations` 在两种布局下
+都能整段去掉。
 
-表格宽度跟随 `COLUMNS`，夹在 60–120 之间，未导出时默认 80。任何一行都不会超出这个宽度 ——
-折了行的边框就不再像边框 —— 所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
+宽度在 stdout 是终端时来自终端本身；导出的 `COLUMNS` 可以覆盖它，管道、重定向与
+`--output-file` 得到 80。无论来源如何都夹在 60–160 之间。上限约束的是散文：弹性表格列
+从不超出内容的自然宽度，所以宽终端上表格会停在自然宽度 —— 足够让最长的规则标题单行
+显示 —— 而不是摊开。任何一行都不会超出这个宽度 —— 折了行的边框就不再像边框 ——
+所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
 
-颜色只是强化，所以输出被管道、重定向或设置了 `NO_COLOR` 时什么都不会丢。过滤是 JSON 的活：
+颜色只是强化，所以输出被管道、重定向或设置了 `NO_COLOR` 时什么都不会丢。
+`--details=<值>` 能过滤表格；更精细的过滤是 JSON 的活：
 
 ```bash
 scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
@@ -376,9 +415,9 @@ scm-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
 `[INFO]`/`[WARN]`/`[FAIL]`/`[PASS]` 标签，因为它们是和别的程序的输出交错着读的，
 也没有表格可归属。stdout 上的报告则不带。
 
-`--max-resources` 限制多少个资源能有自己的表（默认 `0`，即每个都有）。真的截断时报告会说明
-省略了多少个；所有资源在 Report Summary 里仍然都在。它只影响这一种格式：`json` 与 `sarif`
-始终携带完整集合。
+`--max-resources` 限制多少个资源能有自己的 `--details` 一节（默认 `0`，即每个都有）；
+总览不画逐资源的节，所以它只能与 `--details` 搭配使用。真的截断时报告会说明省略了多少个；
+所有资源在 Report Summary 里仍然都在。它只影响这一种格式：`json` 与 `sarif` 始终携带完整集合。
 
 通过和不适用的规则只计入汇总，不会逐条列出——报告是一份待办清单。`--show-passed` 会把它们
 也列出来，当你的问题是「这个实例已经做对了哪些」时用它。

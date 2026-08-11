@@ -71,6 +71,7 @@ type scanOptions struct {
 	format         string
 	outputPath     string
 	showPassed     bool
+	details        []string
 	maxResources   int
 	failOn         string
 	failUnder      int
@@ -115,6 +116,11 @@ terminal, scan offers the same choice interactively — and can save the URL and
 token you enter (0600, under your user config directory, or SCM_BENCH_CONFIG_DIR)
 so later scans need nothing. Delete the file to forget it.
 
+The table report is an overview aggregated by control: one row per failed
+control, however many resources it failed on. --details expands it to one
+section per resource; --details=<resource|control>[,...] narrows those
+sections to what is named.
+
 Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
 Three thresholds drive exit 1, and they answer different questions:
@@ -147,7 +153,11 @@ so.`,
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
-	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "table output: how many resources get a table of their own; 0 means every one")
+	f.StringSliceVar(&opts.details, "details", nil, "per-resource findings instead of the overview; --details=<resource|control>[,...] narrows it (the '=' is required when passing values)")
+	// Bare --details, no value, means every resource and every control. pflag
+	// needs a sentinel to allow the bare form; "all" is stripped by the parser.
+	f.Lookup("details").NoOptDefVal = "all"
+	f.IntVar(&opts.maxResources, "max-resources", report.DefaultMaxResources, "with --details: how many resources get a table of their own; 0 means every one")
 	f.StringVar(&opts.failOn, "fail-on", "high", "exit 1 when a failure at or above this severity exists: high, medium, low, none")
 	f.IntVar(&opts.failUnder, "fail-under", 0, "exit 1 when the score is below this; 0 disables")
 	// Defaults to off, because how much of an instance a token can read is a
@@ -240,6 +250,19 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				}
 			}
 		}
+	}
+
+	// Both are table-layout knobs, checked here because they need to know
+	// which flags were actually typed. --details on a machine format is
+	// refused rather than ignored, for the demo's reason: the output would
+	// look exactly like what was asked for and not be it. --max-resources
+	// caps the per-resource tables, which the default overview never draws,
+	// so alone it is a request the report cannot honour.
+	if len(opts.details) > 0 && !strings.EqualFold(opts.format, report.FormatTable) {
+		return fmt.Errorf("--details shapes the table output; -o %s already carries every finding", opts.format)
+	}
+	if cmd.Flags().Changed("max-resources") && len(opts.details) == 0 {
+		return fmt.Errorf("--max-resources caps the per-resource tables, which the default overview does not print; combine it with --details")
 	}
 
 	if err := validateScanOptions(opts); err != nil {
@@ -341,7 +364,10 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	reportOpts := report.Options{
 		Format:         opts.format,
 		Color:          useColor(opts, out),
+		Width:          console.WidthFor(out),
 		ShowPassed:     opts.showPassed,
+		Details:        len(opts.details) > 0,
+		DetailFilters:  opts.details,
 		MaxResources:   opts.maxResources,
 		NoRemediations: opts.noRemediations,
 		ToolVersion:    Version,
@@ -451,6 +477,11 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		return readSnapshot(opts.snapshotIn)
 	}
 
+	// Only the network path gets the spinner: a snapshot or the demo is done
+	// before a rotor could finish a turn, and starting it here rather than in
+	// runScan keeps that knowledge in one place.
+	progress.start()
+
 	client, err := bitbucketdc.NewClient(bitbucketdc.Options{
 		BaseURL:        opts.baseURL,
 		Token:          opts.token,
@@ -460,7 +491,10 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Concurrency:    opts.concurrency,
 		Insecure:       opts.insecure,
 		AllowPlaintext: opts.allowPlaintext,
-		OnRequest:      trace.record,
+		OnRequest: func(e bitbucketdc.RequestEvent) {
+			trace.record(e)
+			progress.tick()
+		},
 		Logf: func(format string, args ...any) {
 			logf(cmd, opts, format, args...)
 		},

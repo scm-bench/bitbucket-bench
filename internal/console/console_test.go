@@ -3,6 +3,7 @@ package console
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -127,6 +128,49 @@ func TestWidthIsClampedAndDefaultsToEighty(t *testing.T) {
 		if got := Width(); got != tc.want {
 			t.Errorf("COLUMNS=%q: Width() = %d, want %d", tc.columns, got, tc.want)
 		}
+	}
+}
+
+// WidthFor asks the terminal only when the environment has not spoken and the
+// output could actually be one. Neither is true anywhere a test can run, so
+// the tty-success branch stays untested by design — it is two lines.
+func TestWidthForPrefersColumnsThenTerminal(t *testing.T) {
+	var buf bytes.Buffer
+	for _, tc := range []struct {
+		columns string
+		want    int
+	}{
+		{"100", 100},
+		{"300", maxWidth},
+		{"20", minWidth},
+		{"", fallbackWidth},
+		{"junk", fallbackWidth},
+		{"0", fallbackWidth},
+	} {
+		t.Setenv("COLUMNS", tc.columns)
+		if got := WidthFor(&buf); got != tc.want {
+			t.Errorf("COLUMNS=%q: WidthFor(buffer) = %d, want %d", tc.columns, got, tc.want)
+		}
+	}
+
+	// Real files that are not terminals: the size ioctl fails on them, which
+	// is the whole discrimination — no separate is-a-terminal check exists.
+	t.Setenv("COLUMNS", "")
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	defer f.Close()
+	if got := WidthFor(f); got != fallbackWidth {
+		t.Errorf("WidthFor(regular file) = %d, want %d", got, fallbackWidth)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Skipf("open %s: %v", os.DevNull, err)
+	}
+	defer null.Close()
+	if got := WidthFor(null); got != fallbackWidth {
+		t.Errorf("WidthFor(%s) = %d, want %d", os.DevNull, got, fallbackWidth)
 	}
 }
 

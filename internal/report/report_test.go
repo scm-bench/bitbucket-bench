@@ -146,10 +146,12 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 
 	for _, want := range []string{
 		"Report Summary",
+		"Findings",
 		"CIS-1.1.15",
 		"PRJ/app",
-		"Anyone with write access can push directly to main.",
-		"Repository settings -> Branch permissions -> Add restriction",
+		"Ensure pushing is restricted",
+		"Enable Prevent changes without a pull request.",
+		"https://example.invalid/cis",
 		"Remediations",
 		"Scan warnings",
 		"the user directory is not readable",
@@ -157,6 +159,19 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 		if !containsText(out, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, out)
 		}
+	}
+
+	// The default is the overview: no per-resource sections, none of the
+	// per-finding narration that belongs to them, and the one-line fix in
+	// place of the full remediation paragraph.
+	if strings.Contains(out, "Total: ") {
+		t.Errorf("the default output should not draw per-resource sections\n---\n%s", out)
+	}
+	if containsText(out, "Anyone with write access can push directly to main.") {
+		t.Errorf("per-finding details belong to --details\n---\n%s", out)
+	}
+	if containsText(out, "Repository settings -> Branch permissions -> Add restriction") {
+		t.Errorf("the full remediation paragraph belongs to --details\n---\n%s", out)
 	}
 
 	// Passing controls are summarised but not listed unless asked for.
@@ -168,14 +183,36 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 	}
 }
 
+func TestDetailsIncludesPerResourceSections(t *testing.T) {
+	out := render(t, Options{Format: FormatTable, Details: true})
+
+	for _, want := range []string{
+		"Report Summary",
+		"CIS-1.1.15",
+		"PRJ/app",
+		"Total: ",
+		"Anyone with write access can push directly to main.",
+		"Repository settings -> Branch permissions -> Add restriction",
+		"Remediations",
+		"Scan warnings",
+		"the user directory is not readable",
+	} {
+		if !containsText(out, want) {
+			t.Errorf("details output is missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
 // The summary is the first thing on the page, not the last.
 //
 // A CI log is read from its end, but a terminal is read from its top, and a
 // score that arrived after four screens of findings answered "how bad is this"
-// long after the reader had started guessing. The scan warnings come next
-// because they say how much of the report to believe.
+// long after the reader had started guessing. In the detail layout the scan
+// warnings come before the findings because they say how much of the report to
+// believe; the overview is one screen, so there they sit under the sentence
+// that points at them.
 func TestSummaryAndWarningsComeBeforeTheFindings(t *testing.T) {
-	out := render(t, Options{Format: FormatTable})
+	out := render(t, Options{Format: FormatTable, Details: true})
 
 	score := strings.Index(out, "SCORE")
 	summary := strings.Index(out, "Report Summary")
@@ -201,13 +238,42 @@ func TestSummaryAndWarningsComeBeforeTheFindings(t *testing.T) {
 	}
 }
 
+func TestOverviewSectionOrder(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+
+	score := strings.Index(out, "SCORE")
+	summary := strings.Index(out, "Report Summary")
+	findings := strings.Index(out, "Findings")
+	warnings := strings.Index(out, "Scan warnings")
+	remediations := strings.Index(out, "Remediations (")
+	hint := strings.Index(out, "Details: rerun with --details")
+
+	for _, step := range []struct {
+		name       string
+		before, at int
+	}{
+		{"SCORE before the report summary", score, summary},
+		{"report summary before the findings", summary, findings},
+		{"findings before the scan warnings", findings, warnings},
+		{"scan warnings before the remediations", warnings, remediations},
+		{"remediations before the hint", remediations, hint},
+	} {
+		if step.before < 0 || step.at < 0 {
+			t.Fatalf("%s: a section is missing entirely\n---\n%s", step.name, out)
+		}
+		if step.before > step.at {
+			t.Errorf("%s: order is wrong\n---\n%s", step.name, out)
+		}
+	}
+}
+
 // Both are MANUAL, and reading them as one state is what made the sample
 // instance report nineteen controls needing a person when six of them did. The
 // other thirteen were one unreadable repository. The Status column is where
 // that difference survives now that the sections are gone.
 func TestUnreadIsDistinctFromManualInTheStatusColumn(t *testing.T) {
 	ids := []string{"1.1.3", "1.1.4", "1.1.9", "1.1.15", "1.1.16", "1.1.17", "1.2.1"}
-	out := renderReport(t, reportWithUnreadableResource(t, ids...), Options{Format: FormatTable})
+	out := renderReport(t, reportWithUnreadableResource(t, ids...), Options{Format: FormatTable, Details: true})
 
 	if n := strings.Count(out, statusUnread); n < len(ids) {
 		t.Errorf("only %d of %d unreadable controls are marked %s\n---\n%s", n, len(ids), statusUnread, out)
@@ -261,7 +327,7 @@ func TestUnreadControlsAreLeftOutOfTheRemediations(t *testing.T) {
 // The one-line fix rides in the finding's cell so the reader can act without
 // scrolling; the paragraph stays in its own section so the table stays a table.
 func TestFixSummaryRidesWithTheVerdictAndTheParagraphDoesNot(t *testing.T) {
-	out := render(t, Options{Format: FormatTable})
+	out := render(t, Options{Format: FormatTable, Details: true})
 
 	remediations := strings.Index(out, "Remediations (")
 	if remediations < 0 {
@@ -324,16 +390,18 @@ func TestReportSummaryRanksResourcesWorstFirst(t *testing.T) {
 // Nothing may run past the width, at any width, whatever the escape sequences
 // would have measured.
 func TestEveryLineFitsTheTerminalWidth(t *testing.T) {
-	for _, columns := range []string{"60", "80", "100", "300"} {
+	for _, columns := range []string{"60", "80", "100", "140", "300"} {
 		t.Setenv("COLUMNS", columns)
-		limit := min(max(atoi(t, columns), 60), 120)
+		limit := min(max(atoi(t, columns), 60), 160)
 
 		for _, colour := range []bool{false, true} {
-			out := renderReport(t, reportWithUnreadableResource(t, "1.1.3", "1.1.15", "1.1.16"),
-				Options{Format: FormatTable, Color: colour})
-			for _, line := range strings.Split(out, "\n") {
-				if n := utf8.RuneCountInString(stripANSI(line)); n > limit {
-					t.Errorf("COLUMNS=%s colour=%v: %d columns: %q", columns, colour, n, line)
+			for _, details := range []bool{false, true} {
+				out := renderReport(t, reportWithUnreadableResource(t, "1.1.3", "1.1.15", "1.1.16"),
+					Options{Format: FormatTable, Color: colour, Details: details})
+				for _, line := range strings.Split(out, "\n") {
+					if n := utf8.RuneCountInString(stripANSI(line)); n > limit {
+						t.Errorf("COLUMNS=%s colour=%v details=%v: %d columns: %q", columns, colour, details, n, line)
+					}
 				}
 			}
 		}
@@ -443,7 +511,7 @@ func stripANSI(s string) string {
 }
 
 func TestTableShowPassedIncludesPassingControls(t *testing.T) {
-	out := render(t, Options{Format: FormatTable, ShowPassed: true})
+	out := render(t, Options{Format: FormatTable, ShowPassed: true, Details: true})
 	if !containsText(out, "Ensure two approvals") {
 		t.Error("--show-passed should list passing controls")
 	}
@@ -619,7 +687,7 @@ func TestUnknownFormatIsRejected(t *testing.T) {
 // Remediation is a paragraph naming a settings path, and a paragraph in a table
 // cell is a column of three-word lines. It keeps its own section, as prose.
 func TestRemediationLivesInItsOwnSection(t *testing.T) {
-	out := render(t, Options{Format: FormatTable})
+	out := render(t, Options{Format: FormatTable, Details: true})
 
 	remedy := "Repository settings -> Branch permissions -> Add restriction"
 	tables, remediations, ok := strings.Cut(out, "Remediations (")
@@ -863,7 +931,7 @@ func countText(out, want string) int {
 // through, and when it bites it has to say so — a report that silently omits
 // repositories with findings is worse than a long one.
 func TestMaxResourcesCapsTheTablesAndSaysSo(t *testing.T) {
-	out := renderReport(t, reportWithRepeatedFinding(t, 6), Options{Format: FormatTable, MaxResources: 2})
+	out := renderReport(t, reportWithRepeatedFinding(t, 6), Options{Format: FormatTable, Details: true, MaxResources: 2})
 
 	if n := strings.Count(out, "Total: "); n != 2 {
 		t.Errorf("drew %d resource tables, want 2\n---\n%s", n, out)
@@ -883,7 +951,7 @@ func TestMaxResourcesCapsTheTablesAndSaysSo(t *testing.T) {
 // Zero is the default and means "draw them all", because each table is a
 // resource's whole verdict rather than a list that could be trimmed.
 func TestMaxResourcesZeroDrawsEveryTable(t *testing.T) {
-	out := renderReport(t, reportWithRepeatedFinding(t, 6), Options{Format: FormatTable, MaxResources: 0})
+	out := renderReport(t, reportWithRepeatedFinding(t, 6), Options{Format: FormatTable, Details: true, MaxResources: 0})
 	if n := strings.Count(out, "Total: "); n != 6 {
 		t.Errorf("drew %d resource tables, want 6\n---\n%s", n, out)
 	}
@@ -955,5 +1023,470 @@ func TestHeaderShedsPartsRatherThanOverflowing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// One misconfiguration across many repositories is one row saying so, not one
+// table per repository saying the same thing.
+func TestOverviewAggregatesFailuresByControl(t *testing.T) {
+	out := renderReport(t, reportWithRepeatedFinding(t, 6), Options{Format: FormatTable})
+
+	cells := tableCells(out)
+	rows := 0
+	for _, c := range cells {
+		if strings.Contains(c, "CIS-1.1.15") {
+			rows++
+		}
+	}
+	if rows != 1 {
+		t.Errorf("the control appears in %d table rows, want 1\n---\n%s", rows, out)
+	}
+	found := false
+	for _, c := range cells {
+		if c == "6/6" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 6/6 resources cell\n---\n%s", out)
+	}
+}
+
+// FAIL rows lead, ordered by severity and then benchmark number, so the top of
+// the table is the top of the to-do list.
+func TestOverviewOrdersRowsBySeverityThenID(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 1)
+	rep.Findings = append(rep.Findings,
+		engine.Finding{
+			CheckID: "CIS-1.1.8", CISID: "1.1.8", Severity: "LOW", Status: engine.StatusFail,
+			Title: "Ensure stale branches are removed", Resource: "PRJ/repo-00",
+			ResourceType: engine.ResourceRepository, Details: "d", Automated: true,
+		},
+		engine.Finding{
+			CheckID: "CIS-1.1.4", CISID: "1.1.4", Severity: "MEDIUM", Status: engine.StatusFail,
+			Title: "Ensure approvals are dismissed", Resource: "PRJ/repo-00",
+			ResourceType: engine.ResourceRepository, Details: "d", Automated: true,
+		},
+		engine.Finding{
+			CheckID: "CIS-1.3.5", CISID: "1.3.5", Severity: "HIGH", Status: engine.StatusManual,
+			Title: "Ensure MFA is enforced", Resource: engine.InstanceResourceName,
+			ResourceType: engine.ResourceOrganization, Details: "ask the IdP",
+		},
+	)
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	high := strings.Index(out, "CIS-1.1.15")  // HIGH FAIL
+	medium := strings.Index(out, "CIS-1.1.4") // MEDIUM FAIL
+	low := strings.Index(out, "CIS-1.1.8")    // LOW FAIL
+	manual := strings.Index(out, "CIS-1.3.5") // HIGH MANUAL
+	if high < 0 || medium < 0 || low < 0 || manual < 0 {
+		t.Fatalf("a control is missing from the overview\n---\n%s", out)
+	}
+	if !(high < medium && medium < low) {
+		t.Errorf("FAIL rows are not ordered by severity\n---\n%s", out)
+	}
+	if manual < low {
+		t.Errorf("a MANUAL row appears before the FAIL rows\n---\n%s", out)
+	}
+}
+
+// Thirteen controls the token could not read are one problem with one cause,
+// so the overview says so once instead of thirteen times.
+func TestOverviewCollapsesUnreadToOneSentence(t *testing.T) {
+	ids := []string{"1.1.3", "1.1.15", "1.1.16"}
+	rep := reportWithUnreadableResource(t, ids...)
+	rep.Metadata.Warnings = []string{"branch permissions are not readable (401)"}
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if strings.Contains(out, statusUnread) {
+		t.Errorf("unread findings should not appear as rows in the overview\n---\n%s", out)
+	}
+	if !containsText(out, "3 controls could not be read (Unread) on PRJ/locked; see Scan warnings below.") {
+		t.Errorf("no unread summary sentence\n---\n%s", out)
+	}
+	// The control no API can answer is a different thing and keeps its row.
+	if !containsText(out, "CIS-1.3.5") {
+		t.Errorf("the manual control lost its row\n---\n%s", out)
+	}
+}
+
+// Unread instances still widen the denominator: a control failing on two of
+// four resources while two went unread is 2/4, not 2/2.
+func TestOverviewCountsUnreadInTheDenominator(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 4)
+	rep.Findings[2].Status = engine.StatusManual // unread: Automated stays true
+	rep.Findings[3].Status = engine.StatusManual
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	found := false
+	for _, c := range tableCells(out) {
+		if c == "2/4" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 2/4 resources cell\n---\n%s", out)
+	}
+}
+
+func TestOverviewShowPassedAddsPassRows(t *testing.T) {
+	out := render(t, Options{Format: FormatTable, ShowPassed: true})
+	if !containsText(out, "Ensure two approvals") {
+		t.Errorf("--show-passed should add PASS rows to the overview\n---\n%s", out)
+	}
+	if !strings.Contains(out, statusPass) {
+		t.Errorf("no %s in the Status column\n---\n%s", statusPass, out)
+	}
+
+	// Without it, passes stay out.
+	out = render(t, Options{Format: FormatTable})
+	if containsText(out, "Ensure two approvals") {
+		t.Errorf("a PASS row appeared without --show-passed\n---\n%s", out)
+	}
+}
+
+func TestOverviewSaysSoWhenNothingNeedsAttention(t *testing.T) {
+	rep := &engine.Report{
+		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "t", Severity: "HIGH",
+			Status: engine.StatusPass, Resource: "PRJ/app", ResourceType: engine.ResourceRepository,
+			Details: "fine", Automated: true,
+		}},
+	}
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !strings.Contains(out, "No failed or manual-review controls.") {
+		t.Errorf("a clean overview should say it is clean\n---\n%s", out)
+	}
+}
+
+func TestHintAppearsOnlyInOverview(t *testing.T) {
+	if out := render(t, Options{Format: FormatTable}); !strings.Contains(out, "Details: rerun with --details") {
+		t.Errorf("the overview should say how to get the details\n---\n%s", out)
+	}
+	if out := render(t, Options{Format: FormatTable, Details: true}); strings.Contains(out, "Details: rerun with --details") {
+		t.Errorf("the details layout should not advertise itself\n---\n%s", out)
+	}
+}
+
+func TestDetailsFilterByResource(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 3) // PRJ/repo-00 .. PRJ/repo-02
+	out := renderReport(t, rep, Options{Format: FormatTable, Details: true, DetailFilters: []string{"REPO-01"}})
+
+	sections := out[strings.Index(out, "Total: "):]
+	if strings.Contains(sections, "PRJ/repo-00") || strings.Contains(sections, "PRJ/repo-02") {
+		t.Errorf("resources outside the filter got sections\n---\n%s", out)
+	}
+	if n := strings.Count(out, "Total: "); n != 1 {
+		t.Errorf("drew %d sections, want 1\n---\n%s", n, out)
+	}
+	// The summary keeps every resource: it is the navigation.
+	summary := out[strings.Index(out, "Report Summary"):strings.Index(out, "Total: ")]
+	if !strings.Contains(summary, "PRJ/repo-00") {
+		t.Errorf("the report summary lost a resource to the filter\n---\n%s", out)
+	}
+}
+
+func TestDetailsFilterByControl(t *testing.T) {
+	rep := sampleReport()
+	for _, value := range []string{"CIS-1.1.15", "cis-1.1.15", "1.1.15"} {
+		out := renderReport(t, rep, Options{Format: FormatTable, Details: true, DetailFilters: []string{value}})
+		if !containsText(out, "Anyone with write access can push directly to main.") {
+			t.Errorf("--details=%s lost the control it names\n---\n%s", value, out)
+		}
+		if strings.Contains(out[strings.Index(out, "Total: "):], "CIS-1.3.5") {
+			t.Errorf("--details=%s kept a control it does not name\n---\n%s", value, out)
+		}
+		// Remediations narrow with the filter.
+		if strings.Contains(out, "Enforce MFA at the IdP") {
+			t.Errorf("--details=%s kept a filtered control's remediation\n---\n%s", value, out)
+		}
+	}
+}
+
+func TestDetailsFilterKindsIntersect(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 3)
+	rep.Findings = append(rep.Findings, engine.Finding{
+		CheckID: "CIS-1.1.8", CISID: "1.1.8", Severity: "LOW", Status: engine.StatusFail,
+		Title: "Ensure stale branches are removed", Resource: "PRJ/repo-01",
+		ResourceType: engine.ResourceRepository, Details: "stale branches exist",
+		Remediation: "Delete the stale branches", Automated: true,
+	})
+	rep.Score = engine.Compute(rep.Findings)
+
+	out := renderReport(t, rep, Options{Format: FormatTable, Details: true,
+		DetailFilters: []string{"repo-01", "1.1.8"}})
+	sections := out[strings.Index(out, "Total: "):]
+	if !strings.Contains(sections, "CIS-1.1.8") {
+		t.Errorf("the named control on the named resource is missing\n---\n%s", out)
+	}
+	if strings.Contains(sections, "CIS-1.1.15") {
+		t.Errorf("a control outside the filter survived it\n---\n%s", out)
+	}
+	if n := strings.Count(out, "Total: "); n != 1 {
+		t.Errorf("drew %d sections, want 1\n---\n%s", n, out)
+	}
+}
+
+// A filter that matches nothing would render a report indistinguishable from a
+// clean one, so it is an error — and an early one, before any output.
+func TestDetailsFilterMatchingNothingErrors(t *testing.T) {
+	var buf bytes.Buffer
+	err := Write(&buf, sampleReport(), Options{Format: FormatTable, Details: true, DetailFilters: []string{"bogus"}})
+	if err == nil {
+		t.Fatal("a filter matching nothing should be an error")
+	}
+	if !strings.Contains(err.Error(), `"bogus"`) {
+		t.Errorf("the error does not name the value: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("output was written before the filter was rejected:\n%s", buf.String())
+	}
+}
+
+// The overview's remediations are one line per control — the one-sentence fix
+// with the vendor's doc page dim underneath — because ten full paragraphs were
+// most of the report by weight for a reader who had not yet picked a control.
+func TestOverviewRemediationsAreSlimWithLink(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+
+	remediations := out[strings.Index(out, "Remediations ("):]
+	if !containsText(remediations, "Enable Prevent changes without a pull request.") {
+		t.Errorf("the one-line fix is missing\n---\n%s", remediations)
+	}
+	if !strings.Contains(remediations, "https://example.invalid/cis") {
+		t.Errorf("the reference link is missing\n---\n%s", remediations)
+	}
+	if containsText(remediations, "Add restriction") {
+		t.Errorf("the full remediation paragraph leaked into the overview\n---\n%s", remediations)
+	}
+	// The link sits on its own line, indented to the text column.
+	for _, l := range strings.Split(remediations, "\n") {
+		if strings.Contains(l, "https://example.invalid/cis") {
+			if !strings.HasPrefix(l, strings.Repeat(" ", len("CIS-1.1.15")+4)) {
+				t.Errorf("the link is not indented to the text column: %q", l)
+			}
+			if strings.Contains(strings.TrimSpace(strings.Replace(l, "https://example.invalid/cis", "", 1)), " ") {
+				t.Errorf("the link should be alone on its line: %q", l)
+			}
+		}
+	}
+}
+
+// Every control carries the generic CIS benchmark landing page; it identifies
+// none of them, so it never earns a line.
+func TestRemediationLinkSkipsTheGenericBenchmarkPage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		refs []string
+		want string
+	}{
+		{"vendor page wins", []string{"https://www.cisecurity.org/benchmark/software-supply-chain-security", "https://confluence.atlassian.com/x"}, "https://confluence.atlassian.com/x"},
+		{"only the landing page", []string{"https://www.cisecurity.org/benchmark/software-supply-chain-security"}, ""},
+		{"no references", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := referenceLine(tc.refs); got != tc.want {
+				t.Errorf("referenceLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemediationFallsBackToFirstSentenceWithoutFixSummary(t *testing.T) {
+	f := engine.Finding{Remediation: "Do the first thing. Then a second thing that is much longer."}
+	if got, want := fixLine(f), "Do the first thing."; got != want {
+		t.Errorf("fixLine = %q, want %q", got, want)
+	}
+	f = engine.Finding{Remediation: "One sentence without a follow-up"}
+	if got := fixLine(f); got != f.Remediation {
+		t.Errorf("fixLine = %q, want the whole remediation", got)
+	}
+	f = engine.Finding{FixSummary: "The summary.", Remediation: "The paragraph. More paragraph."}
+	if got := fixLine(f); got != "The summary." {
+		t.Errorf("fixLine = %q, want the FixSummary", got)
+	}
+}
+
+// Warnings are bullets with a hanging indent, so where one ends and the next
+// begins survives the wrapping.
+func TestWarningsAreBulleted(t *testing.T) {
+	t.Setenv("COLUMNS", "60")
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{
+		"global user permissions are not readable (GET /api/1.0/admin/permissions/users: 401 nope); rules will report MANUAL",
+	}
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	warnings := out[strings.Index(out, "Scan warnings"):]
+	if !strings.Contains(warnings, "  - global user permissions") {
+		t.Errorf("no bulleted warning\n---\n%s", warnings)
+	}
+	continuation := false
+	for _, l := range strings.Split(warnings, "\n") {
+		if strings.HasPrefix(l, "    ") && strings.TrimSpace(l) != "" {
+			continuation = true
+		}
+	}
+	if !continuation {
+		t.Errorf("a wrapped warning should continue at the bullet's text column\n---\n%s", warnings)
+	}
+	if strings.Contains(out, "\033[") {
+		t.Error("colour was off but escapes were emitted")
+	}
+}
+
+// The parenthesised cause is forensics; dimming it lets the conclusion read
+// first without hiding anything.
+func TestWarningCauseIsDimmed(t *testing.T) {
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{"permissions are not readable (GET /x: 403 nope); rules report MANUAL"}
+	out := renderReport(t, rep, Options{Format: FormatTable, Color: true})
+
+	if !strings.Contains(out, "\033[2m(GET /x: 403 nope)\033[0m") {
+		t.Errorf("the parenthesised cause is not dimmed\n---\n%q", out)
+	}
+	if !strings.Contains(out, "permissions are not readable ") {
+		t.Errorf("the conclusion should stay undimmed\n---\n%q", out)
+	}
+}
+
+// A cause long enough to wrap keeps its dimming on every line it crosses.
+func TestWarningDimSpanCarriesAcrossWrappedLines(t *testing.T) {
+	t.Setenv("COLUMNS", "60")
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{
+		"project permissions are not readable (GET /api/1.0/projects/VERYLONGKEY/permissions/users: 401 You are not permitted to access this resource) so nothing follows",
+	}
+	out := renderReport(t, rep, Options{Format: FormatTable, Color: true})
+
+	inSpan := false
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "(GET") {
+			inSpan = true
+		}
+		if !inSpan {
+			continue
+		}
+		if !strings.Contains(l, "\033[2m") {
+			t.Errorf("a line inside the open paren span is not dimmed: %q", l)
+		}
+		if strings.Contains(l, ")") {
+			break
+		}
+	}
+	if !inSpan {
+		t.Fatalf("the warning did not render\n---\n%s", out)
+	}
+}
+
+// Options.Width is the caller's statement of how wide the destination is; it
+// wins over the environment the tests pin.
+func TestOptionsWidthOverridesEnvironment(t *testing.T) {
+	out := render(t, Options{Format: FormatTable, Width: 60})
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "https://") {
+			continue // links are unbreakable tokens, printed whole by policy
+		}
+		if n := utf8.RuneCountInString(stripANSI(l)); n > 60 {
+			t.Errorf("line is %d columns despite Width 60: %q", n, l)
+		}
+	}
+}
+
+// An instance-level control's 1/1 named no repository, which is exactly the
+// row a reader tries and fails to match to one. It says "instance" instead.
+func TestOverviewInstanceRowSaysInstance(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+
+	cells := tableCells(out)
+	sawInstance := false
+	for _, c := range cells {
+		if c == "instance" {
+			sawInstance = true
+		}
+	}
+	if !sawInstance {
+		t.Errorf("no 'instance' Resources cell for the organization-level control\n---\n%s", out)
+	}
+	// And the legend explains the word.
+	if !containsText(out, "'instance': the Bitbucket instance itself") {
+		t.Errorf("the legend does not explain the instance row\n---\n%s", out)
+	}
+}
+
+// A partial row names the resources it caught, so 3/4 answers "which three"
+// without a rerun. A full sweep needs no list — the fraction already says all.
+func TestOverviewPartialRowNamesTheAffected(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 4)
+	rep.Findings[3].Status = engine.StatusPass // three failing, one passing
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "· failing: repo-00, repo-01, repo-02") {
+		t.Errorf("the partial row does not name its resources (project prefix dropped)\n---\n%s", out)
+	}
+	if containsText(out, "PRJ/repo-00,") {
+		t.Errorf("names within one project should drop the shared prefix\n---\n%s", out)
+	}
+
+	// Full sweep: no list.
+	full := renderReport(t, reportWithRepeatedFinding(t, 4), Options{Format: FormatTable})
+	if strings.Contains(stripANSI(full), "failing:") {
+		t.Errorf("a 4/4 row should not list resources\n---\n%s", full)
+	}
+}
+
+// Past a handful the list stops being read, so it caps and counts the rest.
+func TestOverviewNamedResourcesAreCapped(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 8)
+	rep.Findings[7].Status = engine.StatusPass // seven failing of eight
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "+3 more") {
+		t.Errorf("the resource list should cap at %d names\n---\n%s", maxNamedResources, out)
+	}
+}
+
+// A true-manual control across some resources says what it needs, not that it
+// failed.
+func TestOverviewPartialManualRowSaysNeedsReview(t *testing.T) {
+	rep := reportWithRepeatedFinding(t, 3)
+	for i := range rep.Findings {
+		rep.Findings[i].Status = engine.StatusManual
+		rep.Findings[i].Automated = false
+	}
+	rep.Findings[2].Status = engine.StatusPass
+	rep.Score = engine.Compute(rep.Findings)
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	if !containsText(out, "· needs review: repo-00, repo-01") {
+		t.Errorf("the partial manual row does not name its resources\n---\n%s", out)
+	}
+}
+
+// The ceiling exists for prose; tables stop at their natural width. What it
+// must clear is the longest control title on one line, which needs 128
+// columns of frame.
+func TestWideTerminalKeepsLongTitlesOnOneLine(t *testing.T) {
+	t.Setenv("COLUMNS", "140")
+	title := "Ensure any change to code receives approval of two strongly authenticated users"
+	rep := reportWithRepeatedFinding(t, 1)
+	rep.Findings[0].Title = title
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	found := false
+	for _, l := range strings.Split(stripANSI(out), "\n") {
+		if strings.Contains(l, title) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a 79-character title should fit on one line at COLUMNS=140\n---\n%s", out)
 	}
 }

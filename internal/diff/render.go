@@ -15,6 +15,9 @@ import (
 type Options struct {
 	Format string
 	Color  bool
+	// Width is how many columns the table may use; zero asks the environment
+	// (console.Width), mirroring report.Options.
+	Width int
 }
 
 // The codes come from internal/console, which is the one place they are
@@ -57,7 +60,10 @@ func paint(enabled bool, code, s string) string {
 // like, diff has to look like it too.
 func writeTable(w io.Writer, r *Result, opts Options) error {
 	c := opts.Color
-	width := console.Width()
+	width := opts.Width
+	if width == 0 {
+		width = console.Width()
+	}
 
 	line(w, "%s  %s", paint(c, ansiBold, "scm-bench diff"), paint(c, ansiDim, sideLabel(r)))
 	writeScoreLine(w, r, c)
