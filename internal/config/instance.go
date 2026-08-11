@@ -27,14 +27,11 @@ const instanceFile = "instance.yaml"
 // set — a pipeline pinning the location, a test staying out of the real one —
 // otherwise the platform's user config directory.
 func InstancePath() (string, error) {
-	if dir := os.Getenv("SCM_BENCH_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, instanceFile), nil
-	}
-	dir, err := os.UserConfigDir()
+	dir, err := userConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("locate the config directory: %w", err)
+		return "", err
 	}
-	return filepath.Join(dir, "scm-bench", instanceFile), nil
+	return filepath.Join(dir, instanceFile), nil
 }
 
 // LoadInstance reads the saved instance, returning a zero Instance and no

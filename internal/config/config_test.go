@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -221,5 +222,147 @@ func TestEveryThresholdIsValidated(t *testing.T) {
 		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": -1\n")); err == nil {
 			t.Errorf("thresholds.%s accepts -1; add it to Config.Validate", name)
 		}
+	}
+}
+
+func TestScanSectionLoadsAndValidates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg.yaml")
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	write("scan:\n  failOn: none\n  concurrency: 3\n  timeout: 5s\n  maxDuration: 2m\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Scan.FailOn != "none" || cfg.Scan.Concurrency != 3 {
+		t.Errorf("scan section did not load: %+v", cfg.Scan)
+	}
+	if cfg.Scan.Timeout.Get() != 5*time.Second || cfg.Scan.MaxDuration.Get() != 2*time.Minute {
+		t.Errorf("durations did not parse: %+v", cfg.Scan)
+	}
+	// Absent keys keep their defaults.
+	if cfg.Scan.Progress != "compact" || cfg.Scan.MaxManual != -1 {
+		t.Errorf("absent keys lost their defaults: %+v", cfg.Scan)
+	}
+
+	// The validations that moved here with the settings.
+	for _, tc := range []struct{ name, content string }{
+		{"bad failOn", "scan:\n  failOn: critical\n"},
+		{"bad progress", "scan:\n  progress: loud\n"},
+		{"zero concurrency", "scan:\n  concurrency: 0\n"},
+		{"failUnder out of range", "scan:\n  failUnder: 101\n"},
+		{"maxManual out of range", "scan:\n  maxManual: -2\n"},
+		{"bare-number duration", "scan:\n  timeout: 30\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			write(tc.content)
+			if _, err := Load(path); err == nil {
+				t.Errorf("Load accepted %q", tc.content)
+			}
+		})
+	}
+}
+
+func TestDiscoverPrefersTheWorkingDirectory(t *testing.T) {
+	userDir := t.TempDir()
+	t.Setenv("SCM_BENCH_CONFIG_DIR", userDir)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	// Nothing anywhere: no path, no error.
+	path, err := Discover()
+	if err != nil || path != "" {
+		t.Fatalf("Discover() = %q, %v; want none", path, err)
+	}
+
+	// User config alone is found...
+	userCfg := filepath.Join(userDir, "config.yaml")
+	if err := os.WriteFile(userCfg, []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != userCfg {
+		t.Errorf("Discover() = %q, want %q", path, userCfg)
+	}
+
+	// ...but the working directory wins, hidden name included.
+	if err := os.WriteFile(filepath.Join(work, ".scm-bench.yaml"), []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != ".scm-bench.yaml" {
+		t.Errorf("Discover() = %q, want the hidden working-directory file", path)
+	}
+	if err := os.WriteFile(filepath.Join(work, "scm-bench.yaml"), []byte(""), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if path, _ = Discover(); path != "scm-bench.yaml" {
+		t.Errorf("Discover() = %q, want the visible name first", path)
+	}
+}
+
+// --set is shorthand for the YAML document it names, decoded by the same
+// strict decoder the file gets — so values type themselves and unknown keys
+// are refused, exactly as in the file.
+func TestOverridesApplyOverTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg.yaml")
+	if err := os.WriteFile(path, []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := LoadWithOverrides(path, []string{
+		"scan.failOn=high", // beats the file
+		"scan.timeout=5s",
+		"scan.insecure=true",
+		"thresholds.minApprovers=3",
+		"allowPublicRepositories=true",
+		"exclude=[CIS-1.1.8, CIS-1.1.13]",
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOverrides: %v", err)
+	}
+	if cfg.Scan.FailOn != "high" {
+		t.Errorf("failOn = %q; --set should beat the file", cfg.Scan.FailOn)
+	}
+	if cfg.Scan.Timeout.Get() != 5*time.Second || !cfg.Scan.Insecure {
+		t.Errorf("scan overrides did not land: %+v", cfg.Scan)
+	}
+	if cfg.Thresholds.MinApprovers != 3 || !cfg.AllowPublicRepositories {
+		t.Errorf("non-scan overrides did not land")
+	}
+	if len(cfg.Exclude) != 2 || cfg.Exclude[0] != "CIS-1.1.8" {
+		t.Errorf("flow-sequence override did not land: %v", cfg.Exclude)
+	}
+}
+
+func TestOverridesAreRefusedWhenMalformed(t *testing.T) {
+	for _, tc := range []struct{ name, set, want string }{
+		{"no equals", "scan.failOn", "key=value"},
+		{"unknown key", "scan.failsOn=none", `--set "scan.failsOn=none"`},
+		{"unknown top-level", "bogus=1", `--set "bogus=1"`},
+		{"invalid key segment", "scan.fail-On=none", "not a config key"},
+		{"multiline value", "scan.failOn=a\nb", "single line"},
+		{"bad value type", "scan.concurrency=abc", `--set "scan.concurrency=abc"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadWithOverrides("", []string{tc.set})
+			if err == nil {
+				t.Fatalf("--set %q was accepted", tc.set)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Validation runs after the overrides, so a --set is checked exactly as hard
+// as the file it overrides.
+func TestOverridesStillGoThroughValidation(t *testing.T) {
+	if _, err := LoadWithOverrides("", []string{"scan.concurrency=0"}); err == nil {
+		t.Error("an out-of-range override was accepted")
 	}
 }

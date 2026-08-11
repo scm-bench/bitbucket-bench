@@ -124,8 +124,9 @@ URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` �
 位置），权限 `0600`——token 是一份活的凭据。手敲的 `--url` 或导出的 `BITBUCKET_URL`
 永远优先于这个文件，并且每次用到它的扫描都会在 stderr 上说明。删掉文件即忘记。
 
-仓库是并发抓取的——`--concurrency`（默认 8）限制同时抓取的数量，实例负载高时把它调低是
-比较客气的做法。`--timeout` 限制单个请求（默认 30s）；`--max-duration` 限制整次扫描，
+仓库是并发抓取的——配置文件里的 `scan.concurrency`（默认 8）限制同时抓取的数量，实例
+负载高时把它调低是比较客气的做法。`scan.timeout` 限制单个请求（默认 30s）；
+`scan.maxDuration` 限制整次扫描，
 默认不开启，因为「多久算太久」完全取决于实例有多大。
 
 ### 看着它扫
@@ -161,7 +162,7 @@ query string 只在它是「区分两个请求的关键」时才显示 —— �
 请求按仓库分组。由于仓库是并发抓取的，请求本身是交错到达的，所以每个仓库的请求会先攒着，
 等它抓完再整块打印。
 
-`--progress` 控制展示到什么程度：
+配置里的 `scan.progress` 控制展示到什么程度：
 
 | 模式 | 展示内容 |
 |---|---|
@@ -172,17 +173,18 @@ query string 只在它是「区分两个请求的关键」时才显示 —— �
 重定向或在 CI 里，`full` 会自动退回 `off`：没有光标可移动时，一行一个请求就是几千行没人要的
 日志。但审计行仍然打印——「这个 token 被用来做了什么」的交代，在 CI 日志里同样有价值。
 
-`--verbose` 同时打开请求日志和 fetcher 自己的日志。显式传 `--progress` 会覆盖这一点，
-所以 `--verbose --progress off` 只给日志、不给请求列表。
+`--verbose` 同时打开请求日志和 fetcher 自己的日志；它是刚敲下的 flag，优先于配置文件里
+环境性的 `progress` 设置。
 
-`--max-duration` 用于放弃跑得太久的扫描，超时以 `2` 退出：
+`scan.maxDuration` 用于放弃跑得太久的扫描，超时以 `2` 退出：
 
-```bash
-scm-bench scan --max-duration 20m
+```yaml
+scan:
+  maxDuration: 20m
 ```
 
 没有默认值。多久算太久完全取决于实例规模，随手定一个默认值只会把本来合法的长扫描变成失败。
-`--timeout` 是另一回事——它约束的是单个 HTTP 请求，不是整次扫描。
+`scan.timeout` 是另一回事——它约束的是单个 HTTP 请求，不是整次扫描。
 
 ### Token 需要什么权限
 
@@ -211,9 +213,11 @@ scm-bench **只发 `GET` 请求**。这一点由测试强制保证，不只是�
 
 这个 token 能读取实例上的每一个仓库，因此不会以明文形式上网。`http://` 地址在发出第一个
 请求之前就会被拒绝——和本工具报告的那些配置问题不同，凭据一旦泄露就收不回来了。确实处在
-可信网络中时可用 `--allow-plaintext` 覆盖；loopback 地址本身豁免，无需加任何 flag。
+可信网络中时可用配置里的 `scan.allowPlaintext` 覆盖；loopback 地址本身豁免，无需任何设置。
 
-`--insecure` 用于跳过证书校验，适用于「实例在你无法安装的私有 CA 之后」的情况。
+`scan.insecure` 用于跳过证书校验，适用于「实例在你无法安装的私有 CA 之后」的情况。
+这两项刻意做成配置而不是 flag：削弱传输安全应当是写进文件、能被人 review 的决定，
+而不是手指的习惯。
 
 这两者都会在报告的 Scan warnings 段以及据此抓取的 snapshot 中留下一行记录。明文抓取的扫描、
 或者没有验证过应答方身份的扫描，和正常扫描不是同一种证据。
@@ -376,7 +380,7 @@ Details: rerun with --details for per-resource findings and full remediation ste
 （更大的扫描会写成 "6 controls failed across 23 findings"）。`scored N of M findings`
 这一行值得在看分数之前先读：无法判定的 finding 不进入分数的分子，也不进入分母 ——
 单看每一条规则这是对的，合起来却有误导性，因为分母被缩小了，于是一个读不到多少东西的
-token 反而能从很小的样本里得出很高的分数。`--max-manual` 就是把这种情况变成一次失败的
+token 反而能从很小的样本里得出很高的分数。`scan.maxManual` 就是把这种情况变成一次失败的
 运行，而不是一份好看的报告。
 
 **总览按规则聚合，因为同一个配置错误铺在五十个仓库上是一个问题，不是五十个。**
@@ -458,15 +462,39 @@ scm-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
 
 ## 配置
 
-任何「讲道理的人可能有不同意见」的阈值都可配置，策略里不写死任何数字。
+任何「讲道理的人可能有不同意见」的阈值都可配置；描述部署本身而非某一次运行的设置——
+退出阈值、传输、并发、进度——也都住在这里而不是 flag 里。策略里不写死任何数字。
 
 ```bash
-scm-bench scan --config scm-bench.yaml
+scm-bench init            # 写出一份带完整注释的 scm-bench.yaml
+scm-bench scan            # 自动在工作目录里找到它
 ```
+
+查找顺序：给了 `--config` 就用它；否则找工作目录的 `scm-bench.yaml`（或
+`.scm-bench.yaml`）——项目自己的文件，仓库提交进去给 CI 用的那份；再否则找用户配置
+目录（`SCM_BENCH_CONFIG_DIR` 或平台默认）下的 `config.yaml`。自动找到的文件会在
+stderr 上点名——阈值悄悄来自某个文件的扫描，其退出码是无法解释的。`init` 不会覆盖
+已存在的文件。
+
+一次性的改动用 `--set`，不用碰任何文件——优先级 `--set` > 文件 > 默认值：
+
+```bash
+scm-bench scan --set scan.failOn=none          # 只影响这一次
+scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+```
+
+值按 YAML 解析，数字、布尔、时长（`30s`）、流式序列（`exclude=[CIS-1.1.8]`）
+都可以；未知的键会和写在文件里一样直接拒绝扫描。
 
 完整带注释的配置见 [`examples/config.yaml`](examples/config.yaml)。最常调整的几项：
 
 ```yaml
+scan:
+  failOn: high           # 达到该严重度即退出 1：high、medium、low、none
+  maxManual: -1          # 无法判定的规则超过该百分比即退出 1；-1 关闭
+  concurrency: 8         # 并发抓取仓库数
+  timeout: 30s           # 单请求超时；maxDuration 限制整次扫描
+
 thresholds:
   minApprovers: 2        # CIS-1.1.3
   staleBranchDays: 90    # CIS-1.1.8
@@ -508,11 +536,12 @@ exclude: [CIS-1.1.13]    # 或用 include: 只跑子集
   # 报告还没来得及上传。所以把「失败」推迟到最后一步。
   continue-on-error: true
   run: |
+    # 阈值由提交在本仓库的 scm-bench.yaml 携带：
+    #   scan: { failOn: high, maxManual: 40 }
     scm-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
-      --output sarif --output-file scm-bench.sarif \
-      --fail-on high --max-manual 40
+      --output sarif --output-file scm-bench.sarif
 
 - name: Upload to code scanning
   if: always()
@@ -533,20 +562,22 @@ exclude: [CIS-1.1.13]    # 或用 include: 只跑子集
 | `1` | 扫描完成，触发了某个阈值 |
 | `2` | 扫描本身没能完成 |
 
-有三个 flag 会导致退出码 `1`，它们问的是不同的问题：
+配置里有三个设置会导致退出码 `1`，它们问的是不同的问题：
 
-| Flag | 问的是 |
+| 设置 | 问的是 |
 |---|---|
-| `--fail-on` | 有没有达到这个严重度的失败项？`high`（默认）、`medium`、`low`、`none` |
-| `--fail-under` | 分数可以接受吗？0-100 的数字，`0` 表示关闭 |
-| `--max-manual` | 这次扫描到底看到了多少，够不够形成判断？百分比，`-1` 表示关闭 |
+| `scan.failOn` | 有没有达到这个严重度的失败项？`high`（默认）、`medium`、`low`、`none` |
+| `scan.failUnder` | 分数可以接受吗？0-100 的数字，`0` 表示关闭 |
+| `scan.maxManual` | 这次扫描到底看到了多少，够不够形成判断？百分比，`-1` 表示关闭 |
 
-建议从 `--fail-on high` 起步，清完第一轮发现后再收紧。
+做成配置而不是 flag，是为了让流水线和本地笔记本读同一份提交进仓库的文件，彼此之间
+无从产生分歧。建议从 `failOn: high` 起步，清完第一轮发现后再收紧。
 
-`--max-manual` 是最值得尽早设上、也最不直观的一个。无法判定的规则是被排除出分数，
+`scan.maxManual` 是最值得尽早设上、也最不直观的一个。无法判定的规则是被排除出分数，
 而不是计为失败——单看每一条规则这是对的，合起来却有误导性，因为它缩小了分母。
 于是一个丢了权限的 token 反而可能比正常的 token 得分**更高**：在自带的示例快照上，
-把所有可读字段清空会让分数从 53 涨到 100。`--fail-under` 拦不住这种情况，`--max-manual` 可以。
+把所有可读字段清空会让分数从 53 涨到 100。`scan.failUnder` 拦不住这种情况，
+`scan.maxManual` 可以。
 
 关于 SARIF，如果你要上传它：本工具的发现是配置事实，不是源码行，所以每个 result 带的是指向
 仓库的 `logicalLocation`，而不是指向某个并不存在的文件的 `physicalLocation`。GitHub code
@@ -560,10 +591,10 @@ scanning 用 `physicalLocation` 把告警挂到代码上，因此告警会以「
 
 ```bash
 # 在能访问 Bitbucket、持有 token 的 runner 上
-scm-bench scan --snapshot-out snapshot.json -o json --fail-on none
+scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
-# 之后在任何地方——无需凭据，无需网络
-scm-bench scan --snapshot-in snapshot.json -o sarif --fail-on high
+# 之后在任何地方——无需凭据，无需网络；默认的 failOn: high 生效
+scm-bench scan --snapshot-in snapshot.json -o sarif
 ```
 
 对归档快照重跑策略，还能看出换了阈值之后结论会如何变化，而不必再碰实例一次。
@@ -636,7 +667,7 @@ How to fix the regressions
 在 CI 里把上一次的快照留作 artifact，然后与之比较：
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json --fail-on none
+scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
 scm-bench diff baseline.json today.json
 ```
 

@@ -135,11 +135,13 @@ token is a live credential. A typed `--url` or an exported `BITBUCKET_URL`
 always wins over the file, and every scan that uses it says so on stderr.
 Delete the file to forget it.
 
-Repositories are fetched concurrently — `--concurrency` (default 8) bounds how
-many at once, and lowering it is the polite response to an instance under load.
-`--timeout` bounds a single request (default 30s); `--max-duration` bounds the
-whole scan and is off unless set, because how long is too long depends entirely
-on how big the instance is.
+Repositories are fetched concurrently — `scan.concurrency` in the config file
+(default 8) bounds how many at once, and lowering it is the polite response to
+an instance under load. `scan.timeout` bounds a single request (default 30s);
+`scan.maxDuration` bounds the whole scan and is off unless set, because how
+long is too long depends entirely on how big the instance is. These live in
+the config rather than in flags because they describe the deployment, not any
+one run — see [Configuration](#configuration).
 
 ### Watching the scan
 
@@ -178,7 +180,7 @@ Requests are grouped by repository. They arrive interleaved, because
 repositories are fetched concurrently, so each one's requests are held and
 printed together when it finishes.
 
-`--progress` selects how much of this to show:
+`scan.progress` in the config selects how much of this to show:
 
 | Mode | Shows |
 |---|---|
@@ -191,20 +193,20 @@ move, a request per line is thousands of lines nobody asked for. The closing
 line is still printed, because an account of what a token was used for belongs
 in a CI log too.
 
-`--verbose` turns on the request log and the fetcher's own narration. Passing
-`--progress` explicitly overrides that, so `--verbose --progress off` gives the
-narration without the requests.
+`--verbose` turns on the request log and the fetcher's own narration; being
+the flag typed just now, it wins over the config's ambient `progress` setting.
 
-`--max-duration` abandons a scan that runs too long, exiting `2`:
+`scan.maxDuration` abandons a scan that runs too long, exiting `2`:
 
-```bash
-scm-bench scan --max-duration 20m
+```yaml
+scan:
+  maxDuration: 20m
 ```
 
 There is no default. How long is too long depends entirely on the size of the
 instance, and a default guess would turn a legitimately long scan into a
-failure. `--timeout` is a separate thing — it bounds one HTTP request, not the
-whole scan.
+failure. `scan.timeout` is a separate thing — it bounds one HTTP request, not
+the whole scan.
 
 ### What the token needs
 
@@ -240,11 +242,13 @@ convention.
 That token can read every repository on the instance, so it is not put on the
 wire in the clear. An `http://` URL is refused before the first request — unlike
 the misconfigurations this tool reports, a leaked credential cannot be undone
-once it is out. `--allow-plaintext` overrides it for a genuinely trusted
-network; loopback addresses are exempt and need no flag.
+once it is out. `scan.allowPlaintext` in the config overrides it for a
+genuinely trusted network; loopback addresses are exempt and need no setting.
 
-`--insecure` skips certificate verification, for an instance behind a private CA
-you cannot install.
+`scan.insecure` skips certificate verification, for an instance behind a
+private CA you cannot install. Both are configuration rather than flags on
+purpose: weakening transport security should be a decision written into a
+file someone can review, not a habit of the fingers.
 
 Both leave a line in the report's scan warnings and in any snapshot captured
 that way. A scan taken over cleartext, or without verifying who answered, is not
@@ -417,8 +421,8 @@ larger scan it reads "6 controls failed across 23 findings"). The
 findings that could not be evaluated are excluded from both sides of the
 fraction, which is right for any single control and misleading in aggregate,
 since a token that can read very little produces a high score from a small
-sample. `--max-manual` turns that into a failed run rather than a good-looking
-one.
+sample. `scan.maxManual` turns that into a failed run rather than a
+good-looking one.
 
 **The overview aggregates by control, because one misconfiguration across fifty
 repositories is one problem, not fifty.** Each row is a control; the `Resources`
@@ -534,17 +538,45 @@ findings written in another — reads worse than none.
 
 ## Configuration
 
-Every threshold a reasonable person might disagree with is configurable. Nothing
-is hard-coded in a policy.
+Every threshold a reasonable person might disagree with is configurable, and
+the settings that describe the deployment rather than any one run — exit
+thresholds, transport, concurrency, progress — live here too rather than in
+flags. Nothing is hard-coded in a policy.
 
 ```bash
-scm-bench scan --config scm-bench.yaml
+scm-bench init            # writes a commented scm-bench.yaml with every key
+scm-bench scan            # finds it in the working directory on its own
 ```
+
+Discovery order: `--config` when given, else `scm-bench.yaml` (or
+`.scm-bench.yaml`) in the working directory — the project's file, the one a
+repository commits for CI — else `config.yaml` under the user config directory
+(`SCM_BENCH_CONFIG_DIR`, or the platform default). A discovered file is named
+on stderr, because a scan whose thresholds quietly came from a file is a scan
+whose exit code makes no sense. `init` refuses to overwrite an existing file.
+
+For a one-off, `--set` overrides any config key without touching a file —
+`--set` beats the file, the file beats the defaults:
+
+```bash
+scm-bench scan --set scan.failOn=none          # just this run
+scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+```
+
+The value reads as YAML, so numbers, booleans, durations (`30s`) and flow
+sequences (`exclude=[CIS-1.1.8]`) all work, and an unknown key refuses the
+scan exactly as it would in the file.
 
 See [`examples/config.yaml`](examples/config.yaml) for the annotated full set. The
 most commonly adjusted:
 
 ```yaml
+scan:
+  failOn: high           # exit 1 at or above this severity: high, medium, low, none
+  maxManual: -1          # exit 1 when this % of controls went unevaluated; -1 off
+  concurrency: 8         # parallel repository fetches
+  timeout: 30s           # per-request bound; maxDuration bounds the whole scan
+
 thresholds:
   minApprovers: 2        # CIS-1.1.3
   staleBranchDays: 90    # CIS-1.1.8
@@ -593,11 +625,12 @@ alone.
   # deferred to the last step.
   continue-on-error: true
   run: |
+    # scm-bench.yaml, committed to this repository, carries the thresholds:
+    #   scan: { failOn: high, maxManual: 40 }
     scm-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
-      --output sarif --output-file scm-bench.sarif \
-      --fail-on high --max-manual 40
+      --output sarif --output-file scm-bench.sarif
 
 - name: Upload to code scanning
   if: always()
@@ -618,24 +651,25 @@ Exit codes:
 | `1` | The scan ran and breached one |
 | `2` | The scan itself could not complete |
 
-Three flags drive exit `1`, and they answer different questions:
+Three config settings drive exit `1`, and they answer different questions:
 
-| Flag | Asks |
+| Setting | Asks |
 |---|---|
-| `--fail-on` | Are there failures this severe? `high` (default), `medium`, `low`, `none` |
-| `--fail-under` | Is the score acceptable? A number 0-100; `0` disables |
-| `--max-manual` | Did the scan see enough to have an opinion? A percentage; `-1` disables |
+| `scan.failOn` | Are there failures this severe? `high` (default), `medium`, `low`, `none` |
+| `scan.failUnder` | Is the score acceptable? A number 0-100; `0` disables |
+| `scan.maxManual` | Did the scan see enough to have an opinion? A percentage; `-1` disables |
 
-Start at `--fail-on high` and tighten once the first round of findings is
-cleared.
+They are configuration rather than flags so the pipeline and the laptop read
+the same committed file and disagree about nothing. Start at `failOn: high`
+and tighten once the first round of findings is cleared.
 
-`--max-manual` is the one worth setting early, and the least obvious. Controls
-that could not be evaluated are excluded from the score rather than counted
-against it — right for any single control, and misleading in aggregate, because
-it shrinks the denominator. A token that has lost a permission can therefore
-score *higher* than a working one: on the bundled sample, blanking every
-readable field takes the score from 53 to 100. `--fail-under` cannot catch
-that. `--max-manual` can.
+`scan.maxManual` is the one worth setting early, and the least obvious.
+Controls that could not be evaluated are excluded from the score rather than
+counted against it — right for any single control, and misleading in
+aggregate, because it shrinks the denominator. A token that has lost a
+permission can therefore score *higher* than a working one: on the bundled
+sample, blanking every readable field takes the score from 53 to 100.
+`scan.failUnder` cannot catch that. `scan.maxManual` can.
 
 A note on the SARIF, if you upload it: findings are configuration facts, not
 lines of source, so each result carries a `logicalLocation` naming the
@@ -653,10 +687,10 @@ different times:
 
 ```bash
 # On a runner that can reach Bitbucket and holds the token
-scm-bench scan --snapshot-out snapshot.json -o json --fail-on none
+scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
-# Anywhere, later — no credentials, no network
-scm-bench scan --snapshot-in snapshot.json -o sarif --fail-on high
+# Anywhere, later — no credentials, no network; the default failOn: high applies
+scm-bench scan --snapshot-in snapshot.json -o sarif
 ```
 
 Re-running policies over an archived snapshot also shows how a decision would have
@@ -740,7 +774,7 @@ pipeline for that would blame the instance for the scan's own blind spot.
 In CI, keep the previous snapshot as an artifact and compare against it:
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json --fail-on none
+scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
 scm-bench diff baseline.json today.json
 ```
 
