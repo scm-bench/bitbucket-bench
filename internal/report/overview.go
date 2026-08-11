@@ -198,8 +198,8 @@ func unreadSummary(findings []engine.Finding) string {
 // mode — including under --demo, which is where new users meet the tool.
 func writeHint(w io.Writer, p painter, width int) {
 	blank(w)
-	text := "Details: rerun with --details for per-resource findings, or " +
-		"--details=<resource|control>[,...] to filter; -o json for the full report."
+	text := "Details: rerun with --details for per-resource findings and full remediation steps, " +
+		"or --details=<resource|control>[,...] to filter; -o json for the full report."
 	for _, l := range console.Wrap(text, width) {
 		line(w, "%s", p.paint(ansiDim, l))
 	}

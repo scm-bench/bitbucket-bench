@@ -150,7 +150,8 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 		"CIS-1.1.15",
 		"PRJ/app",
 		"Ensure pushing is restricted",
-		"Repository settings -> Branch permissions -> Add restriction",
+		"Enable Prevent changes without a pull request.",
+		"https://example.invalid/cis",
 		"Remediations",
 		"Scan warnings",
 		"the user directory is not readable",
@@ -160,13 +161,17 @@ func TestTableIncludesFindingsRemediationAndWarnings(t *testing.T) {
 		}
 	}
 
-	// The default is the overview: no per-resource sections, and none of the
-	// per-finding narration that belongs to them.
+	// The default is the overview: no per-resource sections, none of the
+	// per-finding narration that belongs to them, and the one-line fix in
+	// place of the full remediation paragraph.
 	if strings.Contains(out, "Total: ") {
 		t.Errorf("the default output should not draw per-resource sections\n---\n%s", out)
 	}
 	if containsText(out, "Anyone with write access can push directly to main.") {
 		t.Errorf("per-finding details belong to --details\n---\n%s", out)
+	}
+	if containsText(out, "Repository settings -> Branch permissions -> Add restriction") {
+		t.Errorf("the full remediation paragraph belongs to --details\n---\n%s", out)
 	}
 
 	// Passing controls are summarised but not listed unless asked for.
@@ -682,7 +687,7 @@ func TestUnknownFormatIsRejected(t *testing.T) {
 // Remediation is a paragraph naming a settings path, and a paragraph in a table
 // cell is a column of three-word lines. It keeps its own section, as prose.
 func TestRemediationLivesInItsOwnSection(t *testing.T) {
-	out := render(t, Options{Format: FormatTable})
+	out := render(t, Options{Format: FormatTable, Details: true})
 
 	remedy := "Repository settings -> Branch permissions -> Add restriction"
 	tables, remediations, ok := strings.Cut(out, "Remediations (")
@@ -1240,5 +1245,155 @@ func TestDetailsFilterMatchingNothingErrors(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("output was written before the filter was rejected:\n%s", buf.String())
+	}
+}
+
+// The overview's remediations are one line per control — the one-sentence fix
+// with the vendor's doc page dim underneath — because ten full paragraphs were
+// most of the report by weight for a reader who had not yet picked a control.
+func TestOverviewRemediationsAreSlimWithLink(t *testing.T) {
+	out := render(t, Options{Format: FormatTable})
+
+	remediations := out[strings.Index(out, "Remediations ("):]
+	if !containsText(remediations, "Enable Prevent changes without a pull request.") {
+		t.Errorf("the one-line fix is missing\n---\n%s", remediations)
+	}
+	if !strings.Contains(remediations, "https://example.invalid/cis") {
+		t.Errorf("the reference link is missing\n---\n%s", remediations)
+	}
+	if containsText(remediations, "Add restriction") {
+		t.Errorf("the full remediation paragraph leaked into the overview\n---\n%s", remediations)
+	}
+	// The link sits on its own line, indented to the text column.
+	for _, l := range strings.Split(remediations, "\n") {
+		if strings.Contains(l, "https://example.invalid/cis") {
+			if !strings.HasPrefix(l, strings.Repeat(" ", len("CIS-1.1.15")+4)) {
+				t.Errorf("the link is not indented to the text column: %q", l)
+			}
+			if strings.Contains(strings.TrimSpace(strings.Replace(l, "https://example.invalid/cis", "", 1)), " ") {
+				t.Errorf("the link should be alone on its line: %q", l)
+			}
+		}
+	}
+}
+
+// Every control carries the generic CIS benchmark landing page; it identifies
+// none of them, so it never earns a line.
+func TestRemediationLinkSkipsTheGenericBenchmarkPage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		refs []string
+		want string
+	}{
+		{"vendor page wins", []string{"https://www.cisecurity.org/benchmark/software-supply-chain-security", "https://confluence.atlassian.com/x"}, "https://confluence.atlassian.com/x"},
+		{"only the landing page", []string{"https://www.cisecurity.org/benchmark/software-supply-chain-security"}, ""},
+		{"no references", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := referenceLine(tc.refs); got != tc.want {
+				t.Errorf("referenceLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemediationFallsBackToFirstSentenceWithoutFixSummary(t *testing.T) {
+	f := engine.Finding{Remediation: "Do the first thing. Then a second thing that is much longer."}
+	if got, want := fixLine(f), "Do the first thing."; got != want {
+		t.Errorf("fixLine = %q, want %q", got, want)
+	}
+	f = engine.Finding{Remediation: "One sentence without a follow-up"}
+	if got := fixLine(f); got != f.Remediation {
+		t.Errorf("fixLine = %q, want the whole remediation", got)
+	}
+	f = engine.Finding{FixSummary: "The summary.", Remediation: "The paragraph. More paragraph."}
+	if got := fixLine(f); got != "The summary." {
+		t.Errorf("fixLine = %q, want the FixSummary", got)
+	}
+}
+
+// Warnings are bullets with a hanging indent, so where one ends and the next
+// begins survives the wrapping.
+func TestWarningsAreBulleted(t *testing.T) {
+	t.Setenv("COLUMNS", "60")
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{
+		"global user permissions are not readable (GET /api/1.0/admin/permissions/users: 401 nope); rules will report MANUAL",
+	}
+	out := renderReport(t, rep, Options{Format: FormatTable})
+
+	warnings := out[strings.Index(out, "Scan warnings"):]
+	if !strings.Contains(warnings, "  - global user permissions") {
+		t.Errorf("no bulleted warning\n---\n%s", warnings)
+	}
+	continuation := false
+	for _, l := range strings.Split(warnings, "\n") {
+		if strings.HasPrefix(l, "    ") && strings.TrimSpace(l) != "" {
+			continuation = true
+		}
+	}
+	if !continuation {
+		t.Errorf("a wrapped warning should continue at the bullet's text column\n---\n%s", warnings)
+	}
+	if strings.Contains(out, "\033[") {
+		t.Error("colour was off but escapes were emitted")
+	}
+}
+
+// The parenthesised cause is forensics; dimming it lets the conclusion read
+// first without hiding anything.
+func TestWarningCauseIsDimmed(t *testing.T) {
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{"permissions are not readable (GET /x: 403 nope); rules report MANUAL"}
+	out := renderReport(t, rep, Options{Format: FormatTable, Color: true})
+
+	if !strings.Contains(out, "\033[2m(GET /x: 403 nope)\033[0m") {
+		t.Errorf("the parenthesised cause is not dimmed\n---\n%q", out)
+	}
+	if !strings.Contains(out, "permissions are not readable ") {
+		t.Errorf("the conclusion should stay undimmed\n---\n%q", out)
+	}
+}
+
+// A cause long enough to wrap keeps its dimming on every line it crosses.
+func TestWarningDimSpanCarriesAcrossWrappedLines(t *testing.T) {
+	t.Setenv("COLUMNS", "60")
+	rep := sampleReport()
+	rep.Metadata.Warnings = []string{
+		"project permissions are not readable (GET /api/1.0/projects/VERYLONGKEY/permissions/users: 401 You are not permitted to access this resource) so nothing follows",
+	}
+	out := renderReport(t, rep, Options{Format: FormatTable, Color: true})
+
+	inSpan := false
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "(GET") {
+			inSpan = true
+		}
+		if !inSpan {
+			continue
+		}
+		if !strings.Contains(l, "\033[2m") {
+			t.Errorf("a line inside the open paren span is not dimmed: %q", l)
+		}
+		if strings.Contains(l, ")") {
+			break
+		}
+	}
+	if !inSpan {
+		t.Fatalf("the warning did not render\n---\n%s", out)
+	}
+}
+
+// Options.Width is the caller's statement of how wide the destination is; it
+// wins over the environment the tests pin.
+func TestOptionsWidthOverridesEnvironment(t *testing.T) {
+	out := render(t, Options{Format: FormatTable, Width: 60})
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "https://") {
+			continue // links are unbreakable tokens, printed whole by policy
+		}
+		if n := utf8.RuneCountInString(stripANSI(l)); n > 60 {
+			t.Errorf("line is %d columns despite Width 60: %q", n, l)
+		}
 	}
 }

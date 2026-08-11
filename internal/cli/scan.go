@@ -364,6 +364,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	reportOpts := report.Options{
 		Format:         opts.format,
 		Color:          useColor(opts, out),
+		Width:          console.WidthFor(out),
 		ShowPassed:     opts.showPassed,
 		Details:        len(opts.details) > 0,
 		DetailFilters:  opts.details,

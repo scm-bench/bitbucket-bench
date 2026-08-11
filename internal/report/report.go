@@ -23,6 +23,11 @@ type Options struct {
 	Format string
 	// Color enables ANSI colour in the table output.
 	Color bool
+	// Width is how many columns the table output may use. Zero means ask the
+	// environment (console.Width). The caller holds the real destination and
+	// so is the one that can ask a terminal how wide it is; by the time the
+	// renderer runs it is writing into a buffer.
+	Width int
 	// ShowPassed includes passing controls in the table's detail section.
 	// The summary always counts them.
 	ShowPassed bool

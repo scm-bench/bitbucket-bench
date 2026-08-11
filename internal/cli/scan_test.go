@@ -309,16 +309,21 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 
 	// The summary leads, then the by-control overview, then the remediations
 	// and the line saying how to get the per-resource detail. "Branch
-	// permissions" is the remediation text, which has to survive being moved
-	// out of the tables into its own section.
+	// permissions" is in the one-line fix, which is all the overview prints
+	// of a remediation.
 	for _, want := range []string{"SCORE", "10 failed", "Report Summary", "PRJ/app", "Findings", "Remediations (", "Branch permissions", "--details"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}
 	}
-	// The per-resource sections are --details territory.
+	// The per-resource sections and the full remediation paragraphs are
+	// --details territory. Wrapping can split a phrase across lines, so the
+	// paragraph is looked for in the flattened text.
 	if strings.Contains(stdout, "Total: ") {
 		t.Errorf("the default output should be the overview, not per-resource sections\n---\n%s", stdout)
+	}
+	if strings.Contains(flatten(stdout), "Add restriction: select the default branch") {
+		t.Errorf("the full remediation paragraph leaked into the overview\n---\n%s", stdout)
 	}
 	// Colour is off when stdout is not a terminal.
 	if strings.Contains(stdout, "\033[") {
@@ -333,12 +338,22 @@ func TestScanDetailsRestoresPerResourceSections(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d", code, ExitOK)
 	}
+	// Per-resource sections, and the remediation paragraphs at full length.
+	// The paragraph is matched against flattened text because wrapping may
+	// split it anywhere.
 	for _, want := range []string{"PRJ/app", "Total: "} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("--details output is missing %q\n---\n%s", want, stdout)
 		}
 	}
+	if !strings.Contains(flatten(stdout), "Add restriction: select the default branch") {
+		t.Errorf("--details output is missing the full remediation paragraph\n---\n%s", stdout)
+	}
 }
+
+// flatten collapses all whitespace to single spaces, so a phrase can be found
+// no matter where the renderer wrapped it.
+func flatten(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func TestScanDetailsFilter(t *testing.T) {
 	fixture := writeSnapshotFixture(t)

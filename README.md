@@ -371,16 +371,22 @@ Resources: how many are in this state / how many the control was evaluated again
 
 Scan warnings
 
-  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
-  permitted to access this resource); administrator counts are lower bounds
+  - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
+    not permitted to access this resource); administrator counts are lower bounds
 
 Remediations (17)
 
-  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
-              set it to at least 2. ...
+  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+              checks.
+              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
+              permissions.
+              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-Details: rerun with --details for per-resource findings, or --details=<resource|control>[,...] to
-filter; -o json for the full report.
+... one one-line fix per control, with the vendor's doc page underneath ...
+
+Details: rerun with --details for per-resource findings and full remediation steps, or
+--details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
 That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
@@ -426,17 +432,20 @@ saw is not known to be misconfigured, and printing how to change its settings
 would say otherwise. The JSON and the SARIF say `MANUAL` for both, because that
 is what the control returned.
 
-In the `--details` sections, each finding's `Finding` cell carries what the
-resource does, the evidence behind it, and a one-line `fix:` — the first move,
-and where. The full remediation paragraph lives in a section of its own at the
-end, as prose: those paragraphs name settings paths, project-wide variants and
-config keys, and a paragraph in a table cell is a column of three-word lines.
-`--no-remediations` drops the section entirely; the one-line fixes stay.
+**Remediations are one line each in the overview**: the one-sentence fix, with
+the vendor's documentation page dim underneath it (the generic CIS benchmark
+landing page is on every control and identifies none of them, so it never
+earns a line). The full paragraphs — settings paths, project-wide variants,
+config keys — print with `--details`, and in its sections each finding's
+`Finding` cell also carries the evidence and the one-line `fix:` beside the
+verdict. `--no-remediations` drops the section entirely in both layouts.
 
-Tables wrap to `COLUMNS`, clamped to 60–120 and defaulting to 80 when it is not
-exported. Nothing ever exceeds that width — a border that wraps stops reading as
-a border — so a long settings path is broken at the column edge rather than
-pushing the frame out of true.
+Width comes from the terminal itself when stdout is one; an exported `COLUMNS`
+overrides it, and pipes, redirects and `--output-file` get 80. Whatever the
+source, it is clamped to 60–120 — past 120 a line stops being comfortable to
+read regardless of how wide the window is. Nothing ever exceeds that width — a
+border that wraps stops reading as a border — so a long settings path is
+broken at the column edge rather than pushing the frame out of true.
 
 Colour is reinforcement only, so nothing is lost when output is piped,
 redirected, or run with `NO_COLOR` set. `--details=<value>` filters the table;

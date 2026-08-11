@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/term"
 )
 
 // ANSI codes, applied only when the destination is a terminal.
@@ -130,21 +132,41 @@ const (
 	maxWidth      = 120
 )
 
-// Width reports how wide a rendered line may be.
+// Width reports how wide a rendered line may be, from the environment alone.
 //
-// It reads COLUMNS rather than asking the kernel for the window size. The ioctl
-// is not portable across the three operating systems this ships on, and though
-// golang.org/x/term has since arrived as a dependency (the CLI's first-run
-// prompt reads the token through it), asking it for a size would tie this
-// package to a file descriptor when its callers hold io.Writers. The cost is
-// that an unexported COLUMNS gets 80, which is the right answer for a pipe and
-// a safe one for a terminal; a reader who wants their full window can export
-// it.
+// It reads only COLUMNS, so it is deterministic wherever no terminal is
+// attached — which is what the rendering tests rely on. Callers that hold the
+// real output should prefer WidthFor, which also asks the terminal itself.
 func Width() int {
-	w := fallbackWidth
 	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
-		w = n
+		return clampWidth(n)
 	}
+	return fallbackWidth
+}
+
+// WidthFor reports how wide a rendered line may be on the given output.
+//
+// An exported COLUMNS wins, because it is the one explicit statement of intent
+// a user can make and the only handle the tests have. Otherwise the terminal
+// is asked directly: most shells do not export COLUMNS, and defaulting a
+// 200-column window to 80 wrapped every table cell for no reason. There is no
+// separate is-this-a-terminal check — the size ioctl fails on pipes, regular
+// files and /dev/null, which is exactly the discrimination needed. Anything
+// that is not a terminal gets 80, the right answer for a pipe, a CI log and a
+// report written to a file.
+func WidthFor(out io.Writer) int {
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		return clampWidth(n)
+	}
+	if f, ok := out.(*os.File); ok {
+		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
+			return clampWidth(w)
+		}
+	}
+	return fallbackWidth
+}
+
+func clampWidth(w int) int {
 	if w < minWidth {
 		return minWidth
 	}

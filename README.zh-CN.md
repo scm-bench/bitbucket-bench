@@ -334,16 +334,22 @@ Resources: how many are in this state / how many the control was evaluated again
 
 Scan warnings
 
-  group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not
-  permitted to access this resource); administrator counts are lower bounds
+  - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
+    not permitted to access this resource); administrator counts are lower bounds
 
 Remediations (17)
 
-  CIS-1.1.3   Repository settings -> Pull requests -> Merge checks: enable "Minimum approvals" and
-              set it to at least 2. ...
+  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+              checks.
+              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
+              permissions.
+              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-Details: rerun with --details for per-resource findings, or --details=<resource|control>[,...] to
-filter; -o json for the full report.
+... 每条规则一行修法，下面跟着厂商文档链接 ...
+
+Details: rerun with --details for per-resource findings and full remediation steps, or
+--details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
 上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
@@ -378,13 +384,16 @@ scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪
 多好都需要人来判断。只有后者会给出修复建议：一条扫描根本没看到的规则，并不能说它配错了，
 印出「怎么改设置」等于在说反话。JSON 与 SARIF 里两者都是 `MANUAL`，因为那才是规则返回的东西。
 
-在 `--details` 的各节里，每条发现的 `Finding` 单元格装着这个资源的实际状况、支撑它的
-证据，以及一行 `fix:` —— 第一步动作，以及在哪里做。完整的修复段落独立成节放在末尾，
-仍是散文：那些段落写的是设置路径、项目级的等价做法和配置项名称，而一个段落塞进表格
-单元格就是一列三词一行的东西。`--no-remediations` 可以整段去掉；一行的 `fix:` 仍然保留。
+**总览里的 Remediations 一条只占一行**：一句话修法，下面用暗色跟着厂商文档链接
+（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。完整段落 ——
+设置路径、项目级的等价做法、配置项名称 —— 在 `--details` 里打印，且其各节中每条
+发现的 `Finding` 单元格还带着证据和一行 `fix:`。`--no-remediations` 在两种布局下
+都能整段去掉。
 
-表格宽度跟随 `COLUMNS`，夹在 60–120 之间，未导出时默认 80。任何一行都不会超出这个宽度 ——
-折了行的边框就不再像边框 —— 所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
+宽度在 stdout 是终端时来自终端本身；导出的 `COLUMNS` 可以覆盖它，管道、重定向与
+`--output-file` 得到 80。无论来源如何都夹在 60–120 之间 —— 超过 120 之后，无论窗口
+多宽，一行都不再舒服可读。任何一行都不会超出这个宽度 —— 折了行的边框就不再像边框 ——
+所以一个过长的设置路径会在列边缘被切断，而不是把框架顶歪。
 
 颜色只是强化，所以输出被管道、重定向或设置了 `NO_COLOR` 时什么都不会丢。
 `--details=<值>` 能过滤表格；更精细的过滤是 JSON 的活：
