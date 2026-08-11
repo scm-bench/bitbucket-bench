@@ -20,6 +20,8 @@ const configTemplate = `# scm-bench configuration.
 # working directory first, then config.yaml in the user config directory
 # (SCM_BENCH_CONFIG_DIR, or the platform default). --config overrides the
 # search. Every key is optional; an absent key keeps the default shown here.
+# A single run can override any key without touching the file:
+#   scm-bench scan --set scan.failOn=none
 
 # Settings that describe the deployment rather than any one run.
 scan:

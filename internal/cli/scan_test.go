@@ -745,7 +745,7 @@ func TestMovedFlagsAreAnsweredWithTheConfigKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("a retired flag was accepted")
 	}
-	for _, want := range []string{"scan.failOn", "scm-bench init"} {
+	for _, want := range []string{"scan.failOn", "scm-bench init", "--set scan.failOn="} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q: %v", want, err)
 		}
@@ -850,5 +850,26 @@ func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 	raw, _ = os.ReadFile("scm-bench.yaml")
 	if !strings.Contains(string(raw), "failOn: none") {
 		t.Error("init overwrote an existing config")
+	}
+}
+
+// --set is the one-off path: any config key, no file.
+func TestSetOverridesConfigForOneRun(t *testing.T) {
+	fixture := writeSnapshotFixture(t)
+
+	// No config anywhere; the fixture carries HIGH failures, so only the
+	// override can produce exit 0.
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "--set", "scan.failOn=none"); code != ExitOK {
+		t.Errorf("exit code = %d, want %d via --set", code, ExitOK)
+	}
+
+	// --set beats the file it rides with.
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"), "--set", "scan.failOn=high"); code != ExitFindings {
+		t.Errorf("exit code = %d, want %d: --set should beat the file", code, ExitFindings)
+	}
+
+	// A bad key refuses the scan rather than being shrugged off.
+	if _, _, code := run(t, "scan", "--snapshot-in", fixture, "--set", "scan.failsOn=none"); code != ExitError {
+		t.Errorf("exit code = %d, want %d for an unknown key", code, ExitError)
 	}
 }

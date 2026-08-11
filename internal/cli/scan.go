@@ -67,6 +67,7 @@ type scanOptions struct {
 	saveInstance bool
 
 	configPath     string
+	set            []string
 	format         string
 	outputPath     string
 	showPassed     bool
@@ -121,7 +122,8 @@ The settings that describe the deployment rather than any one run — exit
 thresholds, transport, concurrency, progress — live in the config file's scan
 section rather than in flags. Run ` + "`scm-bench init`" + ` to write a commented
 scm-bench.yaml; scan finds it in the working directory (or the user config
-directory) without --config being typed.
+directory) without --config being typed. For a one-off, --set overrides any
+config key without a file: --set scan.failOn=none.
 
 Three of those settings drive exit 1, and they answer different questions:
   scan.failOn      are there failures this severe?
@@ -150,6 +152,7 @@ so.`,
 	f.BoolVar(&opts.demo, "demo", false, "evaluate the bundled example instead of an instance, to see what a report looks like")
 
 	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file; found automatically as ./scm-bench.yaml or in the user config directory")
+	f.StringArrayVar(&opts.set, "set", nil, "override one config key for this run, e.g. --set scan.failOn=none; repeatable")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
 	f.BoolVar(&opts.showPassed, "show-passed", false, "include passing and not-applicable controls in the table output")
@@ -195,7 +198,7 @@ func movedFlagError(cmd *cobra.Command, err error) error {
 	for flag, key := range movedFlags {
 		if strings.Contains(msg, "--"+flag) {
 			return fmt.Errorf("--%s moved to the config file as %s\n"+
-				"run `scm-bench init` to create scm-bench.yaml, or add the key to the file --config names", flag, key)
+				"run `scm-bench init` to keep it in a file, or override once with --set %s=<value>", flag, key, key)
 		}
 	}
 	return err
@@ -242,7 +245,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 				Line(console.Info, "using config %s", discovered)
 		}
 	}
-	cfg, err := config.Load(configPath)
+	cfg, err := config.LoadWithOverrides(configPath, opts.set)
 	if err != nil {
 		return err
 	}

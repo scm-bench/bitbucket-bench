@@ -476,6 +476,16 @@ scm-bench scan            # 自动在工作目录里找到它
 stderr 上点名——阈值悄悄来自某个文件的扫描，其退出码是无法解释的。`init` 不会覆盖
 已存在的文件。
 
+一次性的改动用 `--set`，不用碰任何文件——优先级 `--set` > 文件 > 默认值：
+
+```bash
+scm-bench scan --set scan.failOn=none          # 只影响这一次
+scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+```
+
+值按 YAML 解析，数字、布尔、时长（`30s`）、流式序列（`exclude=[CIS-1.1.8]`）
+都可以；未知的键会和写在文件里一样直接拒绝扫描。
+
 完整带注释的配置见 [`examples/config.yaml`](examples/config.yaml)。最常调整的几项：
 
 ```yaml
@@ -581,7 +591,7 @@ scanning 用 `physicalLocation` 把告警挂到代码上，因此告警会以「
 
 ```bash
 # 在能访问 Bitbucket、持有 token 的 runner 上
-scm-bench scan --snapshot-out snapshot.json -o json -c capture.yaml   # scan: { failOn: none }
+scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
 # 之后在任何地方——无需凭据，无需网络；默认的 failOn: high 生效
 scm-bench scan --snapshot-in snapshot.json -o sarif
@@ -657,7 +667,7 @@ How to fix the regressions
 在 CI 里把上一次的快照留作 artifact，然后与之比较：
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json    # 配置里 scan.failOn: none
+scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
 scm-bench diff baseline.json today.json
 ```
 

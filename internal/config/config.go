@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -187,35 +188,90 @@ func Default() Config {
 // Load reads a YAML config from path and overlays it on the defaults, so a
 // user file only needs to mention what it changes.
 func Load(path string) (Config, error) {
+	return LoadWithOverrides(path, nil)
+}
+
+// LoadWithOverrides is Load plus per-run overrides: each set entry is a
+// "key=value" naming a config key by its dotted YAML path, applied over
+// whatever the file said. Validation runs once, at the end, so an override
+// is checked exactly as hard as the file it overrides.
+func LoadWithOverrides(path string, sets []string) (Config, error) {
 	cfg := Default()
-	if path == "" {
-		return cfg, nil
+	if path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return cfg, fmt.Errorf("read config %s: %w", path, err)
+		}
+		// Decoding onto the populated struct leaves absent keys at their default.
+		// Sequences are the exception: YAML replaces them wholesale, which is what
+		// a user who lists signature hook keys expects.
+		//
+		// KnownFields is on because the failure mode without it is silent and
+		// wrong: `minApprover` for `minApprovers` parses cleanly, changes nothing,
+		// and produces a report the user believes was evaluated at their threshold.
+		// An audit tool that quietly ignores its own configuration is worse than
+		// one that refuses to start.
+		decoder := yaml.NewDecoder(bytes.NewReader(raw))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&cfg); err != nil {
+			// An empty file is not an error: it means "keep every default".
+			if !errors.Is(err, io.EOF) {
+				return cfg, fmt.Errorf("parse config %s: %w", path, err)
+			}
+		}
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return cfg, fmt.Errorf("read config %s: %w", path, err)
-	}
-	// Decoding onto the populated struct leaves absent keys at their default.
-	// Sequences are the exception: YAML replaces them wholesale, which is what
-	// a user who lists signature hook keys expects.
-	//
-	// KnownFields is on because the failure mode without it is silent and
-	// wrong: `minApprover` for `minApprovers` parses cleanly, changes nothing,
-	// and produces a report the user believes was evaluated at their threshold.
-	// An audit tool that quietly ignores its own configuration is worse than
-	// one that refuses to start.
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&cfg); err != nil {
-		// An empty file is not an error: it means "keep every default".
-		if !errors.Is(err, io.EOF) {
-			return cfg, fmt.Errorf("parse config %s: %w", path, err)
+	for _, set := range sets {
+		if err := applyOverride(&cfg, set); err != nil {
+			return cfg, err
 		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// keySegment is what a piece of a dotted config key may look like. Anything
+// else is refused before it can reach the YAML text an override is turned
+// into.
+var keySegment = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+
+// applyOverride applies one "key=value" onto the config.
+//
+// It works by writing the override as the YAML document it is shorthand for —
+// scan.failOn=none becomes "scan:\n  failOn: none\n" — and decoding that onto
+// the config with the same strict decoder the file gets. Everything then
+// comes for free and cannot drift from the file's behaviour: the value
+// parsing (ints, bools, "30s" durations, [flow, sequences]), the overlay
+// semantics, and the refusal of unknown keys.
+func applyOverride(cfg *Config, set string) error {
+	key, value, ok := strings.Cut(set, "=")
+	if !ok {
+		return fmt.Errorf("--set %q is not key=value; e.g. --set scan.failOn=none", set)
+	}
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("--set %q: the value must be a single line", set)
+	}
+	segments := strings.Split(key, ".")
+	var doc strings.Builder
+	for i, seg := range segments {
+		if !keySegment.MatchString(seg) {
+			return fmt.Errorf("--set %q: %q is not a config key", set, key)
+		}
+		indent := strings.Repeat("  ", i)
+		if i < len(segments)-1 {
+			fmt.Fprintf(&doc, "%s%s:\n", indent, seg)
+		} else {
+			fmt.Fprintf(&doc, "%s%s: %s\n", indent, seg, value)
+		}
+	}
+
+	decoder := yaml.NewDecoder(strings.NewReader(doc.String()))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("--set %q: %w", set, err)
+	}
+	return nil
 }
 
 // Validate rejects thresholds that would make a policy meaningless.

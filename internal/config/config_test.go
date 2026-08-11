@@ -303,3 +303,66 @@ func TestDiscoverPrefersTheWorkingDirectory(t *testing.T) {
 		t.Errorf("Discover() = %q, want the visible name first", path)
 	}
 }
+
+// --set is shorthand for the YAML document it names, decoded by the same
+// strict decoder the file gets — so values type themselves and unknown keys
+// are refused, exactly as in the file.
+func TestOverridesApplyOverTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg.yaml")
+	if err := os.WriteFile(path, []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := LoadWithOverrides(path, []string{
+		"scan.failOn=high", // beats the file
+		"scan.timeout=5s",
+		"scan.insecure=true",
+		"thresholds.minApprovers=3",
+		"allowPublicRepositories=true",
+		"exclude=[CIS-1.1.8, CIS-1.1.13]",
+	})
+	if err != nil {
+		t.Fatalf("LoadWithOverrides: %v", err)
+	}
+	if cfg.Scan.FailOn != "high" {
+		t.Errorf("failOn = %q; --set should beat the file", cfg.Scan.FailOn)
+	}
+	if cfg.Scan.Timeout.Get() != 5*time.Second || !cfg.Scan.Insecure {
+		t.Errorf("scan overrides did not land: %+v", cfg.Scan)
+	}
+	if cfg.Thresholds.MinApprovers != 3 || !cfg.AllowPublicRepositories {
+		t.Errorf("non-scan overrides did not land")
+	}
+	if len(cfg.Exclude) != 2 || cfg.Exclude[0] != "CIS-1.1.8" {
+		t.Errorf("flow-sequence override did not land: %v", cfg.Exclude)
+	}
+}
+
+func TestOverridesAreRefusedWhenMalformed(t *testing.T) {
+	for _, tc := range []struct{ name, set, want string }{
+		{"no equals", "scan.failOn", "key=value"},
+		{"unknown key", "scan.failsOn=none", `--set "scan.failsOn=none"`},
+		{"unknown top-level", "bogus=1", `--set "bogus=1"`},
+		{"invalid key segment", "scan.fail-On=none", "not a config key"},
+		{"multiline value", "scan.failOn=a\nb", "single line"},
+		{"bad value type", "scan.concurrency=abc", `--set "scan.concurrency=abc"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadWithOverrides("", []string{tc.set})
+			if err == nil {
+				t.Fatalf("--set %q was accepted", tc.set)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Validation runs after the overrides, so a --set is checked exactly as hard
+// as the file it overrides.
+func TestOverridesStillGoThroughValidation(t *testing.T) {
+	if _, err := LoadWithOverrides("", []string{"scan.concurrency=0"}); err == nil {
+		t.Error("an out-of-range override was accepted")
+	}
+}

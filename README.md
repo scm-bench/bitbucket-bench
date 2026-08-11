@@ -555,6 +555,18 @@ repository commits for CI — else `config.yaml` under the user config directory
 on stderr, because a scan whose thresholds quietly came from a file is a scan
 whose exit code makes no sense. `init` refuses to overwrite an existing file.
 
+For a one-off, `--set` overrides any config key without touching a file —
+`--set` beats the file, the file beats the defaults:
+
+```bash
+scm-bench scan --set scan.failOn=none          # just this run
+scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+```
+
+The value reads as YAML, so numbers, booleans, durations (`30s`) and flow
+sequences (`exclude=[CIS-1.1.8]`) all work, and an unknown key refuses the
+scan exactly as it would in the file.
+
 See [`examples/config.yaml`](examples/config.yaml) for the annotated full set. The
 most commonly adjusted:
 
@@ -675,7 +687,7 @@ different times:
 
 ```bash
 # On a runner that can reach Bitbucket and holds the token
-scm-bench scan --snapshot-out snapshot.json -o json -c capture.yaml   # scan: { failOn: none }
+scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
 # Anywhere, later — no credentials, no network; the default failOn: high applies
 scm-bench scan --snapshot-in snapshot.json -o sarif
@@ -762,7 +774,7 @@ pipeline for that would blame the instance for the scan's own blind spot.
 In CI, keep the previous snapshot as an artifact and compare against it:
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json    # scan.failOn: none in the config
+scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
 scm-bench diff baseline.json today.json
 ```
 
