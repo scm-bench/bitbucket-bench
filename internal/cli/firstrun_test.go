@@ -136,16 +136,21 @@ func TestMissingInstanceErrorListsEveryWayOut(t *testing.T) {
 	}
 }
 
-// Enter alone runs the demo. The reader this menu exists for is the one with
-// nothing to type, and the default has to serve exactly them.
-func TestFirstRunPromptDefaultsToTheDemo(t *testing.T) {
+// Enter alone lands on entering the credentials: the menu's job is to get an
+// instance configured, and the default has to be the main road, not the
+// detour.
+func TestFirstRunPromptDefaultsToEnteringCredentials(t *testing.T) {
 	var out bytes.Buffer
-	res, err := promptFirstRun(strings.NewReader("\n"), &out, false)
+	res, err := promptFirstRun(
+		strings.NewReader("\nhttps://bitbucket.example.com\nsekrit\nn\n"), &out, false)
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
-	if !res.demo {
-		t.Error("Enter did not choose the demo")
+	if res.demo {
+		t.Error("Enter landed on the demo instead of the credentials")
+	}
+	if res.url != "https://bitbucket.example.com" {
+		t.Errorf("url = %q", res.url)
 	}
 	// The menu must show all three exits before asking.
 	for _, want := range []string{"1.", "2.", "3.", "no instance configured"} {

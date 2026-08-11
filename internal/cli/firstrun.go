@@ -54,9 +54,10 @@ type firstRunResult struct {
 	save  bool
 }
 
-// The menu's options, by index. The demo is the default selection: the reader
-// this menu exists for is the one with nothing to type, and the default has to
-// serve exactly them.
+// The menu's options, by index. Entering the credentials is the default
+// selection: the menu's job is to get an instance configured, and the demo is
+// the detour for the reader who cannot do that yet — a detour should be a
+// step away, not the road.
 const (
 	optCredentials = iota
 	optDemo
@@ -83,7 +84,7 @@ func promptFirstRun(in io.Reader, out io.Writer, color bool) (firstRunResult, er
 
 	choice := optQuit
 	if f, ok := in.(*os.File); ok && isTerminal(f) {
-		c, err := selectWithArrows(f, out, p, options, optDemo)
+		c, err := selectWithArrows(f, out, p, options, optCredentials)
 		if err != nil {
 			// Raw mode was refused; the numbered prompt asks the same question.
 			c = selectByNumber(in, out, p, options)
@@ -244,8 +245,8 @@ func decodeMenuKey(b []byte) menuKey {
 }
 
 // selectByNumber is the same question asked without a terminal to draw on:
-// numbered options, one typed answer. Enter alone still lands on the demo, so
-// both selectors keep one default.
+// numbered options, one typed answer. Enter alone lands on entering the
+// credentials, so both selectors keep one default.
 func selectByNumber(in io.Reader, out io.Writer, p console.Painter, options []string) int {
 	for i, opt := range options {
 		fmt.Fprintf(out, "%s\n", menuLine(p, i, opt, false))
@@ -256,7 +257,7 @@ func selectByNumber(in io.Reader, out io.Writer, p console.Painter, options []st
 	// producing garbage would spin forever asking a question nobody is there
 	// to answer.
 	for attempt := 0; attempt < 3; attempt++ {
-		fmt.Fprintf(out, "choose [1/2/3] (Enter = 2): ")
+		fmt.Fprintf(out, "choose [1/2/3] (Enter = 1): ")
 		choice, err := readLine(in)
 		if err != nil {
 			// EOF: nobody is on the other end after all.
@@ -264,9 +265,9 @@ func selectByNumber(in io.Reader, out io.Writer, p console.Painter, options []st
 			return optQuit
 		}
 		switch strings.TrimSpace(choice) {
-		case "1":
+		case "", "1":
 			return optCredentials
-		case "", "2":
+		case "2":
 			return optDemo
 		case "3", "q":
 			return optQuit
