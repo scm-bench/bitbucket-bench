@@ -63,6 +63,9 @@ type scanOptions struct {
 	repositories []string
 
 	demo bool
+	// saveInstance remembers the interactively entered URL and token once the
+	// scan proves they work.
+	saveInstance bool
 
 	configPath     string
 	format         string
@@ -108,7 +111,9 @@ Credentials may be supplied by flag or environment:
 
 No instance yet? --demo evaluates a sample bundled into the binary, so you can
 see what a report looks like before configuring anything. Run bare on a
-terminal, scan offers the same choice interactively.
+terminal, scan offers the same choice interactively — and can save the URL and
+token you enter (0600, under your user config directory, or SCM_BENCH_CONFIG_DIR)
+so later scans need nothing. Delete the file to forget it.
 
 Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
@@ -188,6 +193,28 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		opts.baseURL, opts.token, opts.username, opts.password = "", "", "", ""
 	}
 
+	// Before asking anybody anything: an instance saved by an earlier run's
+	// menu answers the question silently. It only fills what is absent —
+	// a typed flag or an exported variable always wins, and its token is not
+	// used over any credential arriving another way. The stderr line is what
+	// keeps this debuggable: a scan that silently picks up a credential from
+	// disk is a scan whose authentication failures make no sense.
+	if !opts.demo && opts.snapshotIn == "" && strings.TrimSpace(opts.baseURL) == "" {
+		inst, path, err := config.LoadInstance()
+		if err != nil {
+			return err
+		}
+		if inst.URL != "" {
+			opts.baseURL = inst.URL
+			if strings.TrimSpace(opts.token) == "" && strings.TrimSpace(opts.username) == "" {
+				opts.token = inst.Token
+			}
+			stderr := cmd.ErrOrStderr()
+			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
+				Line(console.Info, "using saved instance %s (%s)", inst.URL, path)
+		}
+	}
+
 	// Nothing configured, but a person present: offer the menu instead of the
 	// error. Both ends must be terminals — a redirected stderr means the
 	// question would go somewhere nobody is reading, and a redirected stdin
@@ -205,6 +232,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			} else {
 				opts.baseURL = res.url
 				opts.token = res.token
+				opts.saveInstance = res.save
 				// The prompt collected a token, so basic-auth values inherited
 				// from the environment must not be left to conflict with it.
 				if res.token != "" {
@@ -271,6 +299,20 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	}
 	if err != nil {
 		return describeScanFailure(ctx, opts, err)
+	}
+
+	// Only now, with the fetch behind it, is the interactively entered
+	// instance worth remembering: a credential saved before it worked would
+	// replay its typo on every following run. A failure to write is a warning
+	// rather than an error — the scan in hand succeeded, and refusing to
+	// report it over a bookkeeping problem would cost more than it protects.
+	if opts.saveInstance {
+		w := console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}
+		if path, err := config.SaveInstance(config.Instance{URL: opts.baseURL, Token: opts.token}); err != nil {
+			w.Line(console.Warn, "could not save the instance: %v", err)
+		} else {
+			w.Line(console.Info, "saved to %s; delete the file to forget it", path)
+		}
 	}
 
 	if opts.snapshotOut != "" {

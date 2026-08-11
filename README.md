@@ -127,6 +127,14 @@ interactively: enter a URL and token, or see the sample first. The sample is
 also checked in as `examples/snapshot.json`, which `--snapshot-in` evaluates
 from a checkout.
 
+If you enter a URL and token, scan offers — it asks, it does not assume — to
+save them once they have proven to work, so later runs need nothing. They go
+to `instance.yaml` under your user config directory (`~/.config/scm-bench/` on
+Linux; `SCM_BENCH_CONFIG_DIR` overrides the location), mode `0600` since the
+token is a live credential. A typed `--url` or an exported `BITBUCKET_URL`
+always wins over the file, and every scan that uses it says so on stderr.
+Delete the file to forget it.
+
 Repositories are fetched concurrently — `--concurrency` (default 8) bounds how
 many at once, and lowering it is the polite response to an instance under load.
 `--timeout` bounds a single request (default 30s); `--max-duration` bounds the
@@ -583,11 +591,13 @@ Re-running policies over an archived snapshot also shows how a decision would ha
 changed under new thresholds, without touching the instance again.
 
 Snapshots are written `0600`: they are a precise map of an instance's weak points.
-So are reports. That is a Unix mode, and it is enforced on Unix-like systems
-only — Windows has no equivalent bit, so Go maps the mode to the read-only
-attribute and the file's actual access control comes from the ACL it inherits
-from its directory. On Windows, put snapshots and reports somewhere already
-restricted.
+So are reports, and so is the saved `instance.yaml` — that one holds a live
+credential, the strongest version of the same reason. That is a Unix mode, and
+it is enforced on Unix-like systems only — Windows has no equivalent bit, so Go
+maps the mode to the read-only attribute and the file's actual access control
+comes from the ACL it inherits from its directory. On Windows, put snapshots
+and reports somewhere already restricted, and think twice before saving the
+token there at all.
 
 ### Catching regressions
 

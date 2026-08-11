@@ -22,9 +22,20 @@ import (
 // The table report wraps to console.Width, which reads COLUMNS. Pinning it
 // keeps assertions about the rendered output from depending on the width of
 // whatever terminal the suite runs under.
+//
+// SCM_BENCH_CONFIG_DIR is pinned for the same reason: a scan with no URL now
+// consults the saved instance file, and without the pin this suite would read
+// — and could write — the real one belonging to whoever runs the tests.
 func TestMain(m *testing.M) {
 	os.Setenv("COLUMNS", "80")
-	os.Exit(m.Run())
+	dir, err := os.MkdirTemp("", "scm-bench-test-config")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // writeSnapshotFixture saves a snapshot with one badly configured repository,

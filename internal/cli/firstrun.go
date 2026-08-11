@@ -10,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/scm-bench/scm-bench/examples"
+	"github.com/scm-bench/scm-bench/internal/config"
 	"github.com/scm-bench/scm-bench/internal/console"
 	"github.com/scm-bench/scm-bench/internal/scm"
 )
@@ -44,11 +45,13 @@ func errNoInstance() error {
   evaluate a saved file:   scm-bench scan --snapshot-in snapshot.json`)
 }
 
-// firstRunResult is what the menu settled on: the demo, or an instance.
+// firstRunResult is what the menu settled on: the demo, or an instance —
+// and, for an instance, whether to remember it once it has proven to work.
 type firstRunResult struct {
 	demo  bool
 	url   string
 	token string
+	save  bool
 }
 
 // The menu's options, by index. The demo is the default selection: the reader
@@ -290,7 +293,28 @@ func promptCredentials(in io.Reader, out io.Writer) (firstRunResult, error) {
 		fmt.Fprintln(out)
 		return firstRunResult{}, errNoInstance()
 	}
-	return firstRunResult{url: url, token: strings.TrimSpace(token)}, nil
+
+	res := firstRunResult{url: url, token: strings.TrimSpace(token)}
+
+	// Saving is asked, not assumed: the answer puts a credential on disk. The
+	// prompt names the destination so the consent is to something concrete,
+	// and the file is only written after the scan proves the credential works
+	// — remembering a typo would replay it on every following run.
+	if path, err := config.InstancePath(); err == nil {
+		fmt.Fprintf(out, "save for future scans? (stored 0600 at %s) [Y/n]: ", path)
+		answer, err := readLine(in)
+		if err != nil {
+			fmt.Fprintln(out)
+			// The URL and token were already given; losing them over the
+			// follow-up question would be spite. Scan, just don't remember.
+			return res, nil
+		}
+		switch strings.ToLower(strings.TrimSpace(answer)) {
+		case "", "y", "yes":
+			res.save = true
+		}
+	}
+	return res, nil
 }
 
 // readSecret reads the token without echoing it when in is a real terminal.

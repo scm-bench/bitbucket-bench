@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -157,20 +159,102 @@ func TestFirstRunPromptDefaultsToTheDemo(t *testing.T) {
 }
 
 func TestFirstRunPromptCollectsCredentials(t *testing.T) {
-	var out bytes.Buffer
-	res, err := promptFirstRun(
-		strings.NewReader("1\nhttps://bitbucket.example.com\nsekrit\n"), &out, false)
-	if err != nil {
-		t.Fatalf("prompt: %v", err)
+	for name, tc := range map[string]struct {
+		saveAnswer string
+		wantSave   bool
+	}{
+		// Enter defaults to yes: the reader who typed a URL and token is
+		// exactly the one who does not want to type them again.
+		"enter saves":  {"\n", true},
+		"yes saves":    {"y\n", true},
+		"no does not":  {"n\n", false},
+		"eof does not": {"", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			res, err := promptFirstRun(
+				strings.NewReader("1\nhttps://bitbucket.example.com\nsekrit\n"+tc.saveAnswer), &out, false)
+			if err != nil {
+				t.Fatalf("prompt: %v", err)
+			}
+			if res.demo {
+				t.Error("choice 1 landed on the demo")
+			}
+			if res.url != "https://bitbucket.example.com" {
+				t.Errorf("url = %q", res.url)
+			}
+			if res.token != "sekrit" {
+				t.Errorf("token = %q", res.token)
+			}
+			if res.save != tc.wantSave {
+				t.Errorf("save = %v, want %v", res.save, tc.wantSave)
+			}
+			// Consent must be informed: the question names the destination.
+			if !strings.Contains(out.String(), "instance.yaml") {
+				t.Errorf("the save question never names the file:\n%s", out.String())
+			}
+		})
 	}
-	if res.demo {
-		t.Error("choice 1 landed on the demo")
+}
+
+// writeSavedInstance stages a saved instance in a private config dir, the way
+// an earlier run's menu would have left it.
+func writeSavedInstance(t *testing.T, yaml string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "instance.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write instance: %v", err)
 	}
-	if res.url != "https://bitbucket.example.com" {
-		t.Errorf("url = %q", res.url)
+}
+
+// The feature itself: a URL saved by an earlier run answers the next scan
+// without a menu and without a flag. The scan then fails on the unreachable
+// address — under a --max-duration so the client's transport retries cannot
+// slow the suite — but by then it has already said whose credentials it took.
+func TestScanUsesTheSavedInstance(t *testing.T) {
+	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
+
+	_, stderr, code := run(t, "scan", "--max-duration", "1ms")
+	if code != ExitError {
+		t.Fatalf("exit code = %d, want %d for an unreachable saved instance", code, ExitError)
 	}
-	if res.token != "sekrit" {
-		t.Errorf("token = %q", res.token)
+	if !strings.Contains(stderr, "using saved instance https://127.0.0.1:1") {
+		t.Errorf("stderr never says where the URL came from:\n%s", stderr)
+	}
+}
+
+// A typed flag or an exported variable always beats the file: saved is the
+// answer of last resort, not a preference.
+func TestSavedInstanceYieldsToExplicitConfiguration(t *testing.T) {
+	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
+
+	_, stderr, _ := run(t, "scan", "--url", "https://127.0.0.1:2", "--max-duration", "1ms")
+	if strings.Contains(stderr, "using saved instance") {
+		t.Errorf("a typed --url was overridden by the file:\n%s", stderr)
+	}
+}
+
+// The demo evaluates nothing on any instance, saved or otherwise.
+func TestSavedInstanceDoesNotTouchTheDemo(t *testing.T) {
+	writeSavedInstance(t, "url: https://127.0.0.1:1\ntoken: saved\n")
+
+	_, stderr, code := run(t, "scan", "--demo", "-o", "json", "--fail-on", "none")
+	if code != ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+	if strings.Contains(stderr, "using saved instance") {
+		t.Errorf("the demo consulted the saved instance:\n%s", stderr)
+	}
+}
+
+// A saved file that cannot be understood stops the scan rather than shrugging
+// into an anonymous one — same contract as a broken --config.
+func TestScanRefusesACorruptSavedInstance(t *testing.T) {
+	writeSavedInstance(t, "url: https://127.0.0.1:1\ntokn: oops\n")
+
+	if _, _, code := run(t, "scan"); code != ExitError {
+		t.Errorf("exit code = %d, want %d for a corrupt saved instance", code, ExitError)
 	}
 }
 
