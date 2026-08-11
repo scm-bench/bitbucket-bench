@@ -89,9 +89,11 @@ func (p *progressWriter) callback() func(string) {
 // os.DevNull is excluded by name because it is a character device too, so
 // `scm-bench scan > /dev/null` looked like a terminal: colour escapes were
 // written into output that had been explicitly thrown away, and the compact
-// progress line drew carriage returns at a destination with no cursor. This is
-// the same check without a dependency on golang.org/x/term, which is not worth
-// adding to a supply chain security tool for one boolean.
+// progress line drew carriage returns at a destination with no cursor. It
+// stays a hand-rolled check even though golang.org/x/term is now a dependency
+// (the first-run prompt reads the token through it, unechoed): term.IsTerminal
+// answers for a file descriptor rather than an io.Writer, and it has no
+// opinion about /dev/null.
 func isTerminal(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	if !ok {

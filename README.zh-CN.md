@@ -108,11 +108,15 @@ scm-bench scan -o sarif --output-file report.sarif
 > 每条规则的判定文字是规则自己生成的，换一种语言不是加一张字符串表，而是在二十条规则里
 > 各复制一份消息拼装逻辑。半套翻译——标题是一种语言、发现描述是另一种——比不翻译更难读。
 
-手边没有实例？内置样例快照可以直接跑通所有输出格式：
+手边没有实例？二进制里内置了样例，一个参数就能看到第一份报告：
 
 ```bash
-scm-bench scan --snapshot-in examples/snapshot.json
+scm-bench scan --demo
 ```
+
+在终端里什么都不配置直接运行 `scm-bench scan`，它会交互式地给出同样的选择：现在输入
+URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` 的形式存在仓库里，
+从源码检出运行时也可以用 `--snapshot-in` 评估它。
 
 仓库是并发抓取的——`--concurrency`（默认 8）限制同时抓取的数量，实例负载高时把它调低是
 比较客气的做法。`--timeout` 限制单个请求（默认 30s）；`--max-duration` 限制整次扫描，

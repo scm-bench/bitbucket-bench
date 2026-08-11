@@ -104,6 +104,11 @@ func run(t *testing.T, args ...string) (string, string, int) {
 	root := NewRootCommand()
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
+	// A closed stdin, explicitly. Without it InOrStdin returns os.Stdin, and
+	// `go test` runs with fd 0 on /dev/null — a character device, so the
+	// first-run menu's terminal check would be answered by what the test
+	// runner happened to inherit rather than by this suite.
+	root.SetIn(strings.NewReader(""))
 	root.SetArgs(args)
 
 	err := root.Execute()

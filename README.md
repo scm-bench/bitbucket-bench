@@ -115,11 +115,17 @@ scm-bench scan -o json  --output-file report.json
 scm-bench scan -o sarif --output-file report.sarif
 ```
 
-No instance handy? Every report format works against the bundled sample:
+No instance handy? A sample ships inside the binary, so the first report is one
+flag away:
 
 ```bash
-scm-bench scan --snapshot-in examples/snapshot.json
+scm-bench scan --demo
 ```
+
+Run `scm-bench scan` bare on a terminal and it offers the same choice
+interactively: enter a URL and token, or see the sample first. The sample is
+also checked in as `examples/snapshot.json`, which `--snapshot-in` evaluates
+from a checkout.
 
 Repositories are fetched concurrently — `--concurrency` (default 8) bounds how
 many at once, and lowering it is the polite response to an instance under load.
