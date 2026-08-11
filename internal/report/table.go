@@ -33,33 +33,63 @@ func (p painter) paint(code, s string) string {
 	return code + s + ansiReset
 }
 
-// writeTable renders the report as trivy does: a summary of every resource
-// first, then one section per resource, each a table of what that resource got
-// wrong.
+// writeTable renders the report in one of two layouts.
 //
-// Grouping by resource rather than by control is a trade with a name. A control
-// that fails identically across fifty repositories appears fifty times, once in
-// each repository's table, where grouping by control would have read it as the
-// single misconfiguration it is. What is bought is the question a reader
-// actually arrives with — "what is wrong with *my* repository" — answered
-// without reading anything about anybody else's.
+// The default is an overview: the score, the per-resource summary, then one
+// Findings table aggregated by control, so a control that fails identically
+// across fifty repositories reads as the single misconfiguration it is —
+// one row saying 50/50 — instead of appearing once in each of fifty tables.
+// Findings the scan could not read collapse to a single sentence pointing at
+// the scan warnings that explain them.
 //
-// The full remediation stays out of the tables and keeps its own section at the
-// end. Each fix is a paragraph naming a settings path, and a paragraph does not
-// belong in a cell; the one-line form rides in the Finding column instead.
+// Options.Details flips to the per-resource layout, trivy's shape: one
+// section per resource, each a table of what that resource got wrong. That
+// answers the other question a reader arrives with — "what is wrong with *my*
+// repository" — without reading anything about anybody else's, and
+// Options.DetailFilters narrows it to the resources or controls named.
+//
+// The full remediation stays out of the tables in both layouts and keeps its
+// own section at the end. Each fix is a paragraph naming a settings path, and
+// a paragraph does not belong in a cell; the one-line form rides in the
+// Finding column instead.
 func writeTable(w io.Writer, rep *engine.Report, opts Options) error {
 	p := painter{enabled: opts.Color}
 	width := console.Width()
+
+	if opts.Details {
+		// Parsed before anything is written, so a filter that matches nothing
+		// is an error and not a report that looks clean.
+		filter, err := parseDetailFilters(opts.DetailFilters, rep.Findings)
+		if err != nil {
+			return err
+		}
+		filtered := filterFindings(rep.Findings, filter)
+
+		writeHeader(w, rep, p, width)
+		writeNotice(w, p, width, opts.Notice)
+		writeSummary(w, rep, p, width)
+		writeReportSummary(w, rep, p, width, opts)
+		writeWarnings(w, rep, p, width)
+		writeResourceSections(w, filtered, p, width, opts)
+		if !opts.NoRemediations {
+			writeRemediations(w, filtered, p, width)
+		}
+		return nil
+	}
 
 	writeHeader(w, rep, p, width)
 	writeNotice(w, p, width, opts.Notice)
 	writeSummary(w, rep, p, width)
 	writeReportSummary(w, rep, p, width, opts)
+	writeFindingsOverview(w, rep, p, width, opts)
+	// After the findings rather than before them: the overview's unread
+	// sentence points here, and on a one-screen report the cause should sit
+	// next to the symptom instead of above the table that hides it.
 	writeWarnings(w, rep, p, width)
-	writeResourceSections(w, rep, p, width, opts)
 	if !opts.NoRemediations {
-		writeRemediations(w, rep, p, width)
+		writeRemediations(w, rep.Findings, p, width)
 	}
+	writeHint(w, p, width)
 	return nil
 }
 
@@ -415,10 +445,12 @@ func writeReportSummary(w io.Writer, rep *engine.Report, p painter, width int, o
 
 // writeWarnings reports on the scan itself rather than on the instance.
 //
-// It comes before the findings because it is what decides how much of them to
-// believe. A 403 that cost the scan a whole repository explains a column of
-// UNREAD further down, and printing that explanation after them meant the
-// reader met the symptom several screens before the cause.
+// It is what decides how much of the findings to believe. In the detail
+// layout it comes before them: a 403 that cost the scan a whole repository
+// explains a column of UNREAD several screens further down, and the reader
+// should meet the cause before the symptom. The overview is one screen, so
+// there it sits directly under the sentence that summarises the unread
+// findings and points here.
 func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 	if len(rep.Metadata.Warnings) > 0 {
 		blank(w)
@@ -438,21 +470,22 @@ func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 	}
 }
 
-// writeResourceSections is the body of the report: one heading, one total and
-// one table per resource, in trivy's shape.
-func writeResourceSections(w io.Writer, rep *engine.Report, p painter, width int, opts Options) {
-	tallies := tallyResources(rep.Findings)
+// writeResourceSections is the body of the detail layout: one heading, one
+// total and one table per resource, in trivy's shape. It draws only the
+// findings it is handed, which is how --details filtering narrows it.
+func writeResourceSections(w io.Writer, findings []engine.Finding, p painter, width int, opts Options) {
+	tallies := tallyResources(findings)
 
 	byResource := map[string][]engine.Finding{}
-	for _, f := range rep.Findings {
+	for _, f := range findings {
 		byResource[f.Resource] = append(byResource[f.Resource], f)
 	}
 
 	shown := 0
 	skipped := 0
 	for _, t := range tallies {
-		findings := selectForSection(byResource[t.name], opts.ShowPassed)
-		if len(findings) == 0 {
+		selected := selectForSection(byResource[t.name], opts.ShowPassed)
+		if len(selected) == 0 {
 			continue
 		}
 		if opts.MaxResources > 0 && shown >= opts.MaxResources {
@@ -460,7 +493,7 @@ func writeResourceSections(w io.Writer, rep *engine.Report, p painter, width int
 			continue
 		}
 		shown++
-		writeResourceSection(w, p, width, t, findings)
+		writeResourceSection(w, p, width, t, selected)
 	}
 
 	if skipped > 0 {
@@ -562,10 +595,10 @@ func findingCell(f engine.Finding) string {
 // the verdict. Controls that merely went unread are left out — their settings
 // are not known to be wrong, and printing how to change them would say
 // otherwise.
-func writeRemediations(w io.Writer, rep *engine.Report, p painter, width int) {
+func writeRemediations(w io.Writer, findings []engine.Finding, p painter, width int) {
 	seen := map[string]bool{}
 	var ordered []engine.Finding
-	for _, f := range rep.Findings {
+	for _, f := range findings {
 		if f.Status != engine.StatusFail && f.Status != engine.StatusManual {
 			continue
 		}
