@@ -698,6 +698,10 @@ Bitbucket REST  ──►   fetcher   ──►  snapshot.json  ──►   Rego
 **v0.2** —— CIS 1.2.2（仓库创建限制，待 Project Creator 判定口径确定后）、
 把 default reviewers 作为 CIS-1.1.6 的部分信号、项目级策略覆盖。
 
+**考虑中** —— 免重扫的 `--details`，通过自动快照缓存实现。卡点不在代码：它意味着
+默认把一份实例薄弱点地图落在磁盘上，这个取舍值得一个正式决定，而不是一个功能开关。
+在那之前，`--snapshot-out` / `--snapshot-in` 就是同一件事的手动形式。
+
 **之后** —— GitHub Enterprise 与 GitLab 的 fetcher。快照 schema 本就是平台中立的，
 规则也声明了适用平台，所以这基本只是「再写一个 fetcher」的工作量。
 
