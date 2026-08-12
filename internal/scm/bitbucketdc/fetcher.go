@@ -506,14 +506,22 @@ func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) (scm.
 func (f *Fetcher) fetchDefaultPermission(ctx context.Context, key string) (string, bool) {
 	base := "/api/1.0/projects/" + url.PathEscape(key) + "/permissions/"
 	known := true
+	warned := false
 	for _, perm := range []string{"PROJECT_ADMIN", "PROJECT_WRITE", "PROJECT_READ"} {
 		var resp struct {
 			Permitted bool `json:"permitted"`
 		}
 		if err := f.client.get(ctx, base+perm+"/all", nil, &resp); err != nil {
 			known = false
-			if !f.unreadable(err) {
-				f.warn("project %s default permission probe failed: %v", key, err)
+			// One warning per project, not one per probe: all three ask the
+			// same underlying question, and the cause is the same each time.
+			if !warned {
+				warned = true
+				if f.unreadable(err) {
+					f.warn("project %s default permission is not readable (%v); CIS-1.3.8 will report MANUAL for this project", key, err)
+				} else {
+					f.warn("project %s default permission probe failed: %v", key, err)
+				}
 			}
 			continue
 		}
