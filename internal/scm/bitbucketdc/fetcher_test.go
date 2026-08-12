@@ -965,6 +965,42 @@ func TestPartialDefaultPermissionProbeIsNotReportedAsKnown(t *testing.T) {
 	if snapshot.Projects[0].Repositories[0].Permissions.DefaultPermissionKnown {
 		t.Error("the repository inherited DefaultPermissionKnown = true")
 	}
+
+	found := false
+	for _, w := range snapshot.Metadata.Warnings {
+		if strings.Contains(w, "PRJ") && strings.Contains(w, "default permission") && strings.Contains(w, "not readable") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning about the unreadable default permission probe, got %v", snapshot.Metadata.Warnings)
+	}
+}
+
+// The three probes ask the same underlying question — a token without
+// project admin rights fails all of them the same way — so a token missing
+// that grant should be told once, not three times.
+func TestUnreadableDefaultPermissionProbeWarnsOnce(t *testing.T) {
+	f := standardInstance(t)
+	unauthorized := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+	}
+	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_ADMIN/all", unauthorized)
+	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", unauthorized)
+	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_READ/all", unauthorized)
+
+	_, snapshot := fetchSnapshot(t, f)
+
+	count := 0
+	for _, w := range snapshot.Metadata.Warnings {
+		if strings.Contains(w, "default permission") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("got %d default-permission warnings, want exactly 1: %v", count, snapshot.Metadata.Warnings)
+	}
 }
 
 // The ordinary case must keep working: every probe answers, so the first hit
