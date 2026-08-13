@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // fakeInstance is a stand-in Bitbucket Data Center. Handlers are keyed by the

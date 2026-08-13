@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
 )
 
 func newListChecksCommand() *cobra.Command {

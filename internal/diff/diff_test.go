@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // The renderer wraps to console.Width, which reads COLUMNS. Pinning it keeps

@@ -1,8 +1,8 @@
-# scm-bench configuration.
+# bitbucket-bench configuration.
 #
 # Every field is optional: what you leave out keeps its default, so this file
 # only needs to state what you want changed. scan finds it on its own as
-# scm-bench.yaml (or .scm-bench.yaml) in the working directory, or config.yaml
+# bitbucket-bench.yaml (or .bitbucket-bench.yaml) in the working directory, or config.yaml
 # in the user config directory; --config names it explicitly. A single run
 # can override any key without touching the file: --set scan.failOn=none.
 #

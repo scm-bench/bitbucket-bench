@@ -1,4 +1,4 @@
-module github.com/scm-bench/scm-bench
+module github.com/scm-bench/bitbucket-bench
 
 go 1.25.0
 

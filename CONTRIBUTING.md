@@ -5,11 +5,17 @@ control that fires wrongly against a real Bitbucket instance, or remediation
 text that does not match what the UI actually says, is worth more than a
 refactor.
 
+This document is how the work is done *here*. What a verdict, a `metadata.json`
+and a score are *required* to mean is specified once for the whole family, in
+[scm-bench](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md).
+The two agree; where a change would make them disagree, the specification is the
+one that has to move first, because the other benches read it too.
+
 ## Getting set up
 
 ```bash
-git clone https://github.com/scm-bench/scm-bench
-cd scm-bench
+git clone https://github.com/scm-bench/bitbucket-bench
+cd bitbucket-bench
 
 make check      # gofmt, vet, race-enabled tests, Rego compile + policy tests
 make policy     # just the Rego: compile, unit tests, coverage
@@ -26,7 +32,7 @@ is no code generation step.
 No instance to test against? Everything except the fetcher runs offline:
 
 ```bash
-./bin/scm-bench scan --snapshot-in examples/snapshot.json
+./bin/bitbucket-bench scan --snapshot-in examples/snapshot.json
 ```
 
 ## The one rule that matters
@@ -51,7 +57,7 @@ internal/
                         metadata.json
   engine/               compiles the bundle once, evaluates, scores
   report/               table, json, sarif
-  diff/                 compares two evaluations; backs `scm-bench diff`
+  diff/                 compares two evaluations; backs `bitbucket-bench diff`
   config/               thresholds handed to Rego as input.config
   cli/                  flags, exit codes, the scan trace
   console/              the table renderer both reports draw with, plus the
@@ -116,6 +122,13 @@ statement that nothing applies. `TestRemediationSaysWhereToAct` enforces it.
 Vague remediation is worse than none: it wastes the reader's time before they
 discover it does not help.
 
+The full field list is the family's, not this repository's: it is specified in
+[the bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md#5-metadatajson),
+with a JSON Schema at
+[`schemas/metadata.schema.json`](https://github.com/scm-bench/scm-bench/blob/main/schemas/metadata.schema.json)
+you can validate a new file against before opening a pull request. `Load` in
+`internal/checks/registry.go` enforces the same rules at startup.
+
 Then add the control to the coverage table in both READMEs.
 
 ## Testing
@@ -143,7 +156,7 @@ Push a tag, or run the **Release** workflow from the Actions tab and give it the
 tag to create. The workflow does the rest.
 
 ```bash
-git tag -a v0.1.0 -m "scm-bench v0.1.0" && git push origin v0.1.0
+git tag -a v0.1.0 -m "bitbucket-bench v0.1.0" && git push origin v0.1.0
 ```
 
 Three things that have each gone wrong once:

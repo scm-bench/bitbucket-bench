@@ -1,4 +1,4 @@
-// Command scm-bench audits a source control platform against the Source Code
+// Command bitbucket-bench audits a source control platform against the Source Code
 // section of the CIS Software Supply Chain Security Guide.
 package main
 
@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/scm-bench/scm-bench/internal/cli"
-	"github.com/scm-bench/scm-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/cli"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
 )
 
 func main() {

@@ -8,7 +8,7 @@
   "automated": true,
   "title": "Ensure inactive users are reviewed and removed periodically",
   "description": "An account nobody uses is an account nobody notices being used. Dormant credentials with repository access are a standing invitation, and they also consume licences.",
-  "remediation": "Administration -> Users: for each listed account, either deactivate it or remove the grants that give it repository access. Where accounts come from an external directory, disable them there — Bitbucket will follow. Adjust the window with thresholds.inactiveUserDays in scm-bench's config.",
+  "remediation": "Administration -> Users: for each listed account, either deactivate it or remove the grants that give it repository access. Where accounts come from an external directory, disable them there — Bitbucket will follow. Adjust the window with thresholds.inactiveUserDays in bitbucket-bench's config.",
   "fixSummary": "Deactivate each listed account at Administration -> Users.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security"

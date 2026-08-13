@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// The tag column is still a contract, on stderr: `scm-bench scan 2>&1 | grep
+// The tag column is still a contract, on stderr: `bitbucket-bench scan 2>&1 | grep
 // '^\[WARN\]'` answers "what did this scan fail to see", and it only works if
 // every tag is the same width and the brackets are literal.
 func TestEveryTagIsFourCharactersWide(t *testing.T) {

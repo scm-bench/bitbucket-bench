@@ -270,7 +270,7 @@ func TestScanSectionLoadsAndValidates(t *testing.T) {
 
 func TestDiscoverPrefersTheWorkingDirectory(t *testing.T) {
 	userDir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", userDir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", userDir)
 	work := t.TempDir()
 	t.Chdir(work)
 
@@ -290,16 +290,16 @@ func TestDiscoverPrefersTheWorkingDirectory(t *testing.T) {
 	}
 
 	// ...but the working directory wins, hidden name included.
-	if err := os.WriteFile(filepath.Join(work, ".scm-bench.yaml"), []byte(""), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(work, ".bitbucket-bench.yaml"), []byte(""), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if path, _ = Discover(); path != ".scm-bench.yaml" {
+	if path, _ = Discover(); path != ".bitbucket-bench.yaml" {
 		t.Errorf("Discover() = %q, want the hidden working-directory file", path)
 	}
-	if err := os.WriteFile(filepath.Join(work, "scm-bench.yaml"), []byte(""), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "bitbucket-bench.yaml"), []byte(""), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if path, _ = Discover(); path != "scm-bench.yaml" {
+	if path, _ = Discover(); path != "bitbucket-bench.yaml" {
 		t.Errorf("Discover() = %q, want the visible name first", path)
 	}
 }

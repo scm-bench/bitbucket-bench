@@ -23,7 +23,7 @@ type Instance struct {
 // instanceFile is the name under the config directory.
 const instanceFile = "instance.yaml"
 
-// InstancePath is where the saved instance lives: SCM_BENCH_CONFIG_DIR when
+// InstancePath is where the saved instance lives: BITBUCKET_BENCH_CONFIG_DIR when
 // set — a pipeline pinning the location, a test staying out of the real one —
 // otherwise the platform's user config directory.
 func InstancePath() (string, error) {

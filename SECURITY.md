@@ -3,14 +3,14 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub Security Advisories](https://github.com/scm-bench/scm-bench/security/advisories/new).
+[GitHub Security Advisories](https://github.com/scm-bench/bitbucket-bench/security/advisories/new).
 That keeps the report confidential until a fix is available and gives us a
 private space to work with you on it.
 
 Please do not open a public issue for a security problem.
 
 If you cannot use GitHub advisories, email **xianpeng.shen@gmail.com** with
-`scm-bench security` in the subject.
+`bitbucket-bench security` in the subject.
 
 **What to expect**
 
@@ -35,7 +35,7 @@ supported path.
 
 ## What matters most in this project
 
-scm-bench reads a customer's source control instance with a credential they
+bitbucket-bench reads a customer's source control instance with a credential they
 supplied and writes a file describing exactly where that instance is weak.
 Reports of the following are especially welcome:
 
@@ -57,7 +57,7 @@ Reports of the following are especially welcome:
 
 ## Scope
 
-In scope: the `scm-bench` binary, the policy bundle, the release pipeline, and
+In scope: the `bitbucket-bench` binary, the policy bundle, the release pipeline, and
 the published container images.
 
 Out of scope: vulnerabilities in Bitbucket Data Center or any other audited

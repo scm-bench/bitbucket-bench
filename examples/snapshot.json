@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1",
   "metadata": {
-    "tool": "scm-bench",
+    "tool": "bitbucket-bench",
     "toolVersion": "example",
     "platform": "bitbucket-dc",
     "baseUrl": "https://bitbucket.example.com",

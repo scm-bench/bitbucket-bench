@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
 )
 
 // Score summarises a report as a single 0-100 number plus the counts behind it.

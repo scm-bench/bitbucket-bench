@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scm-bench/scm-bench/internal/scm/bitbucketdc"
+	"github.com/scm-bench/bitbucket-bench/internal/scm/bitbucketdc"
 )
 
 func get(path, scope string, status int) bitbucketdc.RequestEvent {

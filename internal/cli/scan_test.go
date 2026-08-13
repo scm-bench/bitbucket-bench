@@ -15,25 +15,25 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // The table report wraps to console.Width, which reads COLUMNS. Pinning it
 // keeps assertions about the rendered output from depending on the width of
 // whatever terminal the suite runs under.
 //
-// SCM_BENCH_CONFIG_DIR is pinned for the same reason: a scan with no URL now
+// BITBUCKET_BENCH_CONFIG_DIR is pinned for the same reason: a scan with no URL now
 // consults the saved instance file, and without the pin this suite would read
 // — and could write — the real one belonging to whoever runs the tests.
 func TestMain(m *testing.M) {
 	os.Setenv("COLUMNS", "80")
-	dir, err := os.MkdirTemp("", "scm-bench-test-config")
+	dir, err := os.MkdirTemp("", "bitbucket-bench-test-config")
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	os.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -54,7 +54,7 @@ func writeSnapshotWith(t *testing.T, mutate func(*scm.Snapshot)) string {
 	snapshot := scm.Snapshot{
 		SchemaVersion: scm.SchemaVersion,
 		Metadata: scm.Metadata{
-			Tool:        "scm-bench",
+			Tool:        "bitbucket-bench",
 			Platform:    scm.PlatformBitbucketDC,
 			BaseURL:     "https://bitbucket.example.com",
 			GeneratedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -135,7 +135,7 @@ func configWithScan(t *testing.T, lines ...string) string {
 	for _, l := range lines {
 		content += "  " + l + "\n"
 	}
-	path := filepath.Join(t.TempDir(), "scm-bench.yaml")
+	path := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestVersionCommand(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d", code)
 	}
-	if !strings.Contains(stdout, "scm-bench") {
+	if !strings.Contains(stdout, "bitbucket-bench") {
 		t.Errorf("version output = %q", stdout)
 	}
 }
@@ -745,7 +745,7 @@ func TestMovedFlagsAreAnsweredWithTheConfigKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("a retired flag was accepted")
 	}
-	for _, want := range []string{"scan.failOn", "scm-bench init", "--set scan.failOn="} {
+	for _, want := range []string{"scan.failOn", "bitbucket-bench init", "--set scan.failOn="} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q: %v", want, err)
 		}
@@ -763,7 +763,7 @@ func TestScanDiscoversTheWorkingDirectoryConfig(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "scm-bench.yaml"), []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bitbucket-bench.yaml"), []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Chdir(dir)
@@ -772,7 +772,7 @@ func TestScanDiscoversTheWorkingDirectoryConfig(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d, want %d via the discovered failOn: none\n%s", code, ExitOK, stderr)
 	}
-	if !strings.Contains(stderr, "using config scm-bench.yaml") {
+	if !strings.Contains(stderr, "using config bitbucket-bench.yaml") {
 		t.Errorf("stderr never says which config was discovered:\n%s", stderr)
 	}
 
@@ -782,7 +782,7 @@ func TestScanDiscoversTheWorkingDirectoryConfig(t *testing.T) {
 	if code != ExitFindings {
 		t.Errorf("exit code = %d, want %d from the explicit config", code, ExitFindings)
 	}
-	if strings.Contains(stderr, "using config scm-bench.yaml") {
+	if strings.Contains(stderr, "using config bitbucket-bench.yaml") {
 		t.Errorf("an explicit --config still triggered discovery:\n%s", stderr)
 	}
 }
@@ -792,9 +792,9 @@ func TestScanDiscoversTheUserConfig(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	t.Chdir(t.TempDir()) // an empty working directory
 
-	// SCM_BENCH_CONFIG_DIR is pinned by TestMain; config.yaml inside it is
+	// BITBUCKET_BENCH_CONFIG_DIR is pinned by TestMain; config.yaml inside it is
 	// the user-level file.
-	path := filepath.Join(os.Getenv("SCM_BENCH_CONFIG_DIR"), "config.yaml")
+	path := filepath.Join(os.Getenv("BITBUCKET_BENCH_CONFIG_DIR"), "config.yaml")
 	if err := os.WriteFile(path, []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -816,10 +816,10 @@ func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d\n%s", code, stderr)
 	}
-	if !strings.Contains(stderr, "wrote scm-bench.yaml") {
+	if !strings.Contains(stderr, "wrote bitbucket-bench.yaml") {
 		t.Errorf("init never says what it wrote:\n%s", stderr)
 	}
-	raw, err := os.ReadFile("scm-bench.yaml")
+	raw, err := os.ReadFile("bitbucket-bench.yaml")
 	if err != nil {
 		t.Fatalf("the template was not written: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 
 	// The template must load cleanly and reproduce the defaults exactly —
 	// otherwise init writes a file that silently changes behaviour.
-	cfg, err := config.Load("scm-bench.yaml")
+	cfg, err := config.Load("bitbucket-bench.yaml")
 	if err != nil {
 		t.Fatalf("the template does not load: %v", err)
 	}
@@ -841,13 +841,13 @@ func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 
 	// Refuse the second run: a config that changes how an audit judges an
 	// instance is not something scaffolding should replace.
-	if err := os.WriteFile("scm-bench.yaml", []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
+	if err := os.WriteFile("bitbucket-bench.yaml", []byte("scan:\n  failOn: none\n"), 0o600); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
 	if _, _, code := run(t, "init"); code != ExitError {
 		t.Errorf("exit code = %d, want %d for an existing file", code, ExitError)
 	}
-	raw, _ = os.ReadFile("scm-bench.yaml")
+	raw, _ = os.ReadFile("bitbucket-bench.yaml")
 	if !strings.Contains(string(raw), "failOn: none") {
 		t.Error("init overwrote an existing config")
 	}
@@ -876,7 +876,7 @@ func TestSetOverridesConfigForOneRun(t *testing.T) {
 
 // seedSnapshotCache plants a snapshot in the --last cache, exactly as a
 // finished network scan would have left it. The caller must have pinned
-// SCM_BENCH_CONFIG_DIR to a fresh directory first.
+// BITBUCKET_BENCH_CONFIG_DIR to a fresh directory first.
 func seedSnapshotCache(t *testing.T, baseURL string, mutate func(*scm.Snapshot)) string {
 	t.Helper()
 	fixture := writeSnapshotWith(t, mutate)
@@ -907,7 +907,7 @@ func executeErr(t *testing.T, args ...string) error {
 }
 
 func TestScanLastRendersTheCachedSnapshot(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 	seedSnapshotCache(t, "https://bitbucket.example.com", func(s *scm.Snapshot) {
 		s.Metadata.GeneratedAt = time.Now().Add(-30 * time.Minute)
 	})
@@ -928,7 +928,7 @@ func TestScanLastRendersTheCachedSnapshot(t *testing.T) {
 }
 
 func TestScanLastWarnsWhenTheSnapshotIsStale(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 	// The fixture's GeneratedAt is fixed in the past, well over the
 	// staleness threshold.
 	seedSnapshotCache(t, "https://bitbucket.example.com", nil)
@@ -943,7 +943,7 @@ func TestScanLastWarnsWhenTheSnapshotIsStale(t *testing.T) {
 }
 
 func TestScanLastPicksTheNewestCache(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 	older := seedSnapshotCache(t, "https://old.example.com", func(s *scm.Snapshot) {
 		s.Metadata.BaseURL = "https://old.example.com"
 	})
@@ -965,7 +965,7 @@ func TestScanLastPicksTheNewestCache(t *testing.T) {
 }
 
 func TestScanLastWithNothingCached(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	err := executeErr(t, "scan", "--last")
 	if err == nil {
@@ -979,7 +979,7 @@ func TestScanLastWithNothingCached(t *testing.T) {
 }
 
 func TestScanLastRefusesCaptureFlags(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 	fixture := writeSnapshotFixture(t)
 	cases := [][]string{
 		{"--url", "https://bitbucket.example.com"},
@@ -1003,7 +1003,7 @@ func TestScanLastRefusesCaptureFlags(t *testing.T) {
 // bundled example as somebody's instance. A replayed snapshot is excluded
 // for a quieter reason — it would only rewrite what it just read.
 func TestScanDemoAndReplayLeaveNoCache(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	if _, _, code := run(t, "scan", "--demo", "-c", configWithFailOn(t, "none")); code != ExitOK {
 		t.Fatalf("demo exit code = %d, want %d", code, ExitOK)

@@ -20,9 +20,9 @@ const (
 // NewRootCommand builds the command tree.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "scm-bench",
+		Use:   "bitbucket-bench",
 		Short: "Audit source control platforms against the CIS Software Supply Chain Security benchmark",
-		Long: `scm-bench audits a source control platform against the Source Code section of
+		Long: `bitbucket-bench audits a source control platform against the Source Code section of
 the CIS Software Supply Chain Security Guide.
 
 It captures a read-only snapshot of the instance, evaluates it against policies

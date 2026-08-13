@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // The table renderer wraps to console.Width, which reads COLUMNS. Pinning it
@@ -60,7 +60,7 @@ func sampleReport() *engine.Report {
 
 	return &engine.Report{
 		Metadata: scm.Metadata{
-			Tool: "scm-bench", ToolVersion: "1.2.3", Platform: scm.PlatformBitbucketDC,
+			Tool: "bitbucket-bench", ToolVersion: "1.2.3", Platform: scm.PlatformBitbucketDC,
 			BaseURL: "https://bitbucket.example.com", GeneratedAt: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
 			Warnings: []string{"the user directory is not readable"},
 		},
@@ -100,7 +100,7 @@ func reportWithUnreadableResource(t *testing.T, ids ...string) *engine.Report {
 	}
 
 	return &engine.Report{
-		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 		Findings: findings,
 		Score:    engine.Compute(findings),
 	}
@@ -135,7 +135,7 @@ func reportWithRepeatedFinding(t *testing.T, n int) *engine.Report {
 	}
 
 	return &engine.Report{
-		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 		Findings: findings,
 		Score:    engine.Compute(findings),
 	}
@@ -619,7 +619,7 @@ func TestSARIFStructure(t *testing.T) {
 	}
 	run := log.Runs[0]
 
-	if run.Tool.Driver.Name != "scm-bench" || run.Tool.Driver.Version != "1.2.3" {
+	if run.Tool.Driver.Name != "bitbucket-bench" || run.Tool.Driver.Version != "1.2.3" {
 		t.Errorf("driver = %+v", run.Tool.Driver)
 	}
 	// Passing controls carry no action and are omitted; the failure and the
@@ -768,7 +768,7 @@ func TestSummaryReportsAllFourStates(t *testing.T) {
 // produced a file GitHub's SARIF upload rejects, while every dirty scan worked.
 func TestSARIFResultsIsAnArrayWhenThereIsNothingToReport(t *testing.T) {
 	rep := &engine.Report{
-		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 		Findings: []engine.Finding{{
 			CheckID: "CIS-1.3.9", CISID: "1.3.9", Title: "Ensure the organization is verified",
 			Severity: "LOW", Status: engine.StatusNA,
@@ -824,7 +824,7 @@ func TestSummaryStatesHowMuchWasActuallyScored(t *testing.T) {
 	// With nothing unevaluated there is nothing to caveat, so the line is
 	// absent rather than reading "0 could not be evaluated".
 	rep := &engine.Report{
-		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 		Findings: []engine.Finding{{
 			CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "t", Severity: "HIGH",
 			Status: engine.StatusPass, Resource: "PRJ/app", ResourceType: engine.ResourceRepository,
@@ -875,7 +875,7 @@ func TestSARIFRuleSeverityFollowsWhetherAnythingActuallyFailed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := &engine.Report{
-				Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+				Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 				Findings: tc.findings,
 			}
 			out := renderReport(t, rep, Options{Format: FormatSARIF, ToolVersion: "1.2.3"})
@@ -1001,11 +1001,11 @@ func TestHeaderShedsPartsRatherThanOverflowing(t *testing.T) {
 		want    []string
 	}{
 		{"fits on one line", "https://bb.example.com",
-			[]string{"scm-bench 1.2.3  ·  https://bb.example.com  ·  2026-01-01 12:00:00 UTC"}},
+			[]string{"bitbucket-bench 1.2.3  ·  https://bb.example.com  ·  2026-01-01 12:00:00 UTC"}},
 		{"timestamp moves down", "https://bitbucket.a-fairly-long-hostname.example.com",
-			[]string{"scm-bench 1.2.3  ·  https://bitbucket.a-fairly-long-hostname.example.com", "scanned 2026-01-01 12:00:00 UTC"}},
+			[]string{"bitbucket-bench 1.2.3  ·  https://bitbucket.a-fairly-long-hostname.example.com", "scanned 2026-01-01 12:00:00 UTC"}},
 		{"url gets its own line", "https://bitbucket.a-very-long-hostname-for-one-company.example.com",
-			[]string{"scm-bench 1.2.3", "https://bitbucket.a-very-long-hostname-for-one-company.example.com", "scanned 2026-01-01 12:00:00 UTC"}},
+			[]string{"bitbucket-bench 1.2.3", "https://bitbucket.a-very-long-hostname-for-one-company.example.com", "scanned 2026-01-01 12:00:00 UTC"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := sampleReport()
@@ -1153,7 +1153,7 @@ func TestOverviewShowPassedAddsPassRows(t *testing.T) {
 
 func TestOverviewSaysSoWhenNothingNeedsAttention(t *testing.T) {
 	rep := &engine.Report{
-		Metadata: scm.Metadata{Tool: "scm-bench", Platform: scm.PlatformBitbucketDC},
+		Metadata: scm.Metadata{Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC},
 		Findings: []engine.Finding{{
 			CheckID: "CIS-1.1.15", CISID: "1.1.15", Title: "t", Severity: "HIGH",
 			Status: engine.StatusPass, Resource: "PRJ/app", ResourceType: engine.ResourceRepository,

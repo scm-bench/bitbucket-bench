@@ -193,7 +193,7 @@ func (p *progressWriter) callback() func(string) {
 // used to decide on colour.
 //
 // os.DevNull is excluded by name because it is a character device too, so
-// `scm-bench scan > /dev/null` looked like a terminal: colour escapes were
+// `bitbucket-bench scan > /dev/null` looked like a terminal: colour escapes were
 // written into output that had been explicitly thrown away, and the compact
 // progress line drew carriage returns at a destination with no cursor. It
 // stays a hand-rolled check even though golang.org/x/term is now a dependency

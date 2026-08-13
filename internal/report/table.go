@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
 )
 
 // ANSI codes come from internal/console so the report and the scan trace cannot
@@ -127,13 +127,13 @@ func prose(w io.Writer, width int, prefix string, prefixWidth int, text string) 
 func writeHeader(w io.Writer, rep *engine.Report, p painter, width int) {
 	m := rep.Metadata
 	stamp := m.GeneratedAt.Format("2006-01-02 15:04:05 MST")
-	name := p.paint(ansiBold, "scm-bench")
+	name := p.paint(ansiBold, "bitbucket-bench")
 
-	if fits(width, "scm-bench %s  ·  %s  ·  %s", m.ToolVersion, m.BaseURL, stamp) {
+	if fits(width, "bitbucket-bench %s  ·  %s  ·  %s", m.ToolVersion, m.BaseURL, stamp) {
 		line(w, "%s %s  ·  %s  ·  %s", name, m.ToolVersion, m.BaseURL, stamp)
 		return
 	}
-	if fits(width, "scm-bench %s  ·  %s", m.ToolVersion, m.BaseURL) {
+	if fits(width, "bitbucket-bench %s  ·  %s", m.ToolVersion, m.BaseURL) {
 		line(w, "%s %s  ·  %s", name, m.ToolVersion, m.BaseURL)
 		line(w, "%s", p.paint(ansiDim, "scanned "+stamp))
 		return

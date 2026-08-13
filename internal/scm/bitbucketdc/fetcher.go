@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // Fetcher builds a normalized snapshot from a Bitbucket DC instance.
@@ -137,7 +137,7 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 	snapshot := &scm.Snapshot{
 		SchemaVersion: scm.SchemaVersion,
 		Metadata: scm.Metadata{
-			Tool:        "scm-bench",
+			Tool:        "bitbucket-bench",
 			ToolVersion: opts.ToolVersion,
 			Platform:    scm.PlatformBitbucketDC,
 			BaseURL:     f.client.BaseURL(),

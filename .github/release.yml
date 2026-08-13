@@ -39,7 +39,7 @@ changelog:
     - title: 💥 Breaking changes
       labels: [breaking-change]
 
-    # scm-bench specific, and deliberately near the top: a new or retuned
+    # bitbucket-bench specific, and deliberately near the top: a new or retuned
     # control changes what an unchanged instance scores, which is the thing
     # most likely to surprise someone after upgrading.
     - title: 🔍 Policy changes

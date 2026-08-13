@@ -13,7 +13,7 @@ func newVersionCommand() *cobra.Command {
 		Short: "Print version information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), "scm-bench %s\n", Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "bitbucket-bench %s\n", Version)
 			fmt.Fprintf(cmd.OutOrStdout(), "  commit: %s\n", Commit)
 			fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", Date)
 			fmt.Fprintf(cmd.OutOrStdout(), "  go:     %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)

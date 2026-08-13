@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/scm-bench/scm-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
 )
 
 // writeJSON emits the report as it stands.

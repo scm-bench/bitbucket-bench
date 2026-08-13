@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
-	"github.com/scm-bench/scm-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
 )
 
 // SARIF 2.1.0. Findings here are configuration facts about a repository rather
@@ -24,7 +24,7 @@ const (
 	// cosmetic: a validating consumer fetches it, and every report we emit
 	// carries the URL.
 	sarifSchema  = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
-	sarifInfoURI = "https://github.com/scm-bench/scm-bench"
+	sarifInfoURI = "https://github.com/scm-bench/bitbucket-bench"
 )
 
 type sarifLog struct {
@@ -150,7 +150,7 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 
 	run := sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
-			Name:           "scm-bench",
+			Name:           "bitbucket-bench",
 			Version:        opts.ToolVersion,
 			InformationURI: sarifInfoURI,
 			Rules:          ruleList,

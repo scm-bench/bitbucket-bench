@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scm-bench/scm-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
 )
 
 // The demo exists for the reader who has not configured anything yet, so it
@@ -207,7 +207,7 @@ func TestFirstRunPromptCollectsCredentials(t *testing.T) {
 func writeSavedInstance(t *testing.T, yaml string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 	if err := os.WriteFile(filepath.Join(dir, "instance.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write instance: %v", err)
 	}

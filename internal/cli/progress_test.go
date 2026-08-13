@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/scm-bench/scm-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
 )
 
 // A redirected stream has no cursor to move, so carriage returns would pile up
@@ -219,7 +219,7 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// os.DevNull is a character device, so `scm-bench scan > /dev/null` looked like
+// os.DevNull is a character device, so `bitbucket-bench scan > /dev/null` looked like
 // a terminal: colour escapes went into output that had been explicitly thrown
 // away, and the compact progress line drew carriage returns at a destination
 // with no cursor.

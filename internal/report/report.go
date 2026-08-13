@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/scm-bench/scm-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
 )
 
 // Output formats.

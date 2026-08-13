@@ -10,7 +10,7 @@ import (
 
 func TestSnapshotCachePathNamesTheHost(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 
 	path, err := SnapshotCachePath("https://Bitbucket.Example.com:7990/context")
 	if err != nil {
@@ -33,7 +33,7 @@ func TestSnapshotCachePathNamesTheHost(t *testing.T) {
 }
 
 func TestSnapshotCachePathSurvivesAnUnparseableURL(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	path, err := SnapshotCachePath("::not a url::")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestSnapshotCachePathSurvivesAnUnparseableURL(t *testing.T) {
 
 func TestLatestSnapshotCachePicksTheNewest(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 
 	// Before any scan there is nothing — not even the directory — and that
 	// is a "" answer, not an error.
@@ -90,7 +90,7 @@ func TestScanCacheSetting(t *testing.T) {
 		t.Error("the snapshot cache should default to on")
 	}
 
-	path := filepath.Join(t.TempDir(), "scm-bench.yaml")
+	path := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
 	if err := os.WriteFile(path, []byte("scan:\n  cache: false\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

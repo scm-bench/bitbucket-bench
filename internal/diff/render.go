@@ -6,9 +6,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/report"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/report"
 )
 
 // Options controls how a comparison is rendered.
@@ -65,7 +65,7 @@ func writeTable(w io.Writer, r *Result, opts Options) error {
 		width = console.Width()
 	}
 
-	line(w, "%s  %s", paint(c, ansiBold, "scm-bench diff"), paint(c, ansiDim, sideLabel(r)))
+	line(w, "%s  %s", paint(c, ansiBold, "bitbucket-bench diff"), paint(c, ansiDim, sideLabel(r)))
 	writeScoreLine(w, r, c)
 
 	sections := []struct {

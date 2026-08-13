@@ -61,7 +61,7 @@ result := {
 	not default_known
 } else := {
 	"status": "MANUAL",
-	"details": sprintf("The project grants %q by default, which is not listed in permissionRank, so it cannot be compared against the %q ceiling. Add it to permissionRank in scm-bench's config.", [granted, ceiling]),
+	"details": sprintf("The project grants %q by default, which is not listed in permissionRank, so it cannot be compared against the %q ceiling. Add it to permissionRank in bitbucket-bench's config.", [granted, ceiling]),
 	"evidence": [sprintf("unknown permission %q", [granted])],
 } if {
 	not granted_known

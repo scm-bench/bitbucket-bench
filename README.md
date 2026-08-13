@@ -14,25 +14,30 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/scm-bench/scm-bench/actions/workflows/ci.yml"><img src="https://github.com/scm-bench/scm-bench/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/scm-bench/scm-bench/releases"><img src="https://img.shields.io/github/v/release/scm-bench/scm-bench?include_prereleases&sort=semver" alt="Release"></a>
-  <a href="https://goreportcard.com/report/github.com/scm-bench/scm-bench"><img src="https://goreportcard.com/badge/github.com/scm-bench/scm-bench" alt="Go report card"></a>
-  <a href="https://pkg.go.dev/github.com/scm-bench/scm-bench"><img src="https://pkg.go.dev/badge/github.com/scm-bench/scm-bench.svg" alt="Go reference"></a>
+  <a href="https://github.com/scm-bench/bitbucket-bench/actions/workflows/ci.yml"><img src="https://github.com/scm-bench/bitbucket-bench/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/scm-bench/bitbucket-bench/releases"><img src="https://img.shields.io/github/v/release/scm-bench/bitbucket-bench?include_prereleases&sort=semver" alt="Release"></a>
+  <a href="https://goreportcard.com/report/github.com/scm-bench/bitbucket-bench"><img src="https://goreportcard.com/badge/github.com/scm-bench/bitbucket-bench" alt="Go report card"></a>
+  <a href="https://pkg.go.dev/github.com/scm-bench/bitbucket-bench"><img src="https://pkg.go.dev/badge/github.com/scm-bench/bitbucket-bench.svg" alt="Go reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0"></a>
 </p>
 
-Audit a source control platform against the **Source Code** section of the
+Audit **Bitbucket Data Center** against the **Source Code** section of the
 [CIS Software Supply Chain Security Guide](https://www.cisecurity.org/benchmark/software-supply-chain-security).
 
-scm-bench captures a **read-only** snapshot of your instance, evaluates it against
+bitbucket-bench captures a **read-only** snapshot of your instance, evaluates it against
 policies written in Rego, and tells you what is misconfigured — along with the exact
 settings path to fix it.
 
-**v0.1 targets Bitbucket Data Center**, the platform with the least tooling in this
-space. 15 controls are evaluated automatically; 5 more are carried as documented
-manual checks so the mapping is complete rather than quietly partial.
+**v0.1** covers the platform with the least tooling in this space. 15 controls are
+evaluated automatically; 5 more are carried as documented manual checks so the
+mapping is complete rather than quietly partial.
 
-[简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+This is the Bitbucket bench of [scm-bench](https://github.com/scm-bench/scm-bench),
+a family of tools that audit one platform each and report in the same shape. It is
+the reference implementation of the family's
+[bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md).
+
+[简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Spec](#the-specification-it-implements)
 
 ---
 
@@ -52,28 +57,28 @@ for "the API returned 403" teaches people to ignore its output.
 
 ## Install
 
-**Binary** — download from [releases](https://github.com/scm-bench/scm-bench/releases):
+**Binary** — download from [releases](https://github.com/scm-bench/bitbucket-bench/releases):
 
 ```bash
 # The archive name carries the version, so resolve the latest tag first.
-VERSION=$(curl -fsSL https://api.github.com/repos/scm-bench/scm-bench/releases/latest |
+VERSION=$(curl -fsSL https://api.github.com/repos/scm-bench/bitbucket-bench/releases/latest |
   sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
-curl -fsSL "https://github.com/scm-bench/scm-bench/releases/download/v${VERSION}/scm-bench_${VERSION}_linux_amd64.tar.gz" | tar xz
-./scm-bench version
+curl -fsSL "https://github.com/scm-bench/bitbucket-bench/releases/download/v${VERSION}/bitbucket-bench_${VERSION}_linux_amd64.tar.gz" | tar xz
+./bitbucket-bench version
 ```
 
 **Docker:**
 
 ```bash
-docker run --rm ghcr.io/scm-bench/scm-bench:latest \
+docker run --rm ghcr.io/scm-bench/bitbucket-bench:latest \
   scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
 ```
 
 **From source** (Go 1.25+; the build pins a patched toolchain and will fetch it):
 
 ```bash
-go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest
+go install github.com/scm-bench/bitbucket-bench/cmd/bitbucket-bench@latest
 ```
 
 ### Verifying what you downloaded
@@ -104,33 +109,33 @@ export BITBUCKET_URL=https://bitbucket.example.com
 export BITBUCKET_TOKEN=<read-only HTTP access token>
 
 # Scan everything
-scm-bench scan
+bitbucket-bench scan
 
 # Scan one project, or one repository
-scm-bench scan --project PLAT
-scm-bench scan --repository PLAT/payments-api
+bitbucket-bench scan --project PLAT
+bitbucket-bench scan --repository PLAT/payments-api
 
 # Machine-readable output
-scm-bench scan -o json  --output-file report.json
-scm-bench scan -o sarif --output-file report.sarif
+bitbucket-bench scan -o json  --output-file report.json
+bitbucket-bench scan -o sarif --output-file report.sarif
 ```
 
 No instance handy? A sample ships inside the binary, so the first report is one
 flag away:
 
 ```bash
-scm-bench scan --demo
+bitbucket-bench scan --demo
 ```
 
-Run `scm-bench scan` bare on a terminal and it offers the same choice
+Run `bitbucket-bench scan` bare on a terminal and it offers the same choice
 interactively: enter a URL and token, or see the sample first. The sample is
 also checked in as `examples/snapshot.json`, which `--snapshot-in` evaluates
 from a checkout.
 
 If you enter a URL and token, scan offers — it asks, it does not assume — to
 save them once they have proven to work, so later runs need nothing. They go
-to `instance.yaml` under your user config directory (`~/.config/scm-bench/` on
-Linux; `SCM_BENCH_CONFIG_DIR` overrides the location), mode `0600` since the
+to `instance.yaml` under your user config directory (`~/.config/bitbucket-bench/` on
+Linux; `BITBUCKET_BENCH_CONFIG_DIR` overrides the location), mode `0600` since the
 token is a live credential. A typed `--url` or an exported `BITBUCKET_URL`
 always wins over the file, and every scan that uses it says so on stderr.
 Delete the file to forget it.
@@ -234,7 +239,7 @@ the scan starts and exits `2`. Treating it like a missing permission would turn 
 mistyped token into a full report of `MANUAL` with a score of 0 — which looks
 like an audit result rather than a typo.
 
-scm-bench issues **only `GET` requests**. This is enforced by a test, not just by
+bitbucket-bench issues **only `GET` requests**. This is enforced by a test, not just by
 convention.
 
 ### Transport
@@ -290,8 +295,8 @@ excluded from the score:
 | 1.3.9 | Organization is verified | A hosted-SaaS concept with no self-hosted equivalent. Reported `NA`. |
 
 ```bash
-scm-bench list-checks          # all controls, with severity and scope
-scm-bench list-checks --json   # full metadata, including remediation text
+bitbucket-bench list-checks          # all controls, with severity and scope
+bitbucket-bench list-checks --json   # full metadata, including remediation text
 ```
 
 ---
@@ -324,7 +329,7 @@ of every resource, then one `Findings` table aggregated **by control** across
 the whole scan:
 
 ```
-scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
+bitbucket-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
 SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
       13 controls failed
@@ -408,7 +413,7 @@ Details: rerun with --details for per-resource findings and full remediation ste
 --details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
-That block is the real output of `scm-bench scan --snapshot-in examples/snapshot.json`
+That block is the real output of `bitbucket-bench scan --snapshot-in examples/snapshot.json`
 at `COLUMNS=100`, abbreviated only where a line is marked `...`.
 
 The summary leads because a terminal is read from its top. Two countings meet
@@ -448,9 +453,9 @@ passing values; a value that matches nothing is an error rather than a
 quietly clean-looking report. The remediation section narrows with the filter.
 
 ```bash
-scm-bench scan --details                      # every resource, every finding
-scm-bench scan --details=payments-api         # one repository's full verdict
-scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # two controls, wherever they land
+bitbucket-bench scan --details                      # every resource, every finding
+bitbucket-bench scan --details=payments-api         # one repository's full verdict
+bitbucket-bench scan --details=CIS-1.1.15,CIS-1.1.16  # two controls, wherever they land
 ```
 
 **`UNREAD` and `MANUAL` are both `MANUAL` underneath, split by cause.** `UNREAD`
@@ -491,9 +496,9 @@ redirected, or run with `NO_COLOR` set. `--details=<value>` filters the table;
 anything more surgical is a job for the JSON:
 
 ```bash
-scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
-scm-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
-scm-bench scan 2>&1 >/dev/null                  # what the scan itself had to say
+bitbucket-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
+bitbucket-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
+bitbucket-bench scan 2>&1 >/dev/null                  # what the scan itself had to say
 ```
 
 Lines on **stderr** — the request trace, the line explaining an exit code — still
@@ -544,23 +549,29 @@ thresholds, transport, concurrency, progress — live here too rather than in
 flags. Nothing is hard-coded in a policy.
 
 ```bash
-scm-bench init            # writes a commented scm-bench.yaml with every key
-scm-bench scan            # finds it in the working directory on its own
+bitbucket-bench init            # writes a commented bitbucket-bench.yaml with every key
+bitbucket-bench scan            # finds it in the working directory on its own
 ```
 
-Discovery order: `--config` when given, else `scm-bench.yaml` (or
-`.scm-bench.yaml`) in the working directory — the project's file, the one a
+Discovery order: `--config` when given, else `bitbucket-bench.yaml` (or
+`.bitbucket-bench.yaml`) in the working directory — the project's file, the one a
 repository commits for CI — else `config.yaml` under the user config directory
-(`SCM_BENCH_CONFIG_DIR`, or the platform default). A discovered file is named
+(`BITBUCKET_BENCH_CONFIG_DIR`, or the platform default). A discovered file is named
 on stderr, because a scan whose thresholds quietly came from a file is a scan
 whose exit code makes no sense. `init` refuses to overwrite an existing file.
+
+> **Upgrading from a `v0.1.0-rc` build.** These names changed with the tool's
+> own: `scm-bench.yaml` is now `bitbucket-bench.yaml`, `SCM_BENCH_CONFIG_DIR` is
+> now `BITBUCKET_BENCH_CONFIG_DIR`, and the user config directory moved from
+> `<config>/scm-bench` to `<config>/bitbucket-bench`. There is no fallback to the
+> old names — rename the file, or pass `--config` at it.
 
 For a one-off, `--set` overrides any config key without touching a file —
 `--set` beats the file, the file beats the defaults:
 
 ```bash
-scm-bench scan --set scan.failOn=none          # just this run
-scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+bitbucket-bench scan --set scan.failOn=none          # just this run
+bitbucket-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
 ```
 
 The value reads as YAML, so numbers, booleans, durations (`30s`) and flow
@@ -626,18 +637,18 @@ alone.
   # deferred to the last step.
   continue-on-error: true
   run: |
-    # scm-bench.yaml, committed to this repository, carries the thresholds:
+    # bitbucket-bench.yaml, committed to this repository, carries the thresholds:
     #   scan: { failOn: high, maxManual: 40 }
-    scm-bench scan \
+    bitbucket-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
-      --output sarif --output-file scm-bench.sarif
+      --output sarif --output-file bitbucket-bench.sarif
 
 - name: Upload to code scanning
   if: always()
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: scm-bench.sarif
+    sarif_file: bitbucket-bench.sarif
 
 - name: Fail the job if the audit did
   if: steps.audit.outcome == 'failure'
@@ -688,10 +699,10 @@ different times:
 
 ```bash
 # On a runner that can reach Bitbucket and holds the token
-scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
+bitbucket-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
 # Anywhere, later — no credentials, no network; the default failOn: high applies
-scm-bench scan --snapshot-in snapshot.json -o sarif
+bitbucket-bench scan --snapshot-in snapshot.json -o sarif
 ```
 
 Re-running policies over an archived snapshot also shows how a decision would have
@@ -715,9 +726,9 @@ file per instance host, in `cache/` under the user config directory), and
 `--last` re-renders the most recent one:
 
 ```bash
-scm-bench scan                     # the overview; the snapshot is kept on the way out
-scm-bench scan --last --details    # expand it, without touching the instance
-scm-bench scan --last -o json      # or re-ask in another format
+bitbucket-bench scan                     # the overview; the snapshot is kept on the way out
+bitbucket-bench scan --last --details    # expand it, without touching the instance
+bitbucket-bench scan --last -o json      # or re-ask in another format
 ```
 
 A `--last` run says on stderr which instance the snapshot came from and how
@@ -740,11 +751,11 @@ A score is a trend line, and a trend needs two points. `diff` compares two
 snapshots and reports what moved:
 
 ```bash
-scm-bench diff last-week.json today.json
+bitbucket-bench diff last-week.json today.json
 ```
 
 ```
-scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
 SCORE  53 → 31   (-22)
        weighted 29/55 → 25/80
 
@@ -803,8 +814,8 @@ pipeline for that would blame the instance for the scan's own blind spot.
 In CI, keep the previous snapshot as an artifact and compare against it:
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
-scm-bench diff baseline.json today.json
+bitbucket-bench scan --snapshot-out today.json -o json --set scan.failOn=none
+bitbucket-bench diff baseline.json today.json
 ```
 
 Comparing snapshots from two different instances is refused unless
@@ -833,15 +844,39 @@ two test suites and how to cut a release are all in
 
 ---
 
+## The specification it implements
+
+The shape of everything above — the four statuses, the rule that an unevaluable
+control reports `MANUAL`, the `metadata.json` fields, the scoring formula, the
+snapshot schema, the SARIF fingerprint — is specified in
+[scm-bench](https://github.com/scm-bench/scm-bench), the family's umbrella
+repository. Nothing is imported from it at build time; it is a specification, not
+a library, and this repository stays self-contained.
+
+| Document | What it fixes |
+| --- | --- |
+| [bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md) | The parts every bench shares, whatever it audits. |
+| [SCM snapshot schema](https://github.com/scm-bench/scm-bench/blob/main/docs/scm-snapshot.md) | The `snapshot.json` shape, shared with the other benches that audit source control. |
+| [config conventions](https://github.com/scm-bench/scm-bench/blob/main/docs/config-conventions.md) | Where the config file is found and how its keys merge. |
+
+Reading them is optional to *use* this tool and worth it before *changing* it:
+a verdict here has to mean the same as a verdict from any other bench, and that
+is where what it means is written down.
+
+---
+
 ## Roadmap
 
 **v0.2** — CIS 1.2.2 (repository creation limits, once the Project Creator
 interpretation is settled), default reviewers as a partial CIS-1.1.6 signal,
 and per-project policy overrides.
 
-**Later** — GitHub Enterprise and GitLab fetchers. The snapshot schema is already
-platform-neutral, and controls declare which platforms they apply to, so this is
-mostly a matter of writing another fetcher.
+**Elsewhere** — other platforms are their own repositories now, not fetchers
+added here: [azure-devops-bench](https://github.com/scm-bench/azure-devops-bench)
+next, then [jenkins-bench](https://github.com/scm-bench/jenkins-bench). The
+snapshot schema is platform-neutral and controls declare which platforms they
+apply to, so a control written here can be inherited by another bench in the SCM
+domain rather than rewritten.
 
 ---
 
