@@ -37,7 +37,14 @@ jobs:
 
       - name: Collect the URLs the tool hands to users
         run: |
+          # Tests are excluded because their URLs are fixtures, not references.
+          # `https://confluence.atlassian.com/x` is a stand-in in a table that
+          # asserts a vendor page outranks the CIS one; it is not a page and was
+          # never meant to resolve. Sweeping it in failed the job for a reason
+          # no reader of a report could ever encounter — which is the failure
+          # mode this job exists to avoid, pointed at itself.
           grep -rhoE 'https://[^"[:space:]]+' \
+            --exclude='*_test.go' --exclude='*_test.rego' \
             internal/checks/policies internal/report \
             | sed 's/[.,)]*$//' \
             | grep -vE 'example\.(com|invalid)' \
