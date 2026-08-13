@@ -7,7 +7,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="bitbucket-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
@@ -20,15 +20,20 @@
 </p>
 
 依据 [CIS 软件供应链安全指南](https://www.cisecurity.org/benchmark/software-supply-chain-security)
-的 **Source Code** 章节审计源代码管理平台。
+的 **Source Code** 章节审计 **Bitbucket Data Center**。
 
 bitbucket-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略进行判定，然后告诉你哪里配置有问题
 ——并给出修复所需的确切设置路径。
 
-**v0.1 面向 Bitbucket Data Center**，这是该领域工具最少的平台。15 条规则自动判定；另有 5 条
-以「明确记录的人工检查」形式保留，使映射关系完整，而不是悄悄地只做一半。
+**v0.1** 覆盖的正是该领域工具最少的平台。15 条规则自动判定；另有 5 条以「明确记录的人工检查」
+形式保留，使映射关系完整，而不是悄悄地只做一半。
 
-[English](README.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
+本仓库是 [scm-bench](https://github.com/scm-bench/scm-bench) 家族中负责 Bitbucket 的那一个。
+家族里每个工具审计一个平台，并以同样的形态输出报告；本仓库是家族
+[bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md)
+的参考实现。
+
+[English](README.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md) · [遵循的规范](#遵循的规范)
 
 ---
 
@@ -476,6 +481,11 @@ bitbucket-bench scan            # 自动在工作目录里找到它
 stderr 上点名——阈值悄悄来自某个文件的扫描，其退出码是无法解释的。`init` 不会覆盖
 已存在的文件。
 
+> **从 `v0.1.0-rc` 版本升级。** 这些名字随工具一起改了：`scm-bench.yaml` 变为
+> `bitbucket-bench.yaml`，`SCM_BENCH_CONFIG_DIR` 变为 `BITBUCKET_BENCH_CONFIG_DIR`，
+> 用户配置目录从 `<config>/scm-bench` 移到 `<config>/bitbucket-bench`。不保留对旧名字的
+> 兼容——请重命名文件，或用 `--config` 直接指定。
+
 一次性的改动用 `--set`，不用碰任何文件——优先级 `--set` > 文件 > 默认值：
 
 ```bash
@@ -716,13 +726,34 @@ Bitbucket REST  ──►   fetcher   ──►  snapshot.json  ──►   Rego
 
 ---
 
+## 遵循的规范
+
+上面这一切的形态——四种状态、无法判定就报 `MANUAL` 的铁律、`metadata.json` 的字段、
+评分公式、快照 schema、SARIF 指纹键——都写在家族的伞形仓库
+[scm-bench](https://github.com/scm-bench/scm-bench) 里。构建期不会从它引入任何东西：
+那是规范，不是库，本仓库依然是自包含的。
+
+| 文档 | 约定了什么 |
+| --- | --- |
+| [bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md) | 所有 bench 共通的部分，无论审计什么平台 |
+| [SCM 快照 schema](https://github.com/scm-bench/scm-bench/blob/main/docs/scm-snapshot.md) | `snapshot.json` 的结构，与其他审计源代码管理平台的 bench 共享 |
+| [配置约定](https://github.com/scm-bench/scm-bench/blob/main/docs/config-conventions.md) | 配置文件如何被发现、各项如何合并 |
+
+规范文档只有英文版。**用**这个工具不需要读它们，**改**这个工具之前值得读一遍：
+这里的一个判定必须与任何其他 bench 的判定含义相同，而含义就写在那里。
+
+---
+
 ## 路线图
 
 **v0.2** —— CIS 1.2.2（仓库创建限制，待 Project Creator 判定口径确定后）、
 把 default reviewers 作为 CIS-1.1.6 的部分信号、项目级策略覆盖。
 
-**之后** —— GitHub Enterprise 与 GitLab 的 fetcher。快照 schema 本就是平台中立的，
-规则也声明了适用平台，所以这基本只是「再写一个 fetcher」的工作量。
+**在别处** —— 其他平台现在是各自独立的仓库，而不是往这里加 fetcher：先是
+[azure-devops-bench](https://github.com/scm-bench/azure-devops-bench)，然后是
+[jenkins-bench](https://github.com/scm-bench/jenkins-bench)。快照 schema 本就是平台中立的，
+规则也声明了适用平台，因此这里写的一条规则可以被 SCM 领域的另一个 bench 直接继承，
+而不必重写。
 
 ---
 

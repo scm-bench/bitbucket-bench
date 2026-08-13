@@ -9,7 +9,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="bitbucket-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
@@ -21,18 +21,23 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0"></a>
 </p>
 
-Audit a source control platform against the **Source Code** section of the
+Audit **Bitbucket Data Center** against the **Source Code** section of the
 [CIS Software Supply Chain Security Guide](https://www.cisecurity.org/benchmark/software-supply-chain-security).
 
 bitbucket-bench captures a **read-only** snapshot of your instance, evaluates it against
 policies written in Rego, and tells you what is misconfigured — along with the exact
 settings path to fix it.
 
-**v0.1 targets Bitbucket Data Center**, the platform with the least tooling in this
-space. 15 controls are evaluated automatically; 5 more are carried as documented
-manual checks so the mapping is complete rather than quietly partial.
+**v0.1** covers the platform with the least tooling in this space. 15 controls are
+evaluated automatically; 5 more are carried as documented manual checks so the
+mapping is complete rather than quietly partial.
 
-[简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+This is the Bitbucket bench of [scm-bench](https://github.com/scm-bench/scm-bench),
+a family of tools that audit one platform each and report in the same shape. It is
+the reference implementation of the family's
+[bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md).
+
+[简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Spec](#the-specification-it-implements)
 
 ---
 
@@ -555,6 +560,12 @@ repository commits for CI — else `config.yaml` under the user config directory
 on stderr, because a scan whose thresholds quietly came from a file is a scan
 whose exit code makes no sense. `init` refuses to overwrite an existing file.
 
+> **Upgrading from a `v0.1.0-rc` build.** These names changed with the tool's
+> own: `scm-bench.yaml` is now `bitbucket-bench.yaml`, `SCM_BENCH_CONFIG_DIR` is
+> now `BITBUCKET_BENCH_CONFIG_DIR`, and the user config directory moved from
+> `<config>/scm-bench` to `<config>/bitbucket-bench`. There is no fallback to the
+> old names — rename the file, or pass `--config` at it.
+
 For a one-off, `--set` overrides any config key without touching a file —
 `--set` beats the file, the file beats the defaults:
 
@@ -833,15 +844,39 @@ two test suites and how to cut a release are all in
 
 ---
 
+## The specification it implements
+
+The shape of everything above — the four statuses, the rule that an unevaluable
+control reports `MANUAL`, the `metadata.json` fields, the scoring formula, the
+snapshot schema, the SARIF fingerprint — is specified in
+[scm-bench](https://github.com/scm-bench/scm-bench), the family's umbrella
+repository. Nothing is imported from it at build time; it is a specification, not
+a library, and this repository stays self-contained.
+
+| Document | What it fixes |
+| --- | --- |
+| [bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md) | The parts every bench shares, whatever it audits. |
+| [SCM snapshot schema](https://github.com/scm-bench/scm-bench/blob/main/docs/scm-snapshot.md) | The `snapshot.json` shape, shared with the other benches that audit source control. |
+| [config conventions](https://github.com/scm-bench/scm-bench/blob/main/docs/config-conventions.md) | Where the config file is found and how its keys merge. |
+
+Reading them is optional to *use* this tool and worth it before *changing* it:
+a verdict here has to mean the same as a verdict from any other bench, and that
+is where what it means is written down.
+
+---
+
 ## Roadmap
 
 **v0.2** — CIS 1.2.2 (repository creation limits, once the Project Creator
 interpretation is settled), default reviewers as a partial CIS-1.1.6 signal,
 and per-project policy overrides.
 
-**Later** — GitHub Enterprise and GitLab fetchers. The snapshot schema is already
-platform-neutral, and controls declare which platforms they apply to, so this is
-mostly a matter of writing another fetcher.
+**Elsewhere** — other platforms are their own repositories now, not fetchers
+added here: [azure-devops-bench](https://github.com/scm-bench/azure-devops-bench)
+next, then [jenkins-bench](https://github.com/scm-bench/jenkins-bench). The
+snapshot schema is platform-neutral and controls declare which platforms they
+apply to, so a control written here can be inherited by another bench in the SCM
+domain rather than rewritten.
 
 ---
 

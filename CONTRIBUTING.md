@@ -5,6 +5,12 @@ control that fires wrongly against a real Bitbucket instance, or remediation
 text that does not match what the UI actually says, is worth more than a
 refactor.
 
+This document is how the work is done *here*. What a verdict, a `metadata.json`
+and a score are *required* to mean is specified once for the whole family, in
+[scm-bench](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md).
+The two agree; where a change would make them disagree, the specification is the
+one that has to move first, because the other benches read it too.
+
 ## Getting set up
 
 ```bash
@@ -115,6 +121,13 @@ Both must name a concrete place — a settings path, a file to add, or an explic
 statement that nothing applies. `TestRemediationSaysWhereToAct` enforces it.
 Vague remediation is worse than none: it wastes the reader's time before they
 discover it does not help.
+
+The full field list is the family's, not this repository's: it is specified in
+[the bench contract](https://github.com/scm-bench/scm-bench/blob/main/docs/bench-contract.md#5-metadatajson),
+with a JSON Schema at
+[`schemas/metadata.schema.json`](https://github.com/scm-bench/scm-bench/blob/main/schemas/metadata.schema.json)
+you can validate a new file against before opening a pull request. `Load` in
+`internal/checks/registry.go` enforces the same rules at startup.
 
 Then add the control to the coverage table in both READMEs.
 
