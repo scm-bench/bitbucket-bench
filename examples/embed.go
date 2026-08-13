@@ -3,7 +3,7 @@
 // snapshot.json began as a file this repository carries for people with no
 // instance to test against — but a file in a git checkout helps nobody who
 // installed a release binary, which is exactly the person who has not seen a
-// report yet. Embedding it is what lets `scm-bench scan --demo` (and the
+// report yet. Embedding it is what lets `bitbucket-bench scan --demo` (and the
 // first-run menu behind it) work with nothing on disk.
 //
 // The file stays checked in here rather than moving next to the CLI, because

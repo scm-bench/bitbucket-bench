@@ -11,12 +11,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/scm/bitbucketdc"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/scm/bitbucketdc"
 )
 
 // ANSI codes and the tag vocabulary come from internal/console, so the trace on
-// stderr and the report on stdout stay one scheme. `scm-bench scan 2>&1 | grep
+// stderr and the report on stdout stay one scheme. `bitbucket-bench scan 2>&1 | grep
 // '^\[WARN\]'` only answers "what did this scan fail to see" if both streams
 // use the same words.
 const (

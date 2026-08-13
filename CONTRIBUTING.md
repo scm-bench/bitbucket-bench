@@ -8,8 +8,8 @@ refactor.
 ## Getting set up
 
 ```bash
-git clone https://github.com/scm-bench/scm-bench
-cd scm-bench
+git clone https://github.com/scm-bench/bitbucket-bench
+cd bitbucket-bench
 
 make check      # gofmt, vet, race-enabled tests, Rego compile + policy tests
 make policy     # just the Rego: compile, unit tests, coverage
@@ -26,7 +26,7 @@ is no code generation step.
 No instance to test against? Everything except the fetcher runs offline:
 
 ```bash
-./bin/scm-bench scan --snapshot-in examples/snapshot.json
+./bin/bitbucket-bench scan --snapshot-in examples/snapshot.json
 ```
 
 ## The one rule that matters
@@ -51,7 +51,7 @@ internal/
                         metadata.json
   engine/               compiles the bundle once, evaluates, scores
   report/               table, json, sarif
-  diff/                 compares two evaluations; backs `scm-bench diff`
+  diff/                 compares two evaluations; backs `bitbucket-bench diff`
   config/               thresholds handed to Rego as input.config
   cli/                  flags, exit codes, the scan trace
   console/              the table renderer both reports draw with, plus the
@@ -143,7 +143,7 @@ Push a tag, or run the **Release** workflow from the Actions tab and give it the
 tag to create. The workflow does the rest.
 
 ```bash
-git tag -a v0.1.0 -m "scm-bench v0.1.0" && git push origin v0.1.0
+git tag -a v0.1.0 -m "bitbucket-bench v0.1.0" && git push origin v0.1.0
 ```
 
 Three things that have each gone wrong once:

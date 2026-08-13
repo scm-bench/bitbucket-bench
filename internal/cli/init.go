@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scm-bench/scm-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
 )
 
 // configTemplate is the file init writes. Every key is present with its
@@ -14,14 +14,14 @@ import (
 // configured — a template that only shows two keys teaches two keys. Values
 // match config.Default(); TestInitTemplateMatchesTheDefaults holds them
 // together.
-const configTemplate = `# scm-bench configuration.
+const configTemplate = `# bitbucket-bench configuration.
 #
-# scan finds this file on its own: scm-bench.yaml (or .scm-bench.yaml) in the
+# scan finds this file on its own: bitbucket-bench.yaml (or .bitbucket-bench.yaml) in the
 # working directory first, then config.yaml in the user config directory
-# (SCM_BENCH_CONFIG_DIR, or the platform default). --config overrides the
+# (BITBUCKET_BENCH_CONFIG_DIR, or the platform default). --config overrides the
 # search. Every key is optional; an absent key keeps the default shown here.
 # A single run can override any key without touching the file:
-#   scm-bench scan --set scan.failOn=none
+#   bitbucket-bench scan --set scan.failOn=none
 
 # Settings that describe the deployment rather than any one run.
 scan:
@@ -91,7 +91,7 @@ func newInitCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Write a commented scm-bench.yaml into the working directory",
+		Short: "Write a commented bitbucket-bench.yaml into the working directory",
 		Long: `Init writes a configuration template with every key present, commented, and
 set to its default, so the file doubles as the documentation of what can be
 configured. scan discovers it in the working directory without --config.
@@ -125,6 +125,6 @@ judges an instance is not something a scaffolding command should replace.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&path, "path", "scm-bench.yaml", "where to write the template")
+	cmd.Flags().StringVar(&path, "path", "bitbucket-bench.yaml", "where to write the template")
 	return cmd
 }

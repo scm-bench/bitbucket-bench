@@ -1,15 +1,15 @@
 version: 2
 
-project_name: scm-bench
+project_name: bitbucket-bench
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: scm-bench
-    main: ./cmd/scm-bench
-    binary: scm-bench
+  - id: bitbucket-bench
+    main: ./cmd/bitbucket-bench
+    binary: bitbucket-bench
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
@@ -18,13 +18,13 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/scm-bench/scm-bench/internal/cli.Version={{ .Version }}
-      - -X github.com/scm-bench/scm-bench/internal/cli.Commit={{ .FullCommit }}
-      - -X github.com/scm-bench/scm-bench/internal/cli.Date={{ .Date }}
+      - -X github.com/scm-bench/bitbucket-bench/internal/cli.Version={{ .Version }}
+      - -X github.com/scm-bench/bitbucket-bench/internal/cli.Commit={{ .FullCommit }}
+      - -X github.com/scm-bench/bitbucket-bench/internal/cli.Date={{ .Date }}
 
 archives:
-  - id: scm-bench
-    ids: [scm-bench]
+  - id: bitbucket-bench
+    ids: [bitbucket-bench]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     formats: [tar.gz]
@@ -90,7 +90,7 @@ signs:
       - "${artifact}"
       - "--yes"
 
-# The manifest is what `docker pull ghcr.io/scm-bench/scm-bench:0.1.0` resolves
+# The manifest is what `docker pull ghcr.io/scm-bench/bitbucket-bench:0.1.0` resolves
 # to, so that is what carries the signature. A release candidate leaves the
 # :latest manifest unpushed (skip_push: auto), and goreleaser only signs
 # artifacts it actually published.
@@ -131,14 +131,14 @@ changelog:
 # to copy. That contract needs an actual image build to verify, so it should be
 # migrated in a change where the release workflow runs end to end.
 dockers:
-  - id: scm-bench-amd64
-    ids: [scm-bench]
+  - id: bitbucket-bench-amd64
+    ids: [bitbucket-bench]
     goos: linux
     goarch: amd64
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-amd64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-amd64"
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
@@ -149,14 +149,14 @@ dockers:
       - "--label=org.opencontainers.image.source={{ .GitURL }}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
-  - id: scm-bench-arm64
-    ids: [scm-bench]
+  - id: bitbucket-bench-arm64
+    ids: [bitbucket-bench]
     goos: linux
     goarch: arm64
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-arm64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-arm64"
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
@@ -171,15 +171,15 @@ docker_manifests:
   # Both manifests point at the same per-architecture images; a manifest does
   # not need its own set of tags, so there are no separate latest-amd64 /
   # latest-arm64 images to keep in step.
-  - name_template: "ghcr.io/scm-bench/scm-bench:{{ .Version }}"
+  - name_template: "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}"
     image_templates:
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-amd64"
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-arm64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-amd64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-arm64"
 
-  - name_template: "ghcr.io/scm-bench/scm-bench:latest"
+  - name_template: "ghcr.io/scm-bench/bitbucket-bench:latest"
     image_templates:
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-amd64"
-      - "ghcr.io/scm-bench/scm-bench:{{ .Version }}-arm64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-amd64"
+      - "ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}-arm64"
     # "auto" skips this manifest when the tag carries a prerelease part, so a
     # release candidate never becomes what `docker pull` returns by default.
     # Go's @latest already excludes prereleases; Docker has no such notion, so
@@ -202,12 +202,12 @@ release:
   # deliberately absent: a prerelease never becomes it (skip_push: auto below),
   # so naming it here would hand someone the wrong image.
   header: |
-    `scm-bench` audits a source control platform against the Source Code section
+    `bitbucket-bench` audits a source control platform against the Source Code section
     of the CIS Software Supply Chain Security Guide.
 
     ```bash
-    go install github.com/scm-bench/scm-bench/cmd/scm-bench@{{ .Tag }}
-    docker pull ghcr.io/scm-bench/scm-bench:{{ .Version }}
+    go install github.com/scm-bench/bitbucket-bench/cmd/bitbucket-bench@{{ .Tag }}
+    docker pull ghcr.io/scm-bench/bitbucket-bench:{{ .Version }}
     ```
   footer: |
     ## Verifying
@@ -220,16 +220,16 @@ release:
 
     # 2. the checksum file came from this repository's release workflow
     cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
-      --certificate-identity-regexp '^https://github\.com/scm-bench/scm-bench/\.github/workflows/release\.yml@' \
+      --certificate-identity-regexp '^https://github\.com/scm-bench/bitbucket-bench/\.github/workflows/release\.yml@' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     # 3. the container image, same signing identity
-    cosign verify ghcr.io/scm-bench/scm-bench:{{ .Version }} \
-      --certificate-identity-regexp '^https://github\.com/scm-bench/scm-bench/\.github/workflows/release\.yml@' \
+    cosign verify ghcr.io/scm-bench/bitbucket-bench:{{ .Version }} \
+      --certificate-identity-regexp '^https://github\.com/scm-bench/bitbucket-bench/\.github/workflows/release\.yml@' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     # 4. what commit and workflow built an archive
-    gh attestation verify scm-bench_{{ .Version }}_linux_amd64.tar.gz --repo scm-bench/scm-bench
+    gh attestation verify bitbucket-bench_{{ .Version }}_linux_amd64.tar.gz --repo scm-bench/bitbucket-bench
     ```
 
     The two `--certificate-*` flags are the point of the cosign commands: without

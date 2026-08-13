@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/diff"
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/report"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/diff"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/report"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 type diffOptions struct {

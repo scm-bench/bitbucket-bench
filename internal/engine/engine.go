@@ -13,9 +13,9 @@ import (
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // Status is the outcome of one control against one resource.
@@ -166,7 +166,7 @@ func validateSelection(cfg config.Config, bundle *checks.Bundle) error {
 		return nil
 	}
 	sort.Strings(unknown)
-	return fmt.Errorf("unknown check ID(s) in include/exclude: %s; run `scm-bench list-checks` for the %d valid IDs",
+	return fmt.Errorf("unknown check ID(s) in include/exclude: %s; run `bitbucket-bench list-checks` for the %d valid IDs",
 		strings.Join(unknown, ", "), len(bundle.Checks))
 }
 

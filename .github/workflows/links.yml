@@ -63,7 +63,7 @@ jobs:
             code=$(curl -sSL -o /dev/null -w '%{http_code}' \
                      --retry 3 --retry-delay 2 --retry-all-errors \
                      --max-time 30 \
-                     -A 'scm-bench-link-check (+https://github.com/scm-bench/scm-bench)' \
+                     -A 'bitbucket-bench-link-check (+https://github.com/scm-bench/bitbucket-bench)' \
                      "$url" || echo 000)
 
             case "$code" in

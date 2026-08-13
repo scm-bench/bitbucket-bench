@@ -9,13 +9,13 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/scm-bench/scm-bench/examples"
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/examples"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
-// This file is what `scm-bench scan` does before it has an instance to scan.
+// This file is what `bitbucket-bench scan` does before it has an instance to scan.
 //
 // A pipeline with nothing configured gets an error that lists every way out —
 // that is errNoInstance. A person at a terminal gets a menu instead, because
@@ -40,9 +40,9 @@ func demoSnapshot() (*scm.Snapshot, error) {
 // between them yet.
 func errNoInstance() error {
 	return errors.New(`no instance configured: pass --url, or set BITBUCKET_URL
-  scan an instance:        scm-bench scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
-  see a sample report:     scm-bench scan --demo
-  evaluate a saved file:   scm-bench scan --snapshot-in snapshot.json`)
+  scan an instance:        bitbucket-bench scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
+  see a sample report:     bitbucket-bench scan --demo
+  evaluate a saved file:   bitbucket-bench scan --snapshot-in snapshot.json`)
 }
 
 // firstRunResult is what the menu settled on: the demo, or an instance —

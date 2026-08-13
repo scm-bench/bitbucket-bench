@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scm-bench/scm-bench/internal/checks"
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/checks"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // evaluate runs the whole bundle against a snapshot and indexes the results by
@@ -69,7 +69,7 @@ func snapshotWith(repos []scm.Repository, org scm.Organization) *scm.Snapshot {
 	return &scm.Snapshot{
 		SchemaVersion: scm.SchemaVersion,
 		Metadata: scm.Metadata{
-			Tool:        "scm-bench",
+			Tool:        "bitbucket-bench",
 			Platform:    scm.PlatformBitbucketDC,
 			BaseURL:     "https://bitbucket.example.com",
 			GeneratedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),

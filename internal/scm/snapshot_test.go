@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scm-bench/scm-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
 
 // The JSON field names are the contract between the fetcher and every rule.
@@ -78,7 +78,7 @@ func TestSnapshotRoundTrips(t *testing.T) {
 	original := scm.Snapshot{
 		SchemaVersion: scm.SchemaVersion,
 		Metadata: scm.Metadata{
-			Tool: "scm-bench", Platform: scm.PlatformBitbucketDC,
+			Tool: "bitbucket-bench", Platform: scm.PlatformBitbucketDC,
 			BaseURL: "https://bitbucket.example.com", Warnings: []string{"a group could not be expanded"},
 		},
 		Organization: scm.Organization{

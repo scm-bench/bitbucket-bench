@@ -7,22 +7,22 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="bitbucket-bench — audit source control against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/scm-bench/scm-bench/actions/workflows/ci.yml"><img src="https://github.com/scm-bench/scm-bench/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/scm-bench/scm-bench/releases"><img src="https://img.shields.io/github/v/release/scm-bench/scm-bench?include_prereleases&sort=semver" alt="Release"></a>
-  <a href="https://goreportcard.com/report/github.com/scm-bench/scm-bench"><img src="https://goreportcard.com/badge/github.com/scm-bench/scm-bench" alt="Go report card"></a>
-  <a href="https://pkg.go.dev/github.com/scm-bench/scm-bench"><img src="https://pkg.go.dev/badge/github.com/scm-bench/scm-bench.svg" alt="Go reference"></a>
+  <a href="https://github.com/scm-bench/bitbucket-bench/actions/workflows/ci.yml"><img src="https://github.com/scm-bench/bitbucket-bench/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/scm-bench/bitbucket-bench/releases"><img src="https://img.shields.io/github/v/release/scm-bench/bitbucket-bench?include_prereleases&sort=semver" alt="Release"></a>
+  <a href="https://goreportcard.com/report/github.com/scm-bench/bitbucket-bench"><img src="https://goreportcard.com/badge/github.com/scm-bench/bitbucket-bench" alt="Go report card"></a>
+  <a href="https://pkg.go.dev/github.com/scm-bench/bitbucket-bench"><img src="https://pkg.go.dev/badge/github.com/scm-bench/bitbucket-bench.svg" alt="Go reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0"></a>
 </p>
 
 依据 [CIS 软件供应链安全指南](https://www.cisecurity.org/benchmark/software-supply-chain-security)
 的 **Source Code** 章节审计源代码管理平台。
 
-scm-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略进行判定，然后告诉你哪里配置有问题
+bitbucket-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略进行判定，然后告诉你哪里配置有问题
 ——并给出修复所需的确切设置路径。
 
 **v0.1 面向 Bitbucket Data Center**，这是该领域工具最少的平台。15 条规则自动判定；另有 5 条
@@ -46,28 +46,28 @@ scm-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略进行
 
 ## 安装
 
-**二进制** —— 从 [releases](https://github.com/scm-bench/scm-bench/releases) 下载：
+**二进制** —— 从 [releases](https://github.com/scm-bench/bitbucket-bench/releases) 下载：
 
 ```bash
 # 压缩包名里带版本号，所以先取最新的 tag。
-VERSION=$(curl -fsSL https://api.github.com/repos/scm-bench/scm-bench/releases/latest |
+VERSION=$(curl -fsSL https://api.github.com/repos/scm-bench/bitbucket-bench/releases/latest |
   sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
-curl -fsSL "https://github.com/scm-bench/scm-bench/releases/download/v${VERSION}/scm-bench_${VERSION}_linux_amd64.tar.gz" | tar xz
-./scm-bench version
+curl -fsSL "https://github.com/scm-bench/bitbucket-bench/releases/download/v${VERSION}/bitbucket-bench_${VERSION}_linux_amd64.tar.gz" | tar xz
+./bitbucket-bench version
 ```
 
 **Docker：**
 
 ```bash
-docker run --rm ghcr.io/scm-bench/scm-bench:latest \
+docker run --rm ghcr.io/scm-bench/bitbucket-bench:latest \
   scan --url https://bitbucket.example.com --token "$BITBUCKET_TOKEN"
 ```
 
 **从源码构建**（Go 1.25+；构建会固定到一个已打补丁的 toolchain 并自动获取）：
 
 ```bash
-go install github.com/scm-bench/scm-bench/cmd/scm-bench@latest
+go install github.com/scm-bench/bitbucket-bench/cmd/bitbucket-bench@latest
 ```
 
 ### 校验下载的产物
@@ -93,15 +93,15 @@ export BITBUCKET_URL=https://bitbucket.example.com
 export BITBUCKET_TOKEN=<只读 HTTP access token>
 
 # 全量扫描
-scm-bench scan
+bitbucket-bench scan
 
 # 只扫某个项目 / 某个仓库
-scm-bench scan --project PLAT
-scm-bench scan --repository PLAT/payments-api
+bitbucket-bench scan --project PLAT
+bitbucket-bench scan --repository PLAT/payments-api
 
 # 机器可读输出
-scm-bench scan -o json  --output-file report.json
-scm-bench scan -o sarif --output-file report.sarif
+bitbucket-bench scan -o json  --output-file report.json
+bitbucket-bench scan -o sarif --output-file report.sarif
 ```
 
 > 工具输出只有英文。文档是双语的，维护者也并非都以英语为母语，所以这是一个决定而非疏漏：
@@ -111,16 +111,16 @@ scm-bench scan -o sarif --output-file report.sarif
 手边没有实例？二进制里内置了样例，一个参数就能看到第一份报告：
 
 ```bash
-scm-bench scan --demo
+bitbucket-bench scan --demo
 ```
 
-在终端里什么都不配置直接运行 `scm-bench scan`，它会交互式地给出同样的选择：现在输入
+在终端里什么都不配置直接运行 `bitbucket-bench scan`，它会交互式地给出同样的选择：现在输入
 URL 和 token，或者先看样例。样例同时以 `examples/snapshot.json` 的形式存在仓库里，
 从源码检出运行时也可以用 `--snapshot-in` 评估它。
 
 如果你选择输入 URL 和 token，scan 会**询问**（而不是自作主张）是否在它们被验证可用
 之后保存下来，让之后的扫描什么都不用再输。保存位置是用户配置目录下的
-`instance.yaml`（Linux 上是 `~/.config/scm-bench/`；`SCM_BENCH_CONFIG_DIR` 可改写
+`instance.yaml`（Linux 上是 `~/.config/bitbucket-bench/`；`BITBUCKET_BENCH_CONFIG_DIR` 可改写
 位置），权限 `0600`——token 是一份活的凭据。手敲的 `--url` 或导出的 `BITBUCKET_URL`
 永远优先于这个文件，并且每次用到它的扫描都会在 stderr 上说明。删掉文件即忘记。
 
@@ -207,7 +207,7 @@ basic auth（`--username` / `--password`，或 `BITBUCKET_USERNAME` / `BITBUCKET
 但**凭据被实例拒绝**是另一回事：这会在扫描开始前检出并以 `2` 退出。若把它当成「权限不足」，
 一个打错的 token 就会产出满屏 `MANUAL`、得分 0 的完整报告——看起来像审计结论，其实只是拼写错误。
 
-scm-bench **只发 `GET` 请求**。这一点由测试强制保证，不只是靠约定。
+bitbucket-bench **只发 `GET` 请求**。这一点由测试强制保证，不只是靠约定。
 
 ### 传输
 
@@ -257,8 +257,8 @@ scm-bench **只发 `GET` 请求**。这一点由测试强制保证，不只是�
 | 1.3.9 | 组织 Verified 徽章 | 托管 SaaS 概念，自建实例无对应物，输出 `NA`。 |
 
 ```bash
-scm-bench list-checks          # 全部规则，含严重度与作用域
-scm-bench list-checks --json   # 完整元数据，含修复文案
+bitbucket-bench list-checks          # 全部规则，含严重度与作用域
+bitbucket-bench list-checks --json   # 完整元数据，含修复文案
 ```
 
 ---
@@ -287,7 +287,7 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 再是一张**按规则聚合**的 `Findings` 表，覆盖整次扫描：
 
 ```
-scm-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
+bitbucket-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
 SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
       13 controls failed
@@ -371,7 +371,7 @@ Details: rerun with --details for per-resource findings and full remediation ste
 --details=<resource|control>[,...] to filter; -o json for the full report.
 ```
 
-上面这段是 `scm-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
+上面这段是 `bitbucket-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
 下的真实输出，只在标了 `...` 的地方做了省略。
 
 汇总放在最前，因为终端是从上往下读的。这里有两套计数交汇，第二行就是它们之间的桥：
@@ -399,9 +399,9 @@ token 反而能从很小的样本里得出很高的分数。`scan.maxManual` 就
 看起来很干净的报告。修复建议一节会随过滤一起收窄。
 
 ```bash
-scm-bench scan --details                      # 所有资源、所有发现
-scm-bench scan --details=payments-api         # 一个仓库的完整判定
-scm-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪个仓库
+bitbucket-bench scan --details                      # 所有资源、所有发现
+bitbucket-bench scan --details=payments-api         # 一个仓库的完整判定
+bitbucket-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落在哪个仓库
 ```
 
 **`UNREAD` 与 `MANUAL` 底层都是 `MANUAL`，按成因拆开。** `UNREAD` 是**这次运行**读不到的
@@ -429,9 +429,9 @@ together"），因为那是一步修完整行的动作。完整段落 —— 设
 `--details=<值>` 能过滤表格；更精细的过滤是 JSON 的活：
 
 ```bash
-scm-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
-scm-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
-scm-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
+bitbucket-bench scan -o json | jq '.findings[] | select(.status == "FAIL")'
+bitbucket-bench scan -o json | jq -r '.findings[] | select(.status == "MANUAL") | .checkId'
+bitbucket-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
 ```
 
 **stderr** 上的行 —— 请求日志、解释退出码的那一行 —— 仍然带等宽的
@@ -466,21 +466,21 @@ scm-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了什么
 退出阈值、传输、并发、进度——也都住在这里而不是 flag 里。策略里不写死任何数字。
 
 ```bash
-scm-bench init            # 写出一份带完整注释的 scm-bench.yaml
-scm-bench scan            # 自动在工作目录里找到它
+bitbucket-bench init            # 写出一份带完整注释的 bitbucket-bench.yaml
+bitbucket-bench scan            # 自动在工作目录里找到它
 ```
 
-查找顺序：给了 `--config` 就用它；否则找工作目录的 `scm-bench.yaml`（或
-`.scm-bench.yaml`）——项目自己的文件，仓库提交进去给 CI 用的那份；再否则找用户配置
-目录（`SCM_BENCH_CONFIG_DIR` 或平台默认）下的 `config.yaml`。自动找到的文件会在
+查找顺序：给了 `--config` 就用它；否则找工作目录的 `bitbucket-bench.yaml`（或
+`.bitbucket-bench.yaml`）——项目自己的文件，仓库提交进去给 CI 用的那份；再否则找用户配置
+目录（`BITBUCKET_BENCH_CONFIG_DIR` 或平台默认）下的 `config.yaml`。自动找到的文件会在
 stderr 上点名——阈值悄悄来自某个文件的扫描，其退出码是无法解释的。`init` 不会覆盖
 已存在的文件。
 
 一次性的改动用 `--set`，不用碰任何文件——优先级 `--set` > 文件 > 默认值：
 
 ```bash
-scm-bench scan --set scan.failOn=none          # 只影响这一次
-scm-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
+bitbucket-bench scan --set scan.failOn=none          # 只影响这一次
+bitbucket-bench scan --set thresholds.minApprovers=1 --set scan.concurrency=2
 ```
 
 值按 YAML 解析，数字、布尔、时长（`30s`）、流式序列（`exclude=[CIS-1.1.8]`）
@@ -537,18 +537,18 @@ exclude: [CIS-1.1.13]    # 或用 include: 只跑子集
   # 报告还没来得及上传。所以把「失败」推迟到最后一步。
   continue-on-error: true
   run: |
-    # 阈值由提交在本仓库的 scm-bench.yaml 携带：
+    # 阈值由提交在本仓库的 bitbucket-bench.yaml 携带：
     #   scan: { failOn: high, maxManual: 40 }
-    scm-bench scan \
+    bitbucket-bench scan \
       --url "${{ vars.BITBUCKET_URL }}" \
       --token "${{ secrets.BITBUCKET_TOKEN }}" \
-      --output sarif --output-file scm-bench.sarif
+      --output sarif --output-file bitbucket-bench.sarif
 
 - name: Upload to code scanning
   if: always()
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: scm-bench.sarif
+    sarif_file: bitbucket-bench.sarif
 
 - name: Fail the job if the audit did
   if: steps.audit.outcome == 'failure'
@@ -592,10 +592,10 @@ scanning 用 `physicalLocation` 把告警挂到代码上，因此告警会以「
 
 ```bash
 # 在能访问 Bitbucket、持有 token 的 runner 上
-scm-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
+bitbucket-bench scan --snapshot-out snapshot.json -o json --set scan.failOn=none
 
 # 之后在任何地方——无需凭据，无需网络；默认的 failOn: high 生效
-scm-bench scan --snapshot-in snapshot.json -o sarif
+bitbucket-bench scan --snapshot-in snapshot.json -o sarif
 ```
 
 对归档快照重跑策略，还能看出换了阈值之后结论会如何变化，而不必再碰实例一次。
@@ -614,9 +614,9 @@ scm-bench scan --snapshot-in snapshot.json -o sarif
 放在用户配置目录的 `cache/` 下），`--last` 重新渲染最近的那份：
 
 ```bash
-scm-bench scan                     # 总览；快照顺手留了下来
-scm-bench scan --last --details    # 展开它，完全不碰实例
-scm-bench scan --last -o json      # 或者换一种格式再问一遍
+bitbucket-bench scan                     # 总览；快照顺手留了下来
+bitbucket-bench scan --last --details    # 展开它，完全不碰实例
+bitbucket-bench scan --last -o json      # 或者换一种格式再问一遍
 ```
 
 `--last` 运行会在 stderr 上说明快照来自哪个实例、多久之前——超过一天会升级为警告，
@@ -634,11 +634,11 @@ scm-bench scan --last -o json      # 或者换一种格式再问一遍
 分数要当趋势线看，而趋势需要两个点。`diff` 比较两份快照并报告变化：
 
 ```bash
-scm-bench diff last-week.json today.json
+bitbucket-bench diff last-week.json today.json
 ```
 
 ```
-scm-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
+bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
 SCORE  53 → 31   (-22)
        weighted 29/55 → 25/80
 
@@ -690,8 +690,8 @@ How to fix the regressions
 在 CI 里把上一次的快照留作 artifact，然后与之比较：
 
 ```bash
-scm-bench scan --snapshot-out today.json -o json --set scan.failOn=none
-scm-bench diff baseline.json today.json
+bitbucket-bench scan --snapshot-out today.json -o json --set scan.failOn=none
+bitbucket-bench diff baseline.json today.json
 ```
 
 比较来自两个不同实例的快照会被拒绝，除非用 `--allow-other-instance` 表明这是有意为之：

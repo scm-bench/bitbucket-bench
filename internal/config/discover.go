@@ -10,14 +10,14 @@ import (
 // first: a file that changes how an audit judges an instance should be seen
 // in a directory listing, but teams that keep tool files hidden get their
 // convention respected.
-var discoverNames = []string{"scm-bench.yaml", ".scm-bench.yaml"}
+var discoverNames = []string{"bitbucket-bench.yaml", ".bitbucket-bench.yaml"}
 
 const userConfigFile = "config.yaml"
 
-// Discover finds the config file an unadorned `scm-bench scan` should use:
-// scm-bench.yaml (or .scm-bench.yaml) in the working directory first — the
+// Discover finds the config file an unadorned `bitbucket-bench scan` should use:
+// bitbucket-bench.yaml (or .bitbucket-bench.yaml) in the working directory first — the
 // project's file, the one a repository commits for CI — then config.yaml
-// under the user config directory (or SCM_BENCH_CONFIG_DIR), the person's
+// under the user config directory (or BITBUCKET_BENCH_CONFIG_DIR), the person's
 // own defaults. "" means none found, which is not an error: defaults are the
 // normal state before anyone has run init.
 //
@@ -42,16 +42,16 @@ func Discover() (string, error) {
 	return "", nil
 }
 
-// userConfigDir is where per-user scm-bench files live, shared with the
-// saved instance: SCM_BENCH_CONFIG_DIR when set, else the platform's user
+// userConfigDir is where per-user bitbucket-bench files live, shared with the
+// saved instance: BITBUCKET_BENCH_CONFIG_DIR when set, else the platform's user
 // config directory.
 func userConfigDir() (string, error) {
-	if dir := os.Getenv("SCM_BENCH_CONFIG_DIR"); dir != "" {
+	if dir := os.Getenv("BITBUCKET_BENCH_CONFIG_DIR"); dir != "" {
 		return dir, nil
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("locate the config directory: %w", err)
 	}
-	return filepath.Join(dir, "scm-bench"), nil
+	return filepath.Join(dir, "bitbucket-bench"), nil
 }

@@ -8,7 +8,7 @@
   "automated": true,
   "title": "Ensure linear history is required",
   "description": "A linear history keeps the record of what shipped simple to read and to bisect. Merge commits let a branch's history be reshaped in ways that are hard to audit after the fact.",
-  "remediation": "Repository settings -> Pull requests -> Merge strategies: disable \"Merge commit\" (no-ff) and \"Rebase, merge commit\" (rebase-no-ff), leaving fast-forward, rebase-fast-forward or squash strategies enabled. Set the same at Project settings -> Pull requests to apply project-wide. If your workflow requires merge commits, add the strategy ID to nonLinearMergeStrategies in scm-bench's config to adjust what counts.",
+  "remediation": "Repository settings -> Pull requests -> Merge strategies: disable \"Merge commit\" (no-ff) and \"Rebase, merge commit\" (rebase-no-ff), leaving fast-forward, rebase-fast-forward or squash strategies enabled. Set the same at Project settings -> Pull requests to apply project-wide. If your workflow requires merge commits, add the strategy ID to nonLinearMergeStrategies in bitbucket-bench's config to adjust what counts.",
   "fixSummary": "Disable \"Merge commit\" at Repository settings -> Pull requests -> Merge strategies.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",

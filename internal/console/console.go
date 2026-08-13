@@ -59,7 +59,7 @@ func (p Painter) Paint(code, s string) string {
 //
 // The width is fixed so the messages line up down the page whichever tag they
 // carry, and the tag is anchored at the start of the line so
-// `scm-bench scan 2>/dev/null` and `2>&1 | grep '^\[WARN\]'` both still say
+// `bitbucket-bench scan 2>/dev/null` and `2>&1 | grep '^\[WARN\]'` both still say
 // something useful. Colour reinforces the tag but is never the only signal —
 // the text survives NO_COLOR, a pipe, and a redirect to a file.
 type Tag struct {

@@ -13,9 +13,9 @@ import (
 // this directory so a later `scan --last` can re-render it without another
 // fetch. It lives under the config directory rather than the platform cache
 // directory on purpose: a snapshot is a map of the instance's weak points,
-// not disposable derived data; SCM_BENCH_CONFIG_DIR already pins this
+// not disposable derived data; BITBUCKET_BENCH_CONFIG_DIR already pins this
 // location for tests and pipelines; and deleting one directory must be
-// enough to forget everything scm-bench has written down.
+// enough to forget everything bitbucket-bench has written down.
 const cacheDirName = "cache"
 
 // SnapshotCachePath is where a scan of baseURL caches its snapshot: one file

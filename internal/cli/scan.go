@@ -15,12 +15,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/scm-bench/scm-bench/internal/config"
-	"github.com/scm-bench/scm-bench/internal/console"
-	"github.com/scm-bench/scm-bench/internal/engine"
-	"github.com/scm-bench/scm-bench/internal/report"
-	"github.com/scm-bench/scm-bench/internal/scm"
-	"github.com/scm-bench/scm-bench/internal/scm/bitbucketdc"
+	"github.com/scm-bench/bitbucket-bench/internal/config"
+	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"github.com/scm-bench/bitbucket-bench/internal/engine"
+	"github.com/scm-bench/bitbucket-bench/internal/report"
+	"github.com/scm-bench/bitbucket-bench/internal/scm"
+	"github.com/scm-bench/bitbucket-bench/internal/scm/bitbucketdc"
 )
 
 // Progress modes. Compact is the default: one self-overwriting line while the
@@ -111,7 +111,7 @@ Credentials may be supplied by flag or environment:
 No instance yet? --demo evaluates a sample bundled into the binary, so you can
 see what a report looks like before configuring anything. Run bare on a
 terminal, scan offers the same choice interactively — and can save the URL and
-token you enter (0600, under your user config directory, or SCM_BENCH_CONFIG_DIR)
+token you enter (0600, under your user config directory, or BITBUCKET_BENCH_CONFIG_DIR)
 so later scans need nothing. Delete the file to forget it.
 
 The table report is an overview aggregated by control: one row per failed
@@ -131,8 +131,8 @@ Exit codes: 0 clean, 1 a threshold was breached, 2 the scan failed.
 
 The settings that describe the deployment rather than any one run — exit
 thresholds, transport, concurrency, progress — live in the config file's scan
-section rather than in flags. Run ` + "`scm-bench init`" + ` to write a commented
-scm-bench.yaml; scan finds it in the working directory (or the user config
+section rather than in flags. Run ` + "`bitbucket-bench init`" + ` to write a commented
+bitbucket-bench.yaml; scan finds it in the working directory (or the user config
 directory) without --config being typed. For a one-off, --set overrides any
 config key without a file: --set scan.failOn=none.
 
@@ -162,7 +162,7 @@ so.`,
 
 	f.BoolVar(&opts.demo, "demo", false, "evaluate the bundled example instead of an instance, to see what a report looks like")
 
-	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file; found automatically as ./scm-bench.yaml or in the user config directory")
+	f.StringVarP(&opts.configPath, "config", "c", "", "path to a YAML config file; found automatically as ./bitbucket-bench.yaml or in the user config directory")
 	f.StringArrayVar(&opts.set, "set", nil, "override one config key for this run, e.g. --set scan.failOn=none; repeatable")
 	f.StringVarP(&opts.format, "output", "o", report.FormatTable, "output format: "+strings.Join(report.Formats(), ", "))
 	f.StringVar(&opts.outputPath, "output-file", "", "write the report to this file instead of stdout")
@@ -210,7 +210,7 @@ func movedFlagError(cmd *cobra.Command, err error) error {
 	for flag, key := range movedFlags {
 		if strings.Contains(msg, "--"+flag) {
 			return fmt.Errorf("--%s moved to the config file as %s\n"+
-				"run `scm-bench init` to keep it in a file, or override once with --set %s=<value>", flag, key, key)
+				"run `bitbucket-bench init` to keep it in a file, or override once with --set %s=<value>", flag, key, key)
 		}
 	}
 	return err
@@ -265,7 +265,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 
 	// The config comes first, because nearly everything after reads it: the
 	// scan section carries what used to be nine flags. An explicit --config
-	// wins; otherwise the file is discovered — the project's scm-bench.yaml
+	// wins; otherwise the file is discovered — the project's bitbucket-bench.yaml
 	// in the working directory, then the user's config.yaml — and named on
 	// stderr, because a scan whose thresholds quietly came from a file is a
 	// scan whose exit code makes no sense.

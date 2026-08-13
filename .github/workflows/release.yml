@@ -77,7 +77,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "scm-bench $TAG"
+          git tag -a "$TAG" -m "bitbucket-bench $TAG"
           git push origin "$TAG"
           echo "created $TAG at $(git rev-parse --short HEAD)"
 

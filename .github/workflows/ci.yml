@@ -128,7 +128,7 @@ jobs:
           }' 
 
       - name: Verify the bundle loads
-        run: go run ./cmd/scm-bench list-checks
+        run: go run ./cmd/bitbucket-bench list-checks
 
   vuln:
     name: Vulnerabilities
@@ -184,16 +184,16 @@ jobs:
           context: .
           push: false
           load: true
-          tags: scm-bench:ci
+          tags: bitbucket-bench:ci
 
       - name: Check the image runs and is read-only about it
         run: |
           set -euo pipefail
-          docker run --rm scm-bench:ci version
-          docker run --rm scm-bench:ci list-checks | tail -1
+          docker run --rm bitbucket-bench:ci version
+          docker run --rm bitbucket-bench:ci list-checks | tail -1
           # The image must not run as root: it is handed a credential that can
           # read every repository on an instance.
-          user=$(docker run --rm --entrypoint id scm-bench:ci -u)
+          user=$(docker run --rm --entrypoint id bitbucket-bench:ci -u)
           if [ "$user" = "0" ]; then
             echo "::error::the image runs as root"
             exit 1
@@ -205,6 +205,6 @@ jobs:
           # Dockerfile.goreleaser expects a prebuilt binary beside it, which is
           # what goreleaser puts there. Standing one in checks the COPY path
           # and the entrypoint without running a release.
-          CGO_ENABLED=0 go build -trimpath -o scm-bench ./cmd/scm-bench
-          docker build -f Dockerfile.goreleaser -t scm-bench:ci-release .
-          docker run --rm scm-bench:ci-release version
+          CGO_ENABLED=0 go build -trimpath -o bitbucket-bench ./cmd/bitbucket-bench
+          docker build -f Dockerfile.goreleaser -t bitbucket-bench:ci-release .
+          docker run --rm bitbucket-bench:ci-release version

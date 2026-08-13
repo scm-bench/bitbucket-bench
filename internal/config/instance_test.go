@@ -10,7 +10,7 @@ import (
 // The whole feature is "the next run does not ask": what SaveInstance writes,
 // LoadInstance must hand back.
 func TestInstanceRoundTrips(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	saved := Instance{URL: "https://bitbucket.example.com", Token: "sekrit"}
 	path, err := SaveInstance(saved)
@@ -33,7 +33,7 @@ func TestInstanceRoundTrips(t *testing.T) {
 // The file holds a live credential, so it gets the permissions the snapshot
 // gets, for a stronger version of the same reason.
 func TestSavedInstanceIsOwnerOnly(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	path, err := SaveInstance(Instance{URL: "https://x", Token: "t"})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestSavedInstanceIsOwnerOnly(t *testing.T) {
 
 // Nothing saved is the normal first-run state, not a failure.
 func TestLoadInstanceAbsentIsNotAnError(t *testing.T) {
-	t.Setenv("SCM_BENCH_CONFIG_DIR", t.TempDir())
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", t.TempDir())
 
 	inst, path, err := LoadInstance()
 	if err != nil {
@@ -72,7 +72,7 @@ func TestLoadInstanceAbsentIsNotAnError(t *testing.T) {
 // user to debug permissions instead of a typo.
 func TestLoadInstanceRejectsUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 	if err := os.WriteFile(filepath.Join(dir, "instance.yaml"),
 		[]byte("url: https://x\ntokn: oops\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -83,14 +83,14 @@ func TestLoadInstanceRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
-// SCM_BENCH_CONFIG_DIR is both the pipeline's pin and the test suite's
+// BITBUCKET_BENCH_CONFIG_DIR is both the pipeline's pin and the test suite's
 // isolation, so it has to actually win over the platform directory. The
 // expectation is built with filepath.Join rather than a literal, because the
 // separator is the platform's — a hard-coded /pinned/elsewhere passed on Unix
 // and failed on Windows without testing anything different.
 func TestInstancePathHonoursTheOverride(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SCM_BENCH_CONFIG_DIR", dir)
+	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 
 	path, err := InstancePath()
 	if err != nil {
