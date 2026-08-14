@@ -328,11 +328,10 @@ func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))
 
-	// The summary leads, then the by-control overview, then the remediations
-	// and the line saying how to get the per-resource detail. "Branch
-	// permissions" is in the one-line fix, which is all the overview prints
-	// of a remediation.
-	for _, want := range []string{"SCORE", "10 failed", "Report Summary", "PRJ/app", "Findings", "Remediations (", "Branch permissions", "--details"} {
+	// Line-oriented: each failure carries its resource, control, reason and
+	// one-line fix; the score block closes the report. "Branch permissions"
+	// is in a fix line.
+	for _, want := range []string{"SCORE", "10 failed", "PRJ/app", "fix: ", "Branch permissions", "--details"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("table output is missing %q\n---\n%s", want, stdout)
 		}
