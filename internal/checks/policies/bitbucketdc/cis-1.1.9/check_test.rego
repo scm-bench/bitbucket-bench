@@ -57,3 +57,39 @@ test_not_applicable_for_an_empty_repository if {
 	})
 	r.status == "NA"
 }
+
+# A repository whose default branch could not be resolved makes every
+# condition's matchesDefaultBranch false — which must read as "unknown", not
+# as "no condition covers the default branch". The other branch-protection
+# rules gate on the same thing.
+test_manual_when_the_default_branch_is_unresolved if {
+	r := cis_1_1_9.result with input as testdata.repo_input({
+		"defaultBranch": "",
+		"defaultBranchDisplay": "",
+		"available": testdata.without("defaultBranch"),
+		"requiredBuilds": [{"matchesDefaultBranch": false}],
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 0},
+	})
+	r.status == "MANUAL"
+}
+
+# The repository-wide minimum-builds check needs no default branch: it gates
+# every merge, so an unresolved default branch must not push it to MANUAL.
+test_passes_on_minimum_builds_even_without_a_default_branch if {
+	r := cis_1_1_9.result with input as testdata.repo_input({
+		"defaultBranch": "",
+		"defaultBranchDisplay": "",
+		"available": testdata.without("defaultBranch"),
+		"requiredBuilds": [],
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 1},
+	})
+	r.status == "PASS"
+}
+
+test_null_required_builds_do_not_break_the_rule if {
+	r := cis_1_1_9.result with input as testdata.repo_input({
+		"requiredBuilds": null,
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 0},
+	})
+	r.status == "FAIL"
+}

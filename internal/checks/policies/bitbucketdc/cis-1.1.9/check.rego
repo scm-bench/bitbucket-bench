@@ -8,7 +8,7 @@ import data.scmbench.lib
 # green builds (a merge check) or a required-builds condition naming specific
 # CI plans. Either one satisfies the control.
 conditions := [c |
-	some c in object.get(lib.resource, "requiredBuilds", [])
+	some c in lib.list("requiredBuilds")
 	c.matchesDefaultBranch == true
 ]
 
@@ -22,11 +22,16 @@ gated if {
 	minimum_builds > 0
 }
 
-# Both sources must be readable before a clean FAIL can be claimed: a missing
-# required-builds add-on looks exactly like a repository with no conditions.
+# Every source must be readable before a clean FAIL can be claimed: a missing
+# required-builds add-on looks exactly like a repository with no conditions —
+# and a repository whose default branch could not be resolved makes every
+# condition's matchesDefaultBranch false, which looks exactly like no
+# condition covering it. (A PASS through the repository-wide minimum-builds
+# check needs no default branch, which is why gated is decided first.)
 fully_known if {
 	lib.available("requiredBuilds")
 	lib.available("pullRequestSettings")
+	lib.has_default_branch
 }
 
 result := lib.branch_protection_na if {
@@ -38,7 +43,7 @@ result := lib.branch_protection_na if {
 	gated
 } else := {
 	"status": "MANUAL",
-	"details": "Required builds or pull request merge checks could not be read, so CI gating cannot be confirmed.",
+	"details": "Required builds, merge checks or the default branch could not be read, so CI gating cannot be confirmed.",
 } if {
 	not fully_known
 } else := {

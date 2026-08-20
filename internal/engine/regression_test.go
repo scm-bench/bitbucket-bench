@@ -40,7 +40,7 @@ func TestZeroValuedSnapshotProducesAVerdictForEveryControl(t *testing.T) {
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Complete: true},
 			Available: map[string]bool{
-				"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true,
+				"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true,
 			},
 		},
 		Projects: []scm.Project{{

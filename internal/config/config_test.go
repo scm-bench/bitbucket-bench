@@ -366,3 +366,20 @@ func TestOverridesStillGoThroughValidation(t *testing.T) {
 		t.Error("an out-of-range override was accepted")
 	}
 }
+
+// permissionRank's keys are Bitbucket permission names — REPO_READ,
+// PROJECT_WRITE — and the key-segment check used to refuse the underscore,
+// making documented, policy-visible keys unaddressable from --set.
+func TestSetReachesKeysWithUnderscores(t *testing.T) {
+	cfg, err := LoadWithOverrides("", []string{"permissionRank.REPO_READ=15"})
+	if err != nil {
+		t.Fatalf("LoadWithOverrides: %v", err)
+	}
+	if cfg.PermissionRank["REPO_READ"] != 15 {
+		t.Errorf("permissionRank.REPO_READ = %d, want 15", cfg.PermissionRank["REPO_READ"])
+	}
+	// Maps merge rather than replace, so overriding one rank keeps the rest.
+	if cfg.PermissionRank["REPO_WRITE"] == 0 {
+		t.Error("overriding one permissionRank entry should not drop the others")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -68,8 +69,29 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 		ctx = context.Background()
 	}
 
-	cfg, err := config.Load(opts.configPath)
+	// Discovered exactly the way scan discovers it, and named on stderr for
+	// the same reason: both sides of a diff are re-evaluated with these
+	// thresholds, and a diff judged under different config than the scans
+	// sitting next to it would report differences that are the tool's, not
+	// the instance's.
+	configPath := opts.configPath
+	if configPath == "" {
+		discovered, err := config.Discover()
+		if err != nil {
+			return err
+		}
+		if discovered != "" {
+			configPath = discovered
+			stderr := cmd.ErrOrStderr()
+			console.Writer{W: stderr, P: console.Painter{Enabled: isTerminal(stderr) && !opts.noColor && !hasNoColorEnv()}}.
+				Line(console.Info, "using config %s", discovered)
+		}
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
@@ -100,6 +122,19 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 	afterReport, err := evaluateSnapshot(ctx, cfg, after)
 	if err != nil {
 		return fmt.Errorf("evaluate %s: %w", afterPath, err)
+	}
+
+	// The same rule scan applies: a policy that failed to evaluate makes the
+	// report incomplete, and comparing incomplete reports can misfile a real
+	// regression — a PASS degraded to MANUAL by an engine error classifies as
+	// "other changes" and exits 0.
+	if n := len(beforeReport.Errors) + len(afterReport.Errors); n > 0 {
+		return &exitCodeError{
+			code: ExitError,
+			msg: fmt.Sprintf("%s could not be evaluated; the diff would compare incomplete reports\n%s",
+				console.Pluralize(n, "control"),
+				strings.Join(append(append([]string{}, beforeReport.Errors...), afterReport.Errors...), "\n")),
+		}
 	}
 
 	result := diff.Compare(beforeReport, afterReport)

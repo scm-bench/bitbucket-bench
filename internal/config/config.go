@@ -241,7 +241,7 @@ func LoadWithOverrides(path string, sets []string) (Config, error) {
 // keySegment is what a piece of a dotted config key may look like. Anything
 // else is refused before it can reach the YAML text an override is turned
 // into.
-var keySegment = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+var keySegment = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // applyOverride applies one "key=value" onto the config.
 //

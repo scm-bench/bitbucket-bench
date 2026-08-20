@@ -67,3 +67,10 @@ test_a_blank_configured_key_matches_nothing if {
 	}
 	r.status == "FAIL"
 }
+
+# A present-but-null hook list must read as an empty one, not error the rule
+# out of existence. hooks stay available, so the verdict is a real FAIL.
+test_null_hooks_do_not_break_the_rule if {
+	r := cis_1_1_12.result with input as testdata.repo_input({"hooks": null})
+	r.status == "FAIL"
+}

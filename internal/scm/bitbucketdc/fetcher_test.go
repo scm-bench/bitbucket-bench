@@ -1150,3 +1150,33 @@ func TestScanningRepositoriesIsNotWarnedAbout(t *testing.T) {
 		}
 	}
 }
+
+// hasRepositoryAccess is a bare boolean, so its completeness has to travel
+// beside it: a group the scan could not expand may hold the one dormant
+// account worth finding, and the dormant-account rule must see the gap rather
+// than read the quiet map as a clean population.
+func TestUnexpandableGroupMarksRepositoryAccessIncomplete(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/permissions/groups", pageOf(`{"group":{"name":"developers"},"permission":"PROJECT_READ"}`))
+	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("context") == "developers" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+
+	if snapshot.Organization.Available["repositoryAccess"] {
+		t.Error("a group that could not be expanded must mark the access map incomplete")
+	}
+}
+
+func TestFullyReadableGrantsMarkRepositoryAccessComplete(t *testing.T) {
+	_, snapshot := fetchSnapshot(t, standardInstance(t))
+	if !snapshot.Organization.Available["repositoryAccess"] {
+		t.Error("every table and group was readable; the access map should be marked complete")
+	}
+}

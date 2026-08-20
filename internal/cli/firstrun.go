@@ -288,14 +288,22 @@ func promptCredentials(in io.Reader, out io.Writer) (firstRunResult, error) {
 		return firstRunResult{}, errNoInstance()
 	}
 
-	fmt.Fprintf(out, "HTTP access token (hidden; Enter to scan anonymously): ")
+	fmt.Fprintf(out, "HTTP access token (hidden): ")
 	token, err := readSecret(in, out)
 	if err != nil {
 		fmt.Fprintln(out)
 		return firstRunResult{}, errNoInstance()
 	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		// The client refuses to run without a credential, so promising an
+		// anonymous scan here would dead-end two lines later with an error
+		// about flags this person never typed.
+		fmt.Fprintln(out, "A token is required: create one under your Bitbucket profile -> Manage account -> HTTP access tokens.")
+		return firstRunResult{}, errNoInstance()
+	}
 
-	res := firstRunResult{url: url, token: strings.TrimSpace(token)}
+	res := firstRunResult{url: url, token: token}
 
 	// Saving is asked, not assumed: the answer puts a credential on disk. The
 	// prompt names the destination so the consent is to something concrete,
