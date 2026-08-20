@@ -51,6 +51,13 @@ result := {
 } if {
 	count(unknown) > 0
 } else := {
+	"status": "MANUAL",
+	"details": sprintf("Some grant tables or group expansions were unreadable, so the set of users with repository access is incomplete: a dormant account whose only grant sits in an unread table is invisible here. Review users inactive for %d days under Administration -> Users.", [threshold]),
+} if {
+	# Ordered after FAIL on purpose: the dormant accounts the scan did see are
+	# real findings whatever it missed; the gap only forbids the clean PASS.
+	not lib.available("repositoryAccess")
+} else := {
 	"status": "PASS",
 	"details": sprintf("No active user with repository access has been dormant for %d days or more.", [threshold]),
 }

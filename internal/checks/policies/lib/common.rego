@@ -62,14 +62,23 @@ restrictions(kind) := [r |
 	r.matchesDefaultBranch == true
 ]
 
+# as_list reads a list already in hand the way list() reads one by path:
+# an explicit null is treated exactly like a missing field. Go marshals a nil
+# slice to null, and object.get substitutes its default only when the key is
+# absent — a present-but-null value would reach array.concat and error the
+# whole rule out of existence.
+as_list(x) := [] if {
+	x == null
+} else := x
+
 # exemptions lists the principals allowed to bypass the given restrictions.
 # A restriction still counts as configured when it has exemptions, but the
 # report names them so the hole is visible.
 exemptions(rs) := sort({e |
 	some r in rs
 	some e in array.concat(
-		object.get(r, "exemptUsers", []),
-		object.get(r, "exemptGroups", []),
+		as_list(object.get(r, "exemptUsers", [])),
+		as_list(object.get(r, "exemptGroups", [])),
 	)
 })
 

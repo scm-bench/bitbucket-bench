@@ -761,16 +761,27 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 	}
 
 	if opts.scan.MaxManual >= 0 {
-		decidable := rep.Score.Passed + rep.Score.Failed + rep.Score.Manual
-		if decidable > 0 {
-			percent := rep.Score.Manual * 100 / decidable
-			if percent > opts.scan.MaxManual {
-				return &exitCodeError{
-					code: ExitFindings,
-					msg: fmt.Sprintf("%d%% of controls need manual review (scan.maxManual %d%%); the scan could not see enough to judge this instance\n"+
-						"grant the token more read access, or raise scan.maxManual if this is expected",
-						percent, opts.scan.MaxManual),
-				}
+		// Only automated controls count against the gate. The bundle also
+		// ships controls that are MANUAL by design (automated: false, no API
+		// can answer them); counting those would give every scan a manual
+		// floor no token could lower, and the advice below would be a lie.
+		// What the gate measures is what the token failed to read.
+		unread := 0
+		for _, f := range rep.Findings {
+			if f.Status == engine.StatusManual && f.Automated {
+				unread++
+			}
+		}
+		decidable := rep.Score.Passed + rep.Score.Failed + unread
+		// Cross-multiplied rather than divided, so the comparison is exact:
+		// integer division floors, and flooring made maxManual 0 tolerate a
+		// manual finding whenever a scan had more than a hundred findings.
+		if decidable > 0 && unread*100 > opts.scan.MaxManual*decidable {
+			return &exitCodeError{
+				code: ExitFindings,
+				msg: fmt.Sprintf("%d of %d automatable findings needed manual review (scan.maxManual %d%%); the scan could not see enough to judge this instance\n"+
+					"grant the token more read access, or raise scan.maxManual if this is expected",
+					unread, decidable, opts.scan.MaxManual),
 			}
 		}
 	}

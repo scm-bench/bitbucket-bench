@@ -24,7 +24,7 @@ hook_matches(h) if {
 }
 
 matching := {h.key |
-	some h in object.get(lib.resource, "hooks", [])
+	some h in lib.list("hooks")
 	h.enabled == true
 	hook_matches(h)
 }
@@ -42,5 +42,5 @@ result := {
 } else := {
 	"status": "FAIL",
 	"details": "No enabled hook verifies commit signatures, so commit authorship cannot be trusted.",
-	"evidence": [sprintf("%d hook(s) enabled, none matching the configured signature-hook keys", [count([h | some h in object.get(lib.resource, "hooks", []); h.enabled == true])])],
+	"evidence": [sprintf("%d hook(s) enabled, none matching the configured signature-hook keys", [count([h | some h in lib.list("hooks"); h.enabled == true])])],
 }

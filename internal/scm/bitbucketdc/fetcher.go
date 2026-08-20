@@ -198,7 +198,11 @@ func (f *Fetcher) verifyCredentials(ctx context.Context) error {
 		return fmt.Errorf("the instance rejected the credentials: %w\n"+
 			"check --token (BITBUCKET_TOKEN), or --username/--password (BITBUCKET_USERNAME/BITBUCKET_PASSWORD)", err)
 	}
-	f.credentialsVerified = true
+	// Verified only by an HTTP answer. A transport error or a 5xx proves
+	// nothing about the credential, and marking it verified anyway would send
+	// a genuinely rejected token down the "authorized but forbidden" path
+	// later, past the curated message above.
+	f.credentialsVerified = err == nil || IsUnavailable(err)
 	return nil
 }
 
@@ -1130,6 +1134,15 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 	withAccess := map[string]bool{}
 	everyoneHasAccess := false
 
+	// complete records whether every source of access was actually read: the
+	// admin set, each grant table, each group expansion, each default-
+	// permission probe. hasRepositoryAccess is a bare boolean — false means
+	// both "holds no grant" and "holds a grant this scan could not see" — so
+	// the completeness has to travel beside the map, or a dormant user whose
+	// only grant sat in an unreadable table would silently drop out of
+	// CIS-1.3.1's population and turn missing data into a PASS.
+	complete := snapshot.Organization.EffectiveAdmins.Complete
+
 	// EffectiveAdmins rather than Admins: the latter is the grant table as
 	// written, where an entry may be a group, and filtering it to Type ==
 	// "user" dropped everyone who holds instance administrator rights through
@@ -1145,7 +1158,10 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 		withAccess[name] = true
 	}
 
-	collect := func(perms scm.Permissions) {
+	collect := func(perms scm.Permissions, tableRead bool) {
+		if !tableRead {
+			complete = false
+		}
 		for _, u := range perms.Users {
 			withAccess[u.Name] = true
 		}
@@ -1157,6 +1173,7 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 			// cost nothing.
 			members, ok := f.groupMembers(ctx, g.Name)
 			if !ok {
+				complete = false
 				continue
 			}
 			for _, m := range members {
@@ -1166,13 +1183,25 @@ func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapsh
 		if perms.DefaultPermission != "" {
 			everyoneHasAccess = true
 		}
+		if !perms.DefaultPermissionKnown {
+			complete = false
+		}
 	}
 
 	for _, p := range snapshot.Projects {
-		collect(p.Permissions)
+		// The project table's own readability is carried by the repositories
+		// below it: an unreadable project table starts every one of their
+		// "permissions" availabilities false. A project with no repositories
+		// grants access to no code, so it cannot hide anyone.
+		collect(p.Permissions, true)
 		for _, r := range p.Repositories {
-			collect(r.Permissions)
+			collect(r.Permissions, r.Available["permissions"])
 		}
+	}
+
+	snapshot.Organization.Available["repositoryAccess"] = complete
+	if !complete {
+		f.warn("some grant tables or group expansions were unreadable, so the set of users with repository access is incomplete; the dormant-account rule will report MANUAL rather than credit the gap")
 	}
 
 	for i := range snapshot.Organization.Users {

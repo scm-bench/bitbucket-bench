@@ -87,3 +87,18 @@ test_null_restrictions_do_not_break_the_rule if {
 	r := cis_1_1_15.result with input as testdata.repo_input({"branchRestrictions": null})
 	r.status == "FAIL"
 }
+
+# The same null rule applies one level down: a restriction whose exemptUsers is
+# an explicit null must not erase the named exemptions beside it. Before
+# as_list, the null reached array.concat, the note went undefined, and the
+# report described the protection as tighter than it is.
+test_null_exempt_users_do_not_erase_the_named_exemptions if {
+	r := cis_1_1_15.result with input as testdata.repo_input({"branchRestrictions": [{
+		"type": "read-only",
+		"matchesDefaultBranch": true,
+		"exemptUsers": null,
+		"exemptGroups": ["release-bots"],
+	}]})
+	r.status == "PASS"
+	contains(r.details, "release-bots")
+}
