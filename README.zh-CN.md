@@ -5,9 +5,9 @@
 -->
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-dark-1760x440.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png">
-    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-light-1760x440.png" alt="scm-bench — audit source control against the CIS supply chain benchmark" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-bitbucket-bench-dark-1760x440.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-bitbucket-bench-light-1760x440.png">
+    <img src="https://raw.githubusercontent.com/scm-bench/.github/main/brand/banner-bitbucket-bench-light-1760x440.png" alt="bitbucket-bench — audit Bitbucket Data Center against the CIS supply chain benchmark" width="880">
   </picture>
 </p>
 
