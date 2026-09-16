@@ -155,11 +155,21 @@ type BranchRestriction struct {
 	// model and glob semantics. Policies read this boolean instead of trying
 	// to re-implement matcher matching in Rego.
 	MatchesDefaultBranch bool `json:"matchesDefaultBranch"`
-	// Exempt principals can bypass the restriction. A restriction that exempts
-	// somebody still counts as configured, but the report surfaces the holes.
+	// Exempt principals can bypass the restriction, as granted — groups appear
+	// as groups.
 	ExemptUsers      []string `json:"exemptUsers,omitempty"`
 	ExemptGroups     []string `json:"exemptGroups,omitempty"`
 	ExemptAccessKeys int      `json:"exemptAccessKeys,omitempty"`
+	// ExemptPrincipals is the same set with groups expanded to their members,
+	// which is what deciding whether a restriction still binds has to be based
+	// on. Complete is false when a group could not be expanded, making the set
+	// a lower bound: there may be more people behind it than are named.
+	ExemptPrincipals EffectivePrincipals `json:"exemptPrincipals"`
+	// ExemptAccessKeyIDs identifies the keys ExemptAccessKeys counts. The
+	// identities are needed, not only the total, because a rule asks whether
+	// the same key bypasses every restriction covering the branch, and two
+	// restrictions exempting one key each is not one key exempt from both.
+	ExemptAccessKeyIDs []int `json:"exemptAccessKeyIds,omitempty"`
 }
 
 // RequiredBuild is one required-builds merge condition.

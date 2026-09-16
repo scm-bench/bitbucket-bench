@@ -7,7 +7,7 @@
     "baseUrl": "https://bitbucket.example.com",
     "generatedAt": "2026-01-15T09:00:00Z",
     "warnings": [
-      "group \"contractors\" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not permitted to access this resource); administrator counts are lower bounds"
+      "group \"contractors\" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are not permitted to access this resource); counts derived from it are lower bounds"
     ]
   },
   "organization": {
@@ -59,9 +59,9 @@
             "defaultStrategy": "squash"
           },
           "branchRestrictions": [
-            { "id": 1, "type": "pull-request-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true },
-            { "id": 2, "type": "fast-forward-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true },
-            { "id": 3, "type": "no-deletes", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "PROJECT", "matchesDefaultBranch": true, "exemptUsers": ["release-bot"] }
+            { "id": 1, "type": "pull-request-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true, "exemptPrincipals": { "users": [], "groups": [], "count": 0, "complete": true } },
+            { "id": 2, "type": "fast-forward-only", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "REPOSITORY", "matchesDefaultBranch": true, "exemptPrincipals": { "users": [], "groups": [], "count": 0, "complete": true } },
+            { "id": 3, "type": "no-deletes", "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "scope": "PROJECT", "matchesDefaultBranch": true, "exemptPrincipals": { "users": [], "groups": [], "count": 0, "complete": true } }
           ],
           "requiredBuilds": [
             { "id": 7, "buildParentKeys": ["PLAT-PAY-BUILD"], "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "matchesDefaultBranch": true }
@@ -116,7 +116,9 @@
             ],
             "defaultStrategy": "no-ff"
           },
-          "branchRestrictions": [],
+          "branchRestrictions": [
+            { "id": 11, "type": "no-deletes", "matcherId": "refs/heads/master", "matcherType": "BRANCH", "matcherText": "master", "scope": "REPOSITORY", "matchesDefaultBranch": true, "exemptGroups": ["developers"], "exemptPrincipals": { "users": ["dana", "erin", "frank", "grace", "henry"], "groups": ["developers"], "count": 5, "complete": true } }
+          ],
           "requiredBuilds": [],
           "hooks": [
             { "key": "com.example.jira-issue-check", "name": "Jira issue key check", "type": "PRE_RECEIVE", "enabled": true, "configured": true, "scope": "REPOSITORY" }

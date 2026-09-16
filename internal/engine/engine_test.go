@@ -661,10 +661,10 @@ func TestUnknownDataDoesNotBecomeAPass(t *testing.T) {
 }
 
 // An SSH key allowed to push past a branch restriction is a bypass exactly as
-// an exempt user is. exemptAccessKeys was carried in the snapshot and read by
-// nothing, so a restriction that several deploy keys could walk straight
-// through was described as though nobody could.
-func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
+// an exempt user is, and now decides the verdict rather than only decorating
+// it: a restriction several deploy keys can walk straight through is not
+// protecting the branch from them.
+func TestExemptAccessKeysDecideTheVerdict(t *testing.T) {
 	ctx := context.Background()
 	eng, err := engine.New(ctx, config.Default(), scm.PlatformBitbucketDC)
 	if err != nil {
@@ -682,6 +682,8 @@ func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
 				Type:                 "pull-request-only",
 				MatchesDefaultBranch: true,
 				ExemptAccessKeys:     2,
+				ExemptAccessKeyIDs:   []int{1, 2},
+				ExemptPrincipals:     scm.EffectivePrincipals{Complete: true},
 			}},
 			Available: map[string]bool{"branchRestrictions": true, "defaultBranch": true},
 		}}}},
@@ -698,8 +700,8 @@ func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
 			continue
 		}
 		seen = true
-		if f.Status != engine.StatusPass {
-			t.Fatalf("CIS-1.1.15 = %s, want PASS: the restriction is configured", f.Status)
+		if f.Status != engine.StatusFail {
+			t.Fatalf("CIS-1.1.15 = %s, want FAIL: two keys can push straight past the restriction", f.Status)
 		}
 		if !strings.Contains(f.Details, "access key") {
 			t.Errorf("details do not mention the bypass: %s", f.Details)

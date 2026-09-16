@@ -779,8 +779,31 @@ func (f *Fetcher) fetchBranchRestrictions(ctx context.Context, projectKey, slug 
 			br.ExemptUsers = append(br.ExemptUsers, u.Name)
 		}
 		br.ExemptGroups = append(br.ExemptGroups, r.Groups...)
+		for _, k := range r.AccessKeys {
+			br.ExemptAccessKeyIDs = append(br.ExemptAccessKeyIDs, k.ID)
+		}
+		// Expanding here rather than in the rule is the usual split: group
+		// membership is an API call, and a policy may not make one. The
+		// instance-wide group cache means the exemption groups cost nothing
+		// beyond the ones no permission table already expanded.
+		br.ExemptPrincipals = f.expandPrincipals(ctx, exemptGrants(br), true)
 		repo.BranchRestrictions = append(repo.BranchRestrictions, br)
 	}
+}
+
+// exemptGrants renders a restriction's exempt users and groups as the grant
+// list expandPrincipals consumes. The permission field is left empty: what
+// matters here is which principals an entry names and whether it is a group,
+// not what level of access it carries.
+func exemptGrants(br scm.BranchRestriction) []scm.PrincipalPermission {
+	grants := make([]scm.PrincipalPermission, 0, len(br.ExemptUsers)+len(br.ExemptGroups))
+	for _, u := range br.ExemptUsers {
+		grants = append(grants, scm.PrincipalPermission{Name: u, Type: "user"})
+	}
+	for _, g := range br.ExemptGroups {
+		grants = append(grants, scm.PrincipalPermission{Name: g, Type: "group"})
+	}
+	return grants
 }
 
 func (f *Fetcher) fetchRequiredBuilds(ctx context.Context, projectKey, slug string, model branchModel, repo *scm.Repository) {
@@ -1114,7 +1137,7 @@ func (f *Fetcher) groupMembers(ctx context.Context, group string) ([]string, boo
 	defer f.groupMu.Unlock()
 	if err != nil {
 		f.groupFail[group] = true
-		f.warn("group %q could not be expanded (%v); administrator counts are lower bounds", group, err)
+		f.warn("group %q could not be expanded (%v); counts derived from it are lower bounds", group, err)
 		return nil, false
 	}
 	members := make([]string, 0, len(users))

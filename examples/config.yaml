@@ -61,6 +61,21 @@ thresholds:
   # access should be reviewed.
   inactiveUserDays: 90
 
+  # CIS-1.1.15/1.1.16/1.1.17: how many principals may hold an exemption from
+  # every branch restriction protecting the default branch — that is, how many
+  # people the protection does not actually bind. A restriction that exempts
+  # the team group binds nobody it was meant to, so the count is what decides
+  # the verdict, not merely whether the restriction exists.
+  #
+  # Only principals exempt from *all* the restrictions covering the branch are
+  # counted: somebody exempt from "Prevent all changes" but still subject to
+  # "Prevent deletion" cannot delete it, and is not a bypass.
+  #
+  # -1 turns the check off, restoring the behaviour of releases before it
+  # existed, where an exemption was reported beside a PASS instead of deciding
+  # it.
+  maxBypassPrincipals: 0
+
 # CIS-1.1.12: Bitbucket Data Center ships no signature verification of its own,
 # so name the add-on you use. A hook counts when its plugin key or display name
 # contains any of these (case-insensitive) substrings.
@@ -78,6 +93,13 @@ signatureHookKeys:
 nonLinearMergeStrategies:
   - no-ff
   - rebase-no-ff
+
+# CIS-1.1.15/1.1.16/1.1.17: accounts that may hold a branch restriction
+# exemption without counting against maxBypassPrincipals — the build and
+# release service accounts that genuinely have to push past it. Without this
+# list the threshold has to be set high enough to cover the service accounts,
+# which is high enough to hide the people.
+allowedBypassPrincipals: []
 
 # CIS-1.2.1: paths probed on the default branch for a security policy.
 securityPolicyPaths:

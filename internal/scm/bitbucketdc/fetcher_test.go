@@ -1180,3 +1180,105 @@ func TestFullyReadableGrantsMarkRepositoryAccessComplete(t *testing.T) {
 		t.Error("every table and group was readable; the access map should be marked complete")
 	}
 }
+
+// firstRepository is the repository every standardInstance test operates on.
+func firstRepository(t *testing.T, snapshot *scm.Snapshot) scm.Repository {
+	t.Helper()
+	for _, p := range snapshot.Projects {
+		for _, r := range p.Repositories {
+			return r
+		}
+	}
+	t.Fatal("snapshot carries no repositories")
+	return scm.Repository{}
+}
+
+// A restriction exempting a group hides how many people it lets through: the
+// group name is what the API returns, and the count that decides whether the
+// protection still binds anyone is the membership behind it. Expanding happens
+// here because a policy may not make an API call.
+func TestExemptGroupsAreExpandedToPeople(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", pageOf(`{
+		"id": 1,
+		"type": {"id": "no-deletes", "name": "Prevent deletion"},
+		"matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH"}},
+		"scope": {"type": "REPOSITORY", "resourceId": 10},
+		"users": [{"name": "build-bot"}],
+		"groups": ["developers"],
+		"accessKeys": [{"id": 7}, {"id": 9}]
+	}`))
+	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("context") {
+		case "developers":
+			fmt.Fprint(w, pageOf(`{"name":"eve","displayName":"Eve","active":true}`))
+		default:
+			fmt.Fprint(w, pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
+		}
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := firstRepository(t, snapshot)
+	if len(repo.BranchRestrictions) != 1 {
+		t.Fatalf("got %d restrictions, want 1", len(repo.BranchRestrictions))
+	}
+	br := repo.BranchRestrictions[0]
+
+	if !br.ExemptPrincipals.Complete {
+		t.Error("every exempt group expanded, but the set is marked incomplete")
+	}
+	for _, want := range []string{"build-bot", "eve"} {
+		if !slices.Contains(br.ExemptPrincipals.Users, want) {
+			t.Errorf("exempt principals %v do not include %q", br.ExemptPrincipals.Users, want)
+		}
+	}
+	if !slices.Contains(br.ExemptPrincipals.Groups, "developers") {
+		t.Errorf("exempt groups %v do not name developers", br.ExemptPrincipals.Groups)
+	}
+	// The identities, not only the total: a rule asks whether the same key
+	// bypasses every restriction covering the branch.
+	if !slices.Equal(br.ExemptAccessKeyIDs, []int{7, 9}) {
+		t.Errorf("exempt access key ids = %v, want [7 9]", br.ExemptAccessKeyIDs)
+	}
+	if br.ExemptAccessKeys != 2 {
+		t.Errorf("exempt access keys = %d, want 2", br.ExemptAccessKeys)
+	}
+}
+
+// A group the token cannot expand makes the bypass set a lower bound. The
+// fetcher records that rather than reporting the members it happened to see as
+// though they were all of them — the rule turns it into MANUAL from here.
+func TestUnexpandableExemptGroupLeavesTheBypassSetIncomplete(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", pageOf(`{
+		"id": 1,
+		"type": {"id": "no-deletes", "name": "Prevent deletion"},
+		"matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH"}},
+		"scope": {"type": "REPOSITORY", "resourceId": 10},
+		"users": [],
+		"groups": ["contractors"]
+	}`))
+	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("context") == "contractors" {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	br := firstRepository(t, snapshot).BranchRestrictions[0]
+
+	if br.ExemptPrincipals.Complete {
+		t.Error("a group that could not be expanded left the bypass set marked complete")
+	}
+	if len(br.ExemptPrincipals.Users) != 0 {
+		t.Errorf("exempt principals = %v, want none resolved", br.ExemptPrincipals.Users)
+	}
+	if !slices.Contains(br.ExemptPrincipals.Groups, "contractors") {
+		t.Error("the unexpandable group is not named in the snapshot")
+	}
+}

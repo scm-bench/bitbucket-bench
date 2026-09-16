@@ -22,12 +22,23 @@ result := lib.branch_protection_na if {
 } if {
 	not decidable
 } else := {
-	"status": "PASS",
-	"details": sprintf("Deletion of %s is blocked%s.", [lib.default_branch_name, lib.exemption_note(matching)]),
-} if {
-	count(matching) > 0
-} else := {
 	"status": "FAIL",
 	"details": sprintf("%s can be deleted by anyone with write access.", [lib.default_branch_name]),
 	"evidence": [sprintf("no no-deletes or read-only restriction covers %s", [lib.default_branch_name])],
+} if {
+	count(matching) == 0
+} else := {
+	"status": "FAIL",
+	"details": sprintf("Deletion of %s is restricted, but %s can still delete it, taking the branch and its protections with them.", [lib.default_branch_name, lib.bypass_detail(matching)]),
+	"evidence": lib.bypass_evidence(matching),
+} if {
+	lib.bypass_exceeded(matching)
+} else := {
+	"status": "MANUAL",
+	"details": sprintf("Deletion of %s is restricted, but a group holding an exemption could not be expanded, so whether the restriction binds everyone is unknown.", [lib.default_branch_name]),
+} if {
+	lib.bypass_undecidable(matching)
+} else := {
+	"status": "PASS",
+	"details": sprintf("Deletion of %s is blocked%s.", [lib.default_branch_name, lib.exemption_note(matching)]),
 }

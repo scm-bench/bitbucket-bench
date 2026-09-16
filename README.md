@@ -274,14 +274,62 @@ the same evidence as one that was not.
 | 1.1.11 | Open tasks block the merge | LOW | `requiredAllTasksComplete` |
 | 1.1.12 | Commit signatures are verified | MEDIUM | An enabled signature-verification hook |
 | 1.1.13 | Linear history is required | LOW | Enabled merge strategies |
-| 1.1.15 | No direct pushes to the default branch | HIGH | `pull-request-only` / `read-only` restriction |
-| 1.1.16 | No force pushes | HIGH | `fast-forward-only` restriction |
-| 1.1.17 | No branch deletion | MEDIUM | `no-deletes` restriction |
+| 1.1.15 | No direct pushes to the default branch | HIGH | `pull-request-only` / `read-only` restriction, and who is exempt from it |
+| 1.1.16 | No force pushes | HIGH | `fast-forward-only` restriction, and who is exempt from it |
+| 1.1.17 | No branch deletion | MEDIUM | `no-deletes` restriction, and who is exempt from it |
 | 1.2.1 | A security policy is published | LOW | `SECURITY.md` on the default branch |
 | 1.3.1 | Dormant accounts are reviewed | MEDIUM | Last authentication vs. repository access |
 | 1.3.3 | Instance administrators are bounded (2–5) | HIGH | Global permissions, groups expanded |
 | 1.3.7 | Each repository has ≥2 administrators | LOW | Repository + project grants, groups expanded |
 | 1.3.8 | Default repository access is restricted | MEDIUM | Public flag + project default permission |
+
+### A restriction that exempts people is not protection
+
+The three branch-permission controls above judge **who the restriction actually
+binds**, not merely whether somebody configured one. A `no-deletes` restriction
+that exempts the `developers` group does not stop the developers deleting the
+branch, and reporting that as a pass described the repository as safer than it
+is — which is the one thing this tool is built not to do.
+
+Exemptions are resolved the way everything version-dependent is: the fetcher
+expands the groups, so a rule counts people rather than group names, and an
+exemption granted to a team covers everyone who joins it later.
+
+**Only principals exempt from *every* restriction covering the branch count.**
+Protection is the union of those restrictions, so somebody exempt from "Prevent
+all changes" but still subject to "Prevent deletion" cannot delete it and is
+not a bypass. This is what makes a read-only restriction read correctly:
+naming the release managers who may write to an otherwise frozen branch is how
+that restriction is meant to be used.
+
+Two settings decide the verdict:
+
+```yaml
+thresholds:
+  maxBypassPrincipals: 0        # how many principals may hold an exemption
+allowedBypassPrincipals: [release-bot]   # the ones that do not count
+```
+
+`allowedBypassPrincipals` is the one to reach for first. A build account
+usually does need to push past a restriction; without somewhere to say so, the
+threshold has to be raised high enough to cover it, which is high enough to
+hide the people.
+
+When a group holding an exemption cannot be expanded, the count is a **lower
+bound**. A lower bound that already exceeds the threshold still fails — the
+missing members can only add to it — and one that does not reports `MANUAL`,
+because a group the token could not read is not evidence that nobody is in it.
+
+> **Upgrading from v0.1.** This changes verdicts: a restriction with wide
+> exemptions reported `PASS` before and reports `FAIL` now. That is the fix,
+> not a regression. `thresholds.maxBypassPrincipals: -1` restores the old
+> behaviour if you need to stage the cleanup.
+>
+> `diff` is not affected: it re-evaluates both snapshots with the running
+> build, so a baseline captured under v0.1 is judged by the same rule as
+> today's scan rather than producing a wave of false regressions. Snapshots
+> captured before this release carry no resolved exemption sets, so these
+> three controls report `MANUAL` on them rather than guessing.
 
 5 controls carried as documented manual checks — they are reported, explained, and
 excluded from the score:
@@ -386,7 +434,7 @@ the Bitbucket instance itself.
 Scan warnings
 
   - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
-    not permitted to access this resource); administrator counts are lower bounds
+    not permitted to access this resource); counts derived from it are lower bounds
 
   fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
        not see.
@@ -595,6 +643,11 @@ thresholds:
   minOrgAdmins: 2        # CIS-1.3.3
   maxOrgAdmins: 5
   inactiveUserDays: 90   # CIS-1.3.1
+  maxBypassPrincipals: 0 # CIS-1.1.15/16/17; -1 turns the bypass check off
+
+# The service accounts a branch restriction exemption is expected on, so the
+# threshold above can stay at zero for people.
+allowedBypassPrincipals: [release-bot]
 
 # Bitbucket ships no signature verification, so name the add-on you use.
 signatureHookKeys: [signature, gpg, verify-commit]

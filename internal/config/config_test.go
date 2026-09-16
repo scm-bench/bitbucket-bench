@@ -206,6 +206,13 @@ func TestNegativeThresholdsAreRejected(t *testing.T) {
 	}
 }
 
+// disablingThresholds are the thresholds where -1 is a documented value rather
+// than a typo, so the sweep below has to probe them one step further down. The
+// map is deliberately explicit: a threshold that quietly accepts a negative is
+// the failure this test exists to catch, and an exception has to be written
+// down to be granted.
+var disablingThresholds = map[string]bool{"maxBypassPrincipals": true}
+
 // Every threshold in the struct must appear in the check above; a new one that
 // nobody adds is exactly how the first four came to be missing.
 func TestEveryThresholdIsValidated(t *testing.T) {
@@ -219,9 +226,25 @@ func TestEveryThresholdIsValidated(t *testing.T) {
 			t.Errorf("Thresholds.%s has no yaml tag", f.Name)
 			continue
 		}
-		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": -1\n")); err == nil {
-			t.Errorf("thresholds.%s accepts -1; add it to Config.Validate", name)
+		probe := "-1"
+		if disablingThresholds[name] {
+			probe = "-2"
 		}
+		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": "+probe+"\n")); err == nil {
+			t.Errorf("thresholds.%s accepts %s; add it to Config.Validate", name, probe)
+		}
+	}
+}
+
+// -1 is how the bypass check is turned off, and a config that says so has to
+// load. The sweep above can only prove the field rejects nonsense.
+func TestMaxBypassPrincipalsAcceptsMinusOne(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "thresholds:\n  maxBypassPrincipals: -1\n"))
+	if err != nil {
+		t.Fatalf("Load rejected the documented disable value: %v", err)
+	}
+	if cfg.Thresholds.MaxBypassPrincipals != -1 {
+		t.Errorf("maxBypassPrincipals = %d, want -1", cfg.Thresholds.MaxBypassPrincipals)
 	}
 }
 
