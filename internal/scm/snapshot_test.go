@@ -37,9 +37,18 @@ func TestSnapshotJSONContract(t *testing.T) {
 			"defaultBranch", "defaultBranchDisplay", "pullRequestSettings", "branchRestrictions",
 			"requiredBuilds", "hooks", "branches", "files", "permissions", "admins", "available", "errors",
 		}},
+		// exemptPrincipals and exemptAccessKeyIds were added without bumping
+		// SchemaVersion, which is a version mismatch away from refusing every
+		// archived snapshot outright. They are purely additive: no existing
+		// field changed name or meaning, so a policy reading a v0.1 snapshot
+		// does not misread it — it finds the resolved set absent and reports
+		// MANUAL, which is the honest answer and the behaviour this tool is
+		// built around. Bumping would turn that graceful degradation into a
+		// hard error on every `--snapshot-in` and every `diff` baseline.
 		{scm.BranchRestriction{}, []string{
 			"id", "type", "matcherId", "matcherText", "matcherType", "scope",
 			"matchesDefaultBranch", "exemptUsers", "exemptGroups", "exemptAccessKeys",
+			"exemptPrincipals", "exemptAccessKeyIds",
 		}},
 		{scm.EffectivePrincipals{}, []string{"users", "groups", "count", "complete"}},
 		{scm.Permissions{}, []string{"users", "groups", "defaultPermission", "defaultPermissionKnown", "publicAccess"}},

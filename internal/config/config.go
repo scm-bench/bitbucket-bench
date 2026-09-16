@@ -47,6 +47,12 @@ type Config struct {
 	SkipArchivedRepositories bool `yaml:"skipArchivedRepositories" json:"skipArchivedRepositories"`
 	// PermissionRank lets Rego compare Bitbucket permission levels ordinally.
 	PermissionRank map[string]int `yaml:"permissionRank" json:"permissionRank"`
+	// AllowedBypassPrincipals names accounts that may hold a branch
+	// restriction exemption without counting against maxBypassPrincipals: the
+	// build and release service accounts that genuinely have to push past it.
+	// Without this list the threshold has to be set high enough to cover the
+	// service accounts, which is high enough to hide the people.
+	AllowedBypassPrincipals []string `yaml:"allowedBypassPrincipals" json:"allowedBypassPrincipals"`
 	// Exclude lists check IDs (e.g. "CIS-1.1.8") to leave out of the run.
 	Exclude []string `yaml:"exclude" json:"exclude"`
 	// Include, when non-empty, restricts the run to these check IDs.
@@ -127,6 +133,13 @@ type Thresholds struct {
 	// InactiveUserDays is how long a user may go without authenticating before
 	// their access should be reviewed.
 	InactiveUserDays int `yaml:"inactiveUserDays" json:"inactiveUserDays"`
+	// MaxBypassPrincipals is how many principals may hold an exemption from
+	// every branch restriction protecting the default branch — that is, how
+	// many people the protection does not actually bind. -1 disables the
+	// check, restoring the behaviour of releases before this field existed,
+	// where a restriction counted as protection however many principals could
+	// push straight past it.
+	MaxBypassPrincipals int `yaml:"maxBypassPrincipals" json:"maxBypassPrincipals"`
 }
 
 // Default returns the configuration used when the user supplies none. The
@@ -152,6 +165,7 @@ func Default() Config {
 			StaleBranchDays:     90,
 			MaxStaleBranches:    0,
 			InactiveUserDays:    90,
+			MaxBypassPrincipals: 0,
 		},
 		SignatureHookKeys: []string{
 			"signature",
@@ -336,6 +350,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("thresholds.%s must be >= 0, got %d", f.name, f.value)
 		}
 	}
+	// maxBypassPrincipals is checked apart from the loop above because -1 is
+	// meaningful here — it turns the bypass check off — while every other
+	// negative value inverts a control the same way the loop describes.
+	if t.MaxBypassPrincipals < -1 {
+		return fmt.Errorf("thresholds.maxBypassPrincipals must be >= 0, or -1 to disable, got %d", t.MaxBypassPrincipals)
+	}
 	if t.MinOrgAdmins > 0 && t.MaxOrgAdmins > 0 && t.MinOrgAdmins > t.MaxOrgAdmins {
 		return fmt.Errorf("thresholds.minOrgAdmins (%d) must not exceed maxOrgAdmins (%d)", t.MinOrgAdmins, t.MaxOrgAdmins)
 	}
@@ -361,6 +381,7 @@ func (c Config) Validate() error {
 		{"signatureHookKeys", c.SignatureHookKeys},
 		{"nonLinearMergeStrategies", c.NonLinearMergeStrategies},
 		{"securityPolicyPaths", c.SecurityPolicyPaths},
+		{"allowedBypassPrincipals", c.AllowedBypassPrincipals},
 		{"exclude", c.Exclude},
 		{"include", c.Include},
 	} {

@@ -242,14 +242,38 @@ bitbucket-bench **只发 `GET` 请求**。这一点由测试强制保证，不�
 | 1.1.11 | 未解决的任务阻止合并 | LOW | `requiredAllTasksComplete` |
 | 1.1.12 | 验证提交签名 | MEDIUM | 已启用的签名校验 hook |
 | 1.1.13 | 要求线性历史 | LOW | 已启用的合并策略 |
-| 1.1.15 | 禁止直接 push 默认分支 | HIGH | `pull-request-only` / `read-only` 限制 |
-| 1.1.16 | 禁止 force push | HIGH | `fast-forward-only` 限制 |
-| 1.1.17 | 禁止删除分支 | MEDIUM | `no-deletes` 限制 |
+| 1.1.15 | 禁止直接 push 默认分支 | HIGH | `pull-request-only` / `read-only` 限制，以及谁被豁免 |
+| 1.1.16 | 禁止 force push | HIGH | `fast-forward-only` 限制，以及谁被豁免 |
+| 1.1.17 | 禁止删除分支 | MEDIUM | `no-deletes` 限制，以及谁被豁免 |
 | 1.2.1 | 发布安全策略文件 | LOW | 默认分支上的 `SECURITY.md` |
 | 1.3.1 | 定期清理闲置用户 | MEDIUM | 最后登录时间 + 是否持有仓库权限 |
 | 1.3.3 | 实例管理员数量受控（2–5） | HIGH | 全局权限，展开用户组 |
 | 1.3.7 | 每个仓库至少 2 名管理员 | LOW | 仓库 + 项目授权，展开用户组 |
 | 1.3.8 | 收紧仓库默认权限 | MEDIUM | public 标志 + 项目默认权限 |
+
+### 配了豁免的限制，不算保护
+
+上面三条分支权限规则判定的是**这条限制到底约束了谁**，而不只是「有没有人配过一条限制」。一条豁免了 `developers` 组的 `no-deletes`，并不能阻止这个组的人删掉分支；把它报成通过，等于宣称这个仓库比实际更安全——而这正是本工具最不该做的事。
+
+豁免的解析和其他依赖版本的东西一样放在 fetcher 里：用户组会被展开成人，所以规则数的是人而不是组名；一个授予团队组的豁免，同样覆盖日后加入这个组的每一个人。
+
+**只有被覆盖该分支的*每一条*限制都豁免的主体才计入。** 分支的保护是这些限制的并集，所以一个人被「禁止任何修改」豁免、却仍受「禁止删除」约束时，他删不掉分支，就不算一个缺口。这也正是 read-only 能被正确理解的原因：给一条冻结分支指定可以写入的发布负责人，本就是这条限制的正确用法。
+
+判定由两项配置决定：
+
+```yaml
+thresholds:
+  maxBypassPrincipals: 0        # 允许几个主体持有豁免
+allowedBypassPrincipals: [release-bot]   # 不计入上面计数的账号
+```
+
+先用 `allowedBypassPrincipals`。构建账号通常确实需要越过限制；如果没有地方声明这一点，阈值就只能调高到足以覆盖服务账号——而那个高度也足以把人藏进去。
+
+当持有豁免的用户组展不开时，这个计数是一个**下界**。下界已经超过阈值仍然判 FAIL——看不见的成员只会让它更大；下界没超过则报 `MANUAL`，因为「token 读不到这个组」不等于「这个组里没有人」。
+
+> **从 v0.1 升级。** 这会改变判定结果：豁免范围过宽的限制以前报 `PASS`，现在报 `FAIL`。这是修复，不是回归。确实需要分阶段整改时，用 `thresholds.maxBypassPrincipals: -1` 可以恢复旧行为。
+>
+> `diff` 不受影响：它用当前构建重新评估两份快照，所以 v0.1 时期采集的基线和今天的扫描用的是同一套规则，不会冒出一片假的回归。本次发布之前采集的快照不带解析好的豁免集合，这三条规则在它们上面会报 `MANUAL`，而不是去猜。
 
 5 条以「明确记录的人工检查」保留——会被报告、会给出原因，且不计入评分：
 
@@ -349,7 +373,7 @@ the Bitbucket instance itself.
 Scan warnings
 
   - group "contractors" could not be expanded (GET /api/1.0/admin/groups/more-members: 403 You are
-    not permitted to access this resource); administrator counts are lower bounds
+    not permitted to access this resource); counts derived from it are lower bounds
 
   fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
        not see.
@@ -512,6 +536,10 @@ thresholds:
   minOrgAdmins: 2        # CIS-1.3.3
   maxOrgAdmins: 5
   inactiveUserDays: 90   # CIS-1.3.1
+  maxBypassPrincipals: 0 # CIS-1.1.15/16/17；-1 关闭该项判定
+
+# 分支保护豁免本就该落在这些服务账号上，因此不计入上面的阈值
+allowedBypassPrincipals: [release-bot]
 
 # Bitbucket 自身不带签名校验，需指明你用的插件
 signatureHookKeys: [signature, gpg, verify-commit]

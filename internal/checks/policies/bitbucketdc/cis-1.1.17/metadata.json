@@ -4,12 +4,14 @@
   "package": "scmbench.rules.cis_1_1_17",
   "scope": "repository",
   "severity": "MEDIUM",
-  "platforms": ["bitbucket-dc"],
+  "platforms": [
+    "bitbucket-dc"
+  ],
   "automated": true,
   "title": "Ensure branch deletions are denied",
-  "description": "Deleting a protected branch removes both the code and the protections attached to it. Recreating it afterwards restores neither the history nor the restrictions.",
-  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent deletion\". Configure it at Project settings -> Branch permissions to cover every repository in the project.",
-  "fixSummary": "Enable \"Prevent deletion\" at Repository settings -> Branch permissions.",
+  "description": "Deleting a protected branch removes both the code and the protections attached to it. Recreating it afterwards restores neither the history nor the restrictions. A restriction that exempts people does not stop them deleting the branch, so an exemption is the same exposure as no restriction at all for whoever holds it.",
+  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent deletion\". Then review the restriction's exempt users and groups: an exemption granted to a team group covers everyone who joins it later, which is how a restriction comes to bind nobody it was meant to. Name the service accounts that genuinely need one in allowedBypassPrincipals, and set thresholds.maxBypassPrincipals to how many other principals may hold one (-1 turns the check off). Configure it at Project settings -> Branch permissions to cover every repository in the project.",
+  "fixSummary": "Block deletion at Repository settings -> Branch permissions; check who is exempt.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

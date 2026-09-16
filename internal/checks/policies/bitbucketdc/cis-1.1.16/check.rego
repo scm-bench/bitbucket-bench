@@ -25,12 +25,23 @@ result := lib.branch_protection_na if {
 } if {
 	not decidable
 } else := {
-	"status": "PASS",
-	"details": sprintf("History rewrites on %s are blocked%s.", [lib.default_branch_name, lib.exemption_note(blocked)]),
-} if {
-	count(blocked) > 0
-} else := {
 	"status": "FAIL",
 	"details": sprintf("%s can be force pushed, letting anyone with write access rewrite or erase merged history.", [lib.default_branch_name]),
 	"evidence": [sprintf("no fast-forward-only or read-only restriction covers %s", [lib.default_branch_name])],
+} if {
+	count(blocked) == 0
+} else := {
+	"status": "FAIL",
+	"details": sprintf("History rewrites on %s are restricted, but %s can still force push and erase the history reviewers approved.", [lib.default_branch_name, lib.bypass_detail(blocked)]),
+	"evidence": lib.bypass_evidence(blocked),
+} if {
+	lib.bypass_exceeded(blocked)
+} else := {
+	"status": "MANUAL",
+	"details": sprintf("History rewrites on %s are restricted, but a group holding an exemption could not be expanded, so whether the restriction binds everyone is unknown.", [lib.default_branch_name]),
+} if {
+	lib.bypass_undecidable(blocked)
+} else := {
+	"status": "PASS",
+	"details": sprintf("History rewrites on %s are blocked%s.", [lib.default_branch_name, lib.exemption_note(blocked)]),
 }
