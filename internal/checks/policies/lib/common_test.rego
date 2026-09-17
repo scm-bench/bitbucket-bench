@@ -150,8 +150,8 @@ test_bypass_incomplete_when_a_group_could_not_be_expanded if {
 	not lib.bypass_complete(rs) with input as testdata.repo_input({})
 }
 
-# A snapshot from a build older than exemptAccessKeyIds knows how many keys
-# bypass a restriction but not which, so they cannot be intersected.
+# A restriction that reports a key total without the keys behind it disagrees
+# with itself; the intersection cannot be taken, so the set is a lower bound.
 test_bypass_incomplete_when_access_keys_are_unidentified if {
 	rs := [testdata.restriction("no-deletes", {"exemptAccessKeys": 2})]
 	not lib.bypass_complete(rs) with input as testdata.repo_input({})

@@ -647,7 +647,13 @@ func parseSnapshot(raw []byte, source string) (*scm.Snapshot, error) {
 		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
 	if snapshot.SchemaVersion != scm.SchemaVersion {
-		return nil, fmt.Errorf("%s has schema version %q, but this build reads version %q",
+		// The refusal carries the whole recovery, because it is the only thing
+		// the reader sees: --last lands here on the first run after an upgrade
+		// without having chosen the file, and a bare version mismatch tells
+		// that person nothing about what to do next.
+		return nil, fmt.Errorf("%s has schema version %q, but this build reads version %q.\n"+
+			"Capture it again with this build: the older shape is missing settings the current "+
+			"controls decide on, and evaluating it anyway would report verdicts its data cannot support",
 			source, snapshot.SchemaVersion, scm.SchemaVersion)
 	}
 	if snapshot.Metadata.Platform == "" {
