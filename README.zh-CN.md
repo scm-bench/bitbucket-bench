@@ -312,61 +312,41 @@ score = Σ weight(通过) / Σ weight(通过 + 失败) × 100
 
 ## 输出格式
 
-**`table`**（默认）—— 一份为一屏设计的总览：分数在最前，然后是所有资源的汇总表，
-再是一张**按规则聚合**的 `Findings` 表，覆盖整次扫描：
+**`table`**（默认）—— 名字叫 table，实际是一份行式的发现报告，形态和 linter、编译器
+一样。每条失败是一条自包含的记录，分数块收尾：
 
 ```
 bitbucket-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
-      13 controls failed
-      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-      scored 28 of 47 findings (59%); 19 could not be evaluated
+PLAT/legacy-billing  CIS-1.1.3 HIGH: Pull requests require 0 approval(s); at least 2 independent
+    approvals are needed.
+    fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+    checks.
+    · requiredApprovers = 0
 
-Report Summary
+... 每个「资源 × 规则」的失败各一条记录，按严重度降序 ...
 
-┌─────────────────────┬──────────────┬────────┬────────┬────────┬────────┐
-│      Resource       │     Type     │ Failed │ Unread │ Manual │ Passed │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/legacy-billing │ repository   │     12 │      - │      1 │      1 │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ instance            │ organization │      1 │      - │      3 │      1 │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/vendor-mirror  │ repository   │      - │     13 │      1 │      - │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/payments-api   │ repository   │      - │      - │      1 │     13 │
-└─────────────────────┴──────────────┴────────┴────────┴────────┴────────┘
-Legend:
-- '-': none in this state
-- 'Unread': the scan could not read what the control asks about
-- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
-  per-repository
+PLAT/legacy-billing  CIS-1.1.17 MEDIUM: Deletion of master is restricted, but dana, erin, frank,
+    grace and 1 more can still delete it, taking the branch and its protections with them.
+    fix: Block deletion at Repository settings -> Branch permissions; check who is exempt.
+    · exempt from every restriction covering master: dana, erin, frank, grace and 1 more
+    · 5 in total; thresholds.maxBypassPrincipals is 0
+instance  CIS-1.3.1 MEDIUM: 1 active user(s) with repository access have not authenticated for 90
+    days or more: dana.
+    fix: Deactivate each listed account at Administration -> Users.
+    · dana
 
-Findings
+CIS-1.3.5 MANUAL (instance): Multi-factor authentication is enforced by the identity provider in
+    front of Bitbucket Data Center, not by Bitbucket, and cannot be read through its API. Verify
+    enforcement in your SSO, Crowd or LDAP configuration.
+    fix: Require MFA in the IdP, then disable direct login at Administration -> Authentication.
+CIS-1.1.6 MANUAL (3 repositories): Bitbucket Data Center has no native code-owners mechanism.
+    Confirm by hand that changes to sensitive paths require review by their owners, typically via
+    default reviewers combined with a minimum approval count.
+    fix: Add a binding condition at Repository settings -> Default reviewers, approvals required 1
+    or more.
 
-┌────────────┬──────────┬────────┬───────────┬─────────────────────────────────────────────────────┐
-│  Control   │ Severity │ Status │ Resources │                        Title                        │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
-│            │          │        │           │ strongly authenticated users                        │
-│            │          │        │           │ · failing: legacy-billing                           │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
-│            │          │        │           │ code                                                │
-│            │          │        │           │ · failing: legacy-billing                           │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-
-... 每条失败的规则一行，严重度降序 ...
-
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
-│            │          │        │           │ the organization                                    │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
-│            │          │        │           │ or configuration                                    │
-└────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
-Resources: how many are in this state / how many the control was evaluated against; 'instance' is
-the Bitbucket instance itself.
+... 每条需要人来判断的规则各一行，不同原因各占一行 ...
 
 13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
@@ -378,47 +358,49 @@ Scan warnings
   fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
        not see.
 
-Remediations (13)
+Rules
 
-  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
-              checks.
-              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
-  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
-              permissions.
-              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
+  CIS-1.1.3   https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.17  https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-... 每条失败的规则一行修法，下面跟着厂商文档链接 ...
-
-Manual review (4)
-
-  CIS-1.3.5   Require MFA in the IdP, then disable direct login at Administration -> Authentication.
-              https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html
-
-... API 判定不了、需要人来确认的规则 ...
+... 报告中每条规则各一行，附厂商文档页 ...
 
 Details: rerun with --details for per-resource findings and full remediation steps, or
 --details=<resource|control>[,...] to filter; -o json for the full report.
+
+SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      13 controls failed
+      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+      scored 28 of 47 findings (59%); 19 could not be evaluated
 ```
 
 上面这段是 `bitbucket-bench scan --snapshot-in examples/snapshot.json` 在 `COLUMNS=100`
 下的真实输出，只在标了 `...` 的地方做了省略。
 
-汇总放在最前，因为终端是从上往下读的。这里有两套计数交汇，第二行就是它们之间的桥：
-分数按 *finding*（一条规则对一个资源）计，而下面的 Findings 表和结尾的退出行按
-*规则* 计 —— 顶部的 "13 failed" 和它下面的 "13 controls failed" 是同一事实的两面
-（更大的扫描会写成 "6 controls failed across 23 findings"）。`scored N of M findings`
+**一条失败就是一条记录，而且记录是自包含的**：首行是 `<资源>  <规则号> <严重度>: <结论>`，
+一行修复缩进在下，证据再以暗色 `·` 行排在其后。你不需要把任何东西记在脑子里、再去翻输出
+更下面的某张表 —— 这正是这份报告可以直接 grep 的原因：`grep 'HIGH:'` 就是严重发现的清单，
+每一条命中都自带上下文。
+
+**需要人来判断的规则各聚合成一行**，按「规则 + 原因」归并：
+`<规则号> MANUAL (<n> <资源>): <原因>`。一个需要判断的问题，铺在多少个仓库上都还是一个
+问题；而两个不同的原因各占一行。扫描**读不到**的发现是另一回事，折叠得更彻底 —— 收成扫描
+告警上方的那一句话：它们共享同一个成因，讲一次胜过每条规则每个资源各讲一遍。
+
+`Rules` 一节收尾，把每条规则的厂商文档页列一次，而不是在它适用的每条记录下重复同一个
+URL —— 另外还带上单条记录承载不了的那个提示：在**所有**仓库上都失败的规则，是一个项目级
+设置的事，不是 N 个仓库级设置的事，它那一行会直说（"failing on all 4 repositories —
+setting it once at Project settings covers them together"）。真正会被拿去执行的那一行
+修复，则跟着发现本身走。
+
+**分数块收尾**，所以结论是最后打印的东西，而用来核对它的每个数字都已经在屏幕上了。
+两套计数在这里交汇，第二行就是它们之间的桥：分数按 *finding*（一条规则对一个资源）计，
+而它下面那行和结尾的退出行按*规则*计 —— "13 failed" 和 "13 controls failed" 是同一事实的
+两面（更大的扫描会写成 "6 controls failed across 23 findings"）。`scored N of M findings`
 这一行值得在看分数之前先读：无法判定的 finding 不进入分数的分子，也不进入分母 ——
 单看每一条规则这是对的，合起来却有误导性，因为分母被缩小了，于是一个读不到多少东西的
 token 反而能从很小的样本里得出很高的分数。`scan.maxManual` 就是把这种情况变成一次失败的
 运行，而不是一份好看的报告。
-
-**总览按规则聚合，因为同一个配置错误铺在五十个仓库上是一个问题，不是五十个。**
-每行是一条规则；`Resources` 列说明它铺得多广（`1/3`：在被评估的三个资源中的一个上失败），
-部分命中的行会在标题下用 `· failing:` 点名是哪几个 —— 最多四个，超出记 `+N more` ——
-分数不会让你去猜。作用于实例本身而非任何仓库的规则，该列直接写 `instance`。
-扫描读不到的发现折叠成表格下面那一句话 —— 它们共享同一个成因，而紧随其后的扫描告警把
-成因只讲一次，而不是每条规则每个资源各讲一遍。Report Summary 是另一条轴：所有资源，
-最差的排最前 —— 实例的整体形状在任何细节之前，两个方向都先看得到。
 
 **逐资源的细节在 `--details` 里。** 不带值时，按 trivy 的形态渲染每个资源一节 ——
 `Control | Severity | Status | Title | Finding` 表格，每格里带证据和一行修复；扫描告警
@@ -438,15 +420,17 @@ bitbucket-bench scan --details=CIS-1.1.15,CIS-1.1.16  # 两条规则，无论落
 多好都需要人来判断。只有后者会给出修复建议：一条扫描根本没看到的规则，并不能说它配错了，
 印出「怎么改设置」等于在说反话。JSON 与 SARIF 里两者都是 `MANUAL`，因为那才是规则返回的东西。
 
-**总览里的 Remediations 一条只占一行**：一句话修法，下面用暗色跟着厂商文档链接
-（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。它分成两节，
+**修复跟着发现走，完整段落留给 `--details`。** 行式报告里每条记录都自带一行 `fix:`，
+所以处理一条发现不需要翻到别处的清单去；只有文档链接被推迟到 `Rules`
+（CIS 基准的落地页每条规则都一样、指认不了任何一条，所以从不占行）。
+
+`--details` 才打印完整的修复段落 —— 设置路径、项目级的等价做法、配置项名称 —— 分成两节，
 因为两类条目要的东西不同：`Remediations` 是配置错了、怎么改；`Manual review` 是
-API 判定不了、需要人来确认 —— 混成一个清单会把十条读成十个坏东西，其实坏的只有六个。
-在**所有**仓库上都失败、且修法有项目级变体的规则，会在它那一行里直说
-（"Failing on all 4 repositories — setting it once at Project settings covers them
-together"），因为那是一步修完整行的动作。完整段落 —— 设置路径、项目级的等价做法、
-配置项名称 —— 在 `--details` 里打印，且其各节中每条发现的 `Finding` 单元格还带着
-证据和一行 `fix:`。`--no-remediations` 在两种布局下都能把两节一起去掉。
+API 判定不了、需要人来确认。混成一个清单会把十条读成十个坏东西，其实坏的只有六个。
+它的逐资源表格里，每条发现的 `Finding` 单元格还在结论旁边带着证据和一行 `fix:`。
+
+`--no-remediations` 在两种布局下都会把这些一起去掉：行式报告里的 `fix:` 行和 `Rules` 节，
+以及 `--details` 的那两节。
 
 宽度在 stdout 是终端时来自终端本身；导出的 `COLUMNS` 可以覆盖它，管道、重定向与
 `--output-file` 得到 80。无论来源如何都夹在 60–160 之间。上限约束的是散文：弹性表格列
@@ -468,8 +452,9 @@ bitbucket-bench scan 2>&1 >/dev/null                  # 这次扫描自己说了
 也没有表格可归属。stdout 上的报告则不带。
 
 `--max-resources` 限制多少个资源能有自己的 `--details` 一节（默认 `0`，即每个都有）；
-总览不画逐资源的节，所以它只能与 `--details` 搭配使用。真的截断时报告会说明省略了多少个；
-所有资源在 Report Summary 里仍然都在。它只影响这一种格式：`json` 与 `sarif` 始终携带完整集合。
+行式报告不画逐资源的节，所以它只能与 `--details` 搭配使用。真的截断时，报告会说明省略了
+多少个，并指向能拿到全部的格式 —— `3 more resources with findings not shown
+(--max-resources 1); use -o json for all of them.`。它只影响这一种格式：`json` 与 `sarif` 始终携带完整集合。
 
 通过和不适用的规则只计入汇总，不会逐条列出——报告是一份待办清单。`--show-passed` 会把它们
 也列出来，当你的问题是「这个实例已经做对了哪些」时用它。
@@ -676,27 +661,33 @@ bitbucket-bench diff last-week.json today.json
 ```
 
 ```
-bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
-SCORE  53 → 31   (-22)
-       weighted 29/55 → 25/80
+bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 09:00:00 UTC → 2026-01-15 09:00:00 UTC
+SCORE  56 → 53   (-3)
+       weighted 31/55 → 29/55
 
-Regressed (3)
+Regressed (1)
 
-┌────────────┬──────────┬───────────────────┬─────────────┬──────────────────────────────────────┐
-│  Control   │ Severity │     Resource      │   Change    │                Detail                │
-├────────────┼──────────┼───────────────────┼─────────────┼──────────────────────────────────────┤
-│ CIS-1.1.15 │ HIGH     │ PLAT/payments-api │ PASS → FAIL │ Anyone with write access can push    │
-│            │          │                   │             │ directly to main, bypassing review.  │
-└────────────┴──────────┴───────────────────┴─────────────┴──────────────────────────────────────┘
+┌────────────┬──────────┬─────────────────────┬─────────────┬──────────────────────────────────────┐
+│  Control   │ Severity │      Resource       │   Change    │                Detail                │
+├────────────┼──────────┼─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ CIS-1.1.17 │ MEDIUM   │ PLAT/legacy-billing │ PASS → FAIL │ Deletion of master is restricted,    │
+│            │          │                     │             │ but dana, erin, frank, grace and 1   │
+│            │          │                     │             │ more can still delete it, taking the │
+│            │          │                     │             │ branch and its protections with      │
+│            │          │                     │             │ them.                                │
+└────────────┴──────────┴─────────────────────┴─────────────┴──────────────────────────────────────┘
 
 ... 每一类变化一张表：New failures、Fixed、Other changes、Gone ...
 
 How to fix the regressions
 
-  CIS-1.1.15  Repository settings -> Branch permissions -> Add restriction: ...
+  CIS-1.1.17  Repository settings -> Branch permissions -> Add restriction: select the default
+              branch and enable "Prevent deletion". Then review the restriction's exempt users ...
 ```
 
-`diff` 和 `scan` 用的是同一个表格渲染器，所以两个子命令读起来像同一个程序。
+`diff` 仍然是表格，用的正是 `scan --details` 的那个渲染器，所以两个子命令读起来像同一个
+程序。比较这件事天然是网格：每一行都是同四项事实、只是换了一条规则 —— 这正是表格胜过
+行式的那个场合。
 `Gone` 是每个资源一条，而不是每条规则一条：删掉一个仓库是关于这个仓库的一个事实，
 把它报二十遍只会把这条命令本该凸显的回退埋掉 —— 它的 Control 列写 `-`，
 因为表格没法为某一行去掉一列。

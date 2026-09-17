@@ -372,62 +372,42 @@ decide whether a result is acceptable.
 
 ## Output formats
 
-**`table`** (default) — an overview built to fit a screen: the score, a summary
-of every resource, then one `Findings` table aggregated **by control** across
-the whole scan:
+**`table`** (default) — despite the name, a line-oriented findings report, the
+shape linters and compilers use. Each failure is one self-contained record, and
+the score block closes it:
 
 ```
 bitbucket-bench example  ·  https://bitbucket.example.com  ·  2026-01-15 09:00:00 UTC
 
-SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
-      13 controls failed
-      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
-      scored 28 of 47 findings (59%); 19 could not be evaluated
+PLAT/legacy-billing  CIS-1.1.3 HIGH: Pull requests require 0 approval(s); at least 2 independent
+    approvals are needed.
+    fix: Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
+    checks.
+    · requiredApprovers = 0
 
-Report Summary
+... one record per failing resource and control, severity descending ...
 
-┌─────────────────────┬──────────────┬────────┬────────┬────────┬────────┐
-│      Resource       │     Type     │ Failed │ Unread │ Manual │ Passed │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/legacy-billing │ repository   │     12 │      - │      1 │      1 │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ instance            │ organization │      1 │      - │      3 │      1 │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/vendor-mirror  │ repository   │      - │     13 │      1 │      - │
-├─────────────────────┼──────────────┼────────┼────────┼────────┼────────┤
-│ PLAT/payments-api   │ repository   │      - │      - │      1 │     13 │
-└─────────────────────┴──────────────┴────────┴────────┴────────┴────────┘
-Legend:
-- '-': none in this state
-- 'Unread': the scan could not read what the control asks about
-- 'instance': the Bitbucket instance itself — controls that are organization-wide rather than
-  per-repository
+PLAT/legacy-billing  CIS-1.1.17 MEDIUM: Deletion of master is restricted, but dana, erin, frank,
+    grace and 1 more can still delete it, taking the branch and its protections with them.
+    fix: Block deletion at Repository settings -> Branch permissions; check who is exempt.
+    · exempt from every restriction covering master: dana, erin, frank, grace and 1 more
+    · 5 in total; thresholds.maxBypassPrincipals is 0
+instance  CIS-1.3.1 MEDIUM: 1 active user(s) with repository access have not authenticated for 90
+    days or more: dana.
+    fix: Deactivate each listed account at Administration -> Users.
+    · dana
 
-Findings
+CIS-1.3.5 MANUAL (instance): Multi-factor authentication is enforced by the identity provider in
+    front of Bitbucket Data Center, not by Bitbucket, and cannot be read through its API. Verify
+    enforcement in your SSO, Crowd or LDAP configuration.
+    fix: Require MFA in the IdP, then disable direct login at Administration -> Authentication.
+CIS-1.1.6 MANUAL (3 repositories): Bitbucket Data Center has no native code-owners mechanism.
+    Confirm by hand that changes to sensitive paths require review by their owners, typically via
+    default reviewers combined with a minimum approval count.
+    fix: Add a binding condition at Repository settings -> Default reviewers, approvals required 1
+    or more.
 
-┌────────────┬──────────┬────────┬───────────┬─────────────────────────────────────────────────────┐
-│  Control   │ Severity │ Status │ Resources │                        Title                        │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.3  │ HIGH     │ FAIL   │       1/3 │ Ensure any change to code receives approval of two  │
-│            │          │        │           │ strongly authenticated users                        │
-│            │          │        │           │ · failing: legacy-billing                           │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.9  │ HIGH     │ FAIL   │       1/3 │ Ensure all checks have passed before merging new    │
-│            │          │        │           │ code                                                │
-│            │          │        │           │ · failing: legacy-billing                           │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-
-... one row per failed control, severity descending ...
-
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.3.5  │ HIGH     │ MANUAL │  instance │ Ensure multi-factor authentication is enforced for  │
-│            │          │        │           │ the organization                                    │
-├────────────┼──────────┼────────┼───────────┼─────────────────────────────────────────────────────┤
-│ CIS-1.1.6  │ MEDIUM   │ MANUAL │       3/3 │ Ensure code owners are set for extra sensitive code │
-│            │          │        │           │ or configuration                                    │
-└────────────┴──────────┴────────┴───────────┴─────────────────────────────────────────────────────┘
-Resources: how many are in this state / how many the control was evaluated against; 'instance' is
-the Bitbucket instance itself.
+... one line per control that needs a person, and per distinct reason ...
 
 13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
 
@@ -439,56 +419,60 @@ Scan warnings
   fix: rerun with a token that has administrator read access, so the scan can evaluate what it could
        not see.
 
-Remediations (13)
+Rules
 
-  CIS-1.1.3   Set "Minimum approvals" to at least 2 at Repository settings -> Pull requests -> Merge
-              checks.
-              https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
-  CIS-1.1.15  Enable "Prevent changes without a pull request" at Repository settings -> Branch
-              permissions.
-              https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
+  CIS-1.1.3   https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html
+  CIS-1.1.17  https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html
 
-... one one-line fix per failed control, with the vendor's doc page underneath ...
-
-Manual review (4)
-
-  CIS-1.3.5   Require MFA in the IdP, then disable direct login at Administration -> Authentication.
-              https://confluence.atlassian.com/bitbucketserver/external-user-directories-776640394.html
-
-... the controls no API can decide, where the ask is a person's judgement ...
+... one line per control in the report, with the vendor's documentation page ...
 
 Details: rerun with --details for per-resource findings and full remediation steps, or
 --details=<resource|control>[,...] to filter; -o json for the full report.
+
+SCORE 53/100   15 passed  13 failed  19 manual  1 n/a
+      13 controls failed
+      weighted 29/55 (HIGH=3, MEDIUM=2, LOW=1; manual and n/a excluded)
+      scored 28 of 47 findings (59%); 19 could not be evaluated
 ```
 
 That block is the real output of `bitbucket-bench scan --snapshot-in examples/snapshot.json`
 at `COLUMNS=100`, abbreviated only where a line is marked `...`.
 
-The summary leads because a terminal is read from its top. Two countings meet
-here and the second line is the bridge between them: the score counts
-*findings* — one control against one resource — while the Findings table below
-and the closing exit line count *controls*, so "13 failed" up top and "13
-controls failed" beneath it are the same fact seen from both sides (on a
-larger scan it reads "6 controls failed across 23 findings"). The
-`scored N of M findings` line is worth reading before the score above it:
-findings that could not be evaluated are excluded from both sides of the
-fraction, which is right for any single control and misleading in aggregate,
-since a token that can read very little produces a high score from a small
-sample. `scan.maxManual` turns that into a failed run rather than a
-good-looking one.
+**A failure is one record, and the record is self-contained**: `<resource>
+<CHECK-ID> <SEVERITY>: <details>` on the first line, the one-line fix indented
+beneath it, the evidence as dim `·` lines under that. Nothing has to be carried
+in your head to a table further down the output, which is what makes the report
+greppable — `grep 'HIGH:'` is the list of severe findings, and every hit brings
+its own context with it.
 
-**The overview aggregates by control, because one misconfiguration across fifty
-repositories is one problem, not fifty.** Each row is a control; the `Resources`
-column says how far it has spread (`1/3`: failing on one of the three resources
-it was evaluated against), and a partial row names which ones on a `· failing:`
-line under the title — up to four, then `+N more` — so a fraction never leaves
-you guessing. Controls that apply to the instance itself rather than to any
-repository say `instance` in that column. Findings the scan could not read
-collapse into the single sentence under the table — they share one cause, and
-the scan warnings directly below it state that cause once instead of once per
-control per resource. Report Summary is the other axis: every resource, worst
-first, so the instance's shape is visible in both directions before any detail
-is.
+**Controls that need a person aggregate to one line each**, keyed by control
+and reason: `<CHECK-ID> MANUAL (<n> <resources>): <reason>`. A question needing
+judgement is one question however many repositories it spans, and two different
+reasons keep their own lines. Findings the scan could not *read* are a
+different thing and collapse further still, into the one sentence above the
+scan warnings: they share a single cause, and stating it once beats restating
+it per control per resource.
+
+`Rules` closes the findings with the vendor's documentation page for each
+control, once, rather than repeating a URL under every record it applies to —
+plus the one hint a single record cannot carry: a control failing on *every*
+repository is one project-level setting, not N repository-level ones, and its
+line says so ("failing on all 4 repositories — setting it once at Project
+settings covers them together"). The one-line fix that actually gets acted on
+rides with the finding instead.
+
+**The score block closes the report**, so the verdict is the last thing printed
+and every number above it is already on screen to check it against. Two
+countings meet there and the second line is the bridge between them: the score
+counts *findings* — one control against one resource — while the line beneath
+it and the closing exit line count *controls*, so "13 failed" and "13 controls
+failed" are the same fact seen from both sides (on a larger scan it reads "6
+controls failed across 23 findings"). The `scored N of M findings` line is
+worth reading before the score above it: findings that could not be evaluated
+are excluded from both sides of the fraction, which is right for any single
+control and misleading in aggregate, since a token that can read very little
+produces a high score from a small sample. `scan.maxManual` turns that into a
+failed run rather than a good-looking one.
 
 **`--details` is where the per-resource detail lives.** Bare, it renders one
 section per resource in the shape trivy uses — a `Control | Severity | Status |
@@ -514,21 +498,22 @@ saw is not known to be misconfigured, and printing how to change its settings
 would say otherwise. The JSON and the SARIF say `MANUAL` for both, because that
 is what the control returned.
 
-**Remediations are one line each in the overview**: the one-sentence fix, with
-the vendor's documentation page dim underneath it (the generic CIS benchmark
-landing page is on every control and identifies none of them, so it never
-earns a line). They come in two sections, because the entries ask for two
-different things: `Remediations` is settings that are wrong and how to change
-them, `Manual review` is controls no API can decide, where the ask is a
-person's judgement — one undivided list read as ten broken things when six
-were. A control failing on **every** repository whose remediation has a
-project-level variant says so in its line ("Failing on all 4 repositories —
-setting it once at Project settings covers them together"), because that is
-the single move that fixes the whole row. The full paragraphs — settings
-paths, project-wide variants, config keys — print with `--details`, and in
-its sections each finding's `Finding` cell also carries the evidence and the
-one-line `fix:` beside the verdict. `--no-remediations` drops both sections
-in both layouts.
+**The fix travels with the finding, and the paragraph waits for `--details`.**
+In the line report every record carries its one-line `fix:`, so acting on a
+finding never means scrolling to a list somewhere else; only the documentation
+link is deferred, to `Rules`. (The generic CIS benchmark landing page is on
+every control and identifies none of them, so it never earns a line.)
+
+`--details` prints the full remediation paragraphs — settings paths,
+project-wide variants, config keys — in two sections, because the entries ask
+for two different things: `Remediations` is settings that are wrong and how to
+change them, `Manual review` is controls no API can decide, where the ask is a
+person's judgement. One undivided list read as ten broken things when six were.
+Its per-resource tables carry the evidence and the one-line `fix:` in each
+finding's `Finding` cell, beside the verdict.
+
+`--no-remediations` drops all of it in both layouts: the `fix:` lines and
+`Rules` from the line report, both sections from `--details`.
 
 Width comes from the terminal itself when stdout is one; an exported `COLUMNS`
 overrides it, and pipes, redirects and `--output-file` get 80. Whatever the
@@ -555,11 +540,12 @@ interleaved with other programs' output and have no table to belong to. The
 report on stdout does not.
 
 `--max-resources` caps how many resources get a `--details` section of their
-own (`0`, the default, gives every one of them a section); the overview draws
-no per-resource sections, so it is only accepted alongside `--details`. When it
-bites, the report says how many it withheld; every resource still appears in
-Report Summary. It affects only this format: `json` and `sarif` always carry
-the full set.
+own (`0`, the default, gives every one of them a section); the line report
+draws no per-resource sections, so it is only accepted alongside `--details`.
+When it bites, the report says how many it withheld and points at the format
+that carries them all — `3 more resources with findings not shown
+(--max-resources 1); use -o json for all of them.` It affects only this format:
+`json` and `sarif` always carry the full set.
 
 Passing and not-applicable controls are summarised but not listed, since a
 report is a list of things to do. `--show-passed` lists them too, which is what
@@ -808,28 +794,34 @@ bitbucket-bench diff last-week.json today.json
 ```
 
 ```
-bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 → 2026-01-15
-SCORE  53 → 31   (-22)
-       weighted 29/55 → 25/80
+bitbucket-bench diff  https://bitbucket.example.com  ·  2026-01-08 09:00:00 UTC → 2026-01-15 09:00:00 UTC
+SCORE  56 → 53   (-3)
+       weighted 31/55 → 29/55
 
-Regressed (3)
+Regressed (1)
 
-┌────────────┬──────────┬───────────────────┬─────────────┬──────────────────────────────────────┐
-│  Control   │ Severity │     Resource      │   Change    │                Detail                │
-├────────────┼──────────┼───────────────────┼─────────────┼──────────────────────────────────────┤
-│ CIS-1.1.15 │ HIGH     │ PLAT/payments-api │ PASS → FAIL │ Anyone with write access can push    │
-│            │          │                   │             │ directly to main, bypassing review.  │
-└────────────┴──────────┴───────────────────┴─────────────┴──────────────────────────────────────┘
+┌────────────┬──────────┬─────────────────────┬─────────────┬──────────────────────────────────────┐
+│  Control   │ Severity │      Resource       │   Change    │                Detail                │
+├────────────┼──────────┼─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ CIS-1.1.17 │ MEDIUM   │ PLAT/legacy-billing │ PASS → FAIL │ Deletion of master is restricted,    │
+│            │          │                     │             │ but dana, erin, frank, grace and 1   │
+│            │          │                     │             │ more can still delete it, taking the │
+│            │          │                     │             │ branch and its protections with      │
+│            │          │                     │             │ them.                                │
+└────────────┴──────────┴─────────────────────┴─────────────┴──────────────────────────────────────┘
 
 ... one table per kind of change: New failures, Fixed, Other changes, Gone ...
 
 How to fix the regressions
 
-  CIS-1.1.15  Repository settings -> Branch permissions -> Add restriction: ...
+  CIS-1.1.17  Repository settings -> Branch permissions -> Add restriction: select the default
+              branch and enable "Prevent deletion". Then review the restriction's exempt users ...
 ```
 
-`diff` draws with the same table renderer as `scan`, so the two subcommands read
-as one program. `Gone` is one entry per resource rather than one per control:
+`diff` stays tabular, drawing with the same renderer `scan --details` uses, so
+the two subcommands read as one program. A comparison is a grid by nature —
+every row is the same four facts about a different control — which is the one
+place a table beats a line. `Gone` is one entry per resource rather than one per control:
 deleting a repository is one fact about the repository, and reporting it twenty
 times buried the regressions this command exists to surface — it shows a `-` in
 the Control column, since a table cannot drop a column for one row.
