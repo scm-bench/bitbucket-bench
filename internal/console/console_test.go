@@ -383,3 +383,31 @@ func TestCellsHonourTheirAlignment(t *testing.T) {
 		}
 	}
 }
+
+// The report reached "3 repositorys" because the resource kind is read from
+// the snapshot and handed straight to Pluralize, so the nouns this helper sees
+// are not only the ones its callers spell out by hand.
+func TestPluralizeHandlesNounsEndingInY(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		noun string
+		want string
+	}{
+		{1, "repository", "1 repository"},
+		{3, "repository", "3 repositories"},
+		{0, "repository", "0 repositories"},
+		{2, "organization", "2 organizations"},
+		{2, "control", "2 controls"},
+		{2, "more resource", "2 more resources"},
+		// A vowel before the y keeps the plain "s": "days", not "daies".
+		{2, "day", "2 days"},
+		// A bare "y" has no consonant in front of it to test, so it must not
+		// index past the start of the string.
+		{2, "y", "2 ys"},
+		{2, "", "2 s"},
+	} {
+		if got := Pluralize(tc.n, tc.noun); got != tc.want {
+			t.Errorf("Pluralize(%d, %q) = %q, want %q", tc.n, tc.noun, got, tc.want)
+		}
+	}
+}

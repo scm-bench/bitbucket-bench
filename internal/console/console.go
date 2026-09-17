@@ -101,11 +101,25 @@ func (w Writer) Line(t Tag, format string, args ...any) {
 // must not disagree: the scan report went to the trouble of writing real
 // grammar instead of "1 control(s)", and diff was writing "control(s)" three
 // files away. A shared helper is how that stops drifting.
+//
+// Nouns ending in a consonant plus "y" take "ies". That is not general English
+// pluralisation and is not meant to be — it is the one rule the nouns actually
+// passed here need, because one of them is a resource kind read straight from
+// the snapshot, which is how the report came to say "3 repositorys".
 func Pluralize(n int, noun string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, noun)
 	}
+	// stem != "" keeps a bare "y" out of this branch: it has no consonant in
+	// front of it to test, and "ies" would be the wrong answer anyway.
+	if stem, ok := strings.CutSuffix(noun, "y"); ok && stem != "" && !endsInVowel(stem) {
+		return fmt.Sprintf("%d %sies", n, stem)
+	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+func endsInVowel(s string) bool {
+	return strings.ContainsRune("aeiou", rune(s[len(s)-1]))
 }
 
 // Blank separates blocks. It is deliberately a real empty line rather than a
