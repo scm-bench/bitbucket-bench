@@ -114,10 +114,12 @@ terminal, scan offers the same choice interactively — and can save the URL and
 token you enter (0600, under your user config directory, or BITBUCKET_BENCH_CONFIG_DIR)
 so later scans need nothing. Delete the file to forget it.
 
-The table report is an overview aggregated by control: one row per failed
-control, however many resources it failed on. --details expands it to one
-section per resource; --details=<resource|control>[,...] narrows those
-sections to what is named.
+The table report is line-oriented: one record per failure, naming the resource,
+the control and what is wrong, with the one-line fix and the evidence beneath
+it. Controls needing a person aggregate to one line each, since a question that
+needs judgement is one question however many resources it spans. --details
+expands the report to a table per resource; --details=<resource|control>[,...]
+narrows those sections to what is named.
 
 Each network scan also leaves its snapshot behind (0600, under the user
 config directory), so the next question does not cost another scan:
