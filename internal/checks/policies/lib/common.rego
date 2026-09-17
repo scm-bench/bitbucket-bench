@@ -165,9 +165,11 @@ no_exemptions(r) if {
 	object.get(r, "exemptAccessKeys", 0) == 0
 }
 
-# keys_identified is false for a snapshot captured before exemptAccessKeyIds
-# existed: the total is known, the identities are not, so the keys cannot be
-# intersected across restrictions.
+# keys_identified checks a restriction against itself: exemptAccessKeys is a
+# total and exemptAccessKeyIds are the keys behind it, and a fetcher writes
+# both or neither. A file where they disagree cannot have its keys intersected
+# across restrictions, and a snapshot is JSON somebody can edit — so this is
+# MANUAL rather than a count quietly taken from the half that parsed.
 keys_identified(r) if {
 	object.get(r, "exemptAccessKeys", 0) == count(exempt_keys_of(r))
 }

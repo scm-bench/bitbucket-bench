@@ -324,6 +324,23 @@ func TestScanRejectsSnapshotWithWrongSchemaVersion(t *testing.T) {
 	}
 }
 
+// The refusal is the only thing the reader gets — refusing rather than
+// degrading means there is no partial report to fall back on — so it has to
+// say what to do about it. --last lands here on the first run after an upgrade
+// without having picked the file, and a bare version mismatch strands that
+// person with a path they did not choose.
+func TestSchemaVersionRefusalSaysHowToRecover(t *testing.T) {
+	_, err := parseSnapshot([]byte(`{"schemaVersion":"0","metadata":{"platform":"bitbucket-dc"}}`), "the snapshot")
+	if err == nil {
+		t.Fatal("an incompatible schema version was accepted")
+	}
+	for _, want := range []string{"schema version", "Capture it again with this build"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, err)
+		}
+	}
+}
+
 func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))

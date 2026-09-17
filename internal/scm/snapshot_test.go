@@ -37,14 +37,14 @@ func TestSnapshotJSONContract(t *testing.T) {
 			"defaultBranch", "defaultBranchDisplay", "pullRequestSettings", "branchRestrictions",
 			"requiredBuilds", "hooks", "branches", "files", "permissions", "admins", "available", "errors",
 		}},
-		// exemptPrincipals and exemptAccessKeyIds were added without bumping
-		// SchemaVersion, which is a version mismatch away from refusing every
-		// archived snapshot outright. They are purely additive: no existing
-		// field changed name or meaning, so a policy reading a v0.1 snapshot
-		// does not misread it — it finds the resolved set absent and reports
-		// MANUAL, which is the honest answer and the behaviour this tool is
-		// built around. Bumping would turn that graceful degradation into a
-		// hard error on every `--snapshot-in` and every `diff` baseline.
+		// exemptPrincipals and exemptAccessKeyIds arrived with schema 2. They
+		// are additive — no existing field changed name or meaning — so a rule
+		// could have read a schema 1 snapshot and reported MANUAL where the
+		// resolved set was absent. That degradation was rejected on purpose:
+		// the resulting report reads like a scan of the instance while being a
+		// scan of what an old file happened to record, and nothing in it says
+		// which. A refused snapshot costs one re-capture and cannot be
+		// mistaken for a result.
 		{scm.BranchRestriction{}, []string{
 			"id", "type", "matcherId", "matcherText", "matcherType", "scope",
 			"matchesDefaultBranch", "exemptUsers", "exemptGroups", "exemptAccessKeys",
@@ -74,7 +74,7 @@ func TestSnapshotJSONContract(t *testing.T) {
 // A version bump is what tells an old snapshot it can no longer be read, so it
 // is worth one assertion of its own rather than living only in a struct tag.
 func TestSchemaVersionIsPinned(t *testing.T) {
-	if scm.SchemaVersion != "1" {
+	if scm.SchemaVersion != "2" {
 		t.Errorf("SchemaVersion = %q; changing it is a breaking change for archived snapshots, "+
 			"so update this test only alongside the rules that read them", scm.SchemaVersion)
 	}

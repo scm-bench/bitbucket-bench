@@ -7,9 +7,17 @@ package scm
 
 import "time"
 
-// SchemaVersion is bumped whenever the snapshot shape changes in a way that
-// existing policies would misread.
-const SchemaVersion = "1"
+// SchemaVersion is bumped whenever the snapshot shape changes, and a reader
+// refuses any version it was not built for.
+//
+// The weaker rule — bump only when a policy would *misread* the older shape —
+// was tempting for additive fields, since a rule that finds a new key absent
+// can report MANUAL and carry on. That is a graceful degradation, and it is
+// the wrong default for an audit tool: the report would look like a scan of
+// the instance while quietly being a scan of what an old file happened to
+// record, and the reader has no way to tell those apart. Refusing is louder,
+// costs one re-capture, and cannot be mistaken for a result.
+const SchemaVersion = "2"
 
 // Platform identifiers used in Metadata.Platform and check metadata.
 const (

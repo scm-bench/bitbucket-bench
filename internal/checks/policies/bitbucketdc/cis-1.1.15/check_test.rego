@@ -107,9 +107,8 @@ test_exempt_access_keys_are_counted if {
 	contains(r.details, "3 access key")
 }
 
-# A snapshot captured before exemptAccessKeyIds existed knows how many keys
-# bypass a restriction but not which, so they cannot be intersected across
-# restrictions. That is a gap in the data, not a clean branch.
+# A key total with no keys behind it is a snapshot disagreeing with itself.
+# That is a gap in the data, not a clean branch, and it is reported as one.
 test_manual_when_exempt_access_keys_are_unidentified if {
 	r := cis_1_1_15.result with input as testdata.repo_input({"branchRestrictions": [
 		testdata.restriction("pull-request-only", {"exemptAccessKeys": 3}),

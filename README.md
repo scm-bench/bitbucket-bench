@@ -325,11 +325,17 @@ because a group the token could not read is not evidence that nobody is in it.
 > not a regression. `thresholds.maxBypassPrincipals: -1` restores the old
 > behaviour if you need to stage the cleanup.
 >
-> `diff` is not affected: it re-evaluates both snapshots with the running
-> build, so a baseline captured under v0.1 is judged by the same rule as
-> today's scan rather than producing a wave of false regressions. Snapshots
-> captured before this release carry no resolved exemption sets, so these
-> three controls report `MANUAL` on them rather than guessing.
+> **Snapshots captured before this release are refused, not read.** They are
+> schema 1; this build reads schema 2, and the exemption sets these controls
+> decide on are not in them. A rule *could* find the resolved set absent and
+> report `MANUAL` — but then the report reads like a scan of your instance
+> while being a scan of what an old file happened to record, and nothing in it
+> says which. So `--snapshot-in`, `--last` and both sides of a `diff` refuse a
+> schema 1 file and say to capture it again.
+>
+> In practice: re-scan once after upgrading. `--last` works from the next scan
+> onwards, and a `diff` baseline has to be re-captured before it compares
+> against anything.
 
 5 controls carried as documented manual checks — they are reported, explained, and
 excluded from the score:
