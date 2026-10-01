@@ -43,6 +43,11 @@ type Metadata struct {
 	// admin endpoint, an API missing on an older Bitbucket version, ...).
 	// Rules turn the corresponding gaps into MANUAL rather than FAIL.
 	Warnings []string `json:"warnings,omitempty"`
+	// Unlisted names the projects whose repositories could not be listed.
+	// Their repositories are not in the snapshot at all, so no rule can
+	// report them MANUAL: the gap is only visible here, and a scan with one
+	// is incomplete — it exits 2 unless scan.allowIncomplete accepts it.
+	Unlisted []string `json:"unlisted,omitempty"`
 }
 
 // Organization is the instance-level view: who administers it and who can log in.

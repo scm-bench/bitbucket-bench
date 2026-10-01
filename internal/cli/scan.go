@@ -502,7 +502,42 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return err
 	}
 
+	if err := coverageStatus(snapshot, opts); err != nil {
+		return err
+	}
 	return exitStatus(rep, opts)
+}
+
+// coverageStatus refuses a scan that cannot vouch for what it covered.
+//
+// Both cases used to exit 0. A scan that evaluated no repository — a
+// --project nobody can read, a token that sees nothing — reported only the
+// instance-level controls, which a gate on severity or score happily passed.
+// A project whose repository list could not be read dropped out of the
+// snapshot entirely, and with it every finding nobody could now report as
+// MANUAL. The report is still written in both cases; the exit code is what a
+// pipeline reads.
+func coverageStatus(snapshot *scm.Snapshot, opts *scanOptions) error {
+	repositories := 0
+	for _, p := range snapshot.Projects {
+		repositories += len(p.Repositories)
+	}
+	if repositories == 0 {
+		return &exitCodeError{
+			code: ExitError,
+			msg: "the scan evaluated no repository, so it audited nothing the repository controls cover\n" +
+				"check --project/--repository, and that the token can see the repositories you expect",
+		}
+	}
+	if n := len(snapshot.Metadata.Unlisted); n > 0 && !opts.scan.AllowIncomplete {
+		return &exitCodeError{
+			code: ExitError,
+			msg: fmt.Sprintf("the repositories of %s could not be listed (%s), so the scan is incomplete and they are missing from the report\n"+
+				"grant the token read access to them, or set scan.allowIncomplete: true to accept a partial scan",
+				console.Pluralize(n, "project"), strings.Join(snapshot.Metadata.Unlisted, ", ")),
+		}
+	}
+	return nil
 }
 
 // resolveCredentials settles which credential wins when more than one is

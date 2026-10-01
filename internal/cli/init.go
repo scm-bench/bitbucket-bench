@@ -52,6 +52,10 @@ scan:
   # scan. The snapshot maps the instance's weak points; false keeps it off
   # disk.
   cache: true
+  # Accept a scan that could not list the repositories of every project.
+  # Those repositories are missing from the report entirely, so by default
+  # such a scan exits 2 rather than passing on what it never looked at.
+  allowIncomplete: false
 
 # Numeric knobs the policies read. Uncomment to change.
 #thresholds:

@@ -64,6 +64,9 @@ type Fetcher struct {
 	warnMu   sync.Mutex
 	warnings []string
 	warnSeen map[string]bool
+	// unlisted collects the projects whose repository list could not be read,
+	// under warnMu.
+	unlisted []string
 
 	// progress reports how far along the scan is. It is called from the
 	// repository goroutines, so it must be safe for concurrent use; nil means
@@ -180,7 +183,9 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 
 	f.warnMu.Lock()
 	snapshot.Metadata.Warnings = append([]string(nil), f.warnings...)
+	snapshot.Metadata.Unlisted = append([]string(nil), f.unlisted...)
 	f.warnMu.Unlock()
+	sort.Strings(snapshot.Metadata.Unlisted)
 	return snapshot, nil
 }
 
@@ -509,6 +514,7 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 	}
 
 	projects := make([]scm.Project, 0, len(apiProjects))
+	found := map[string]bool{}
 	for i, ap := range apiProjects {
 		project := scm.Project{
 			Key:    ap.Key,
@@ -522,8 +528,38 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 		}
 		project.Repositories = repos
 		projects = append(projects, project)
+		for _, repo := range repos {
+			found[strings.ToLower(repo.FullName)] = true
+		}
+	}
+
+	// A --repository that names nothing used to scan zero repositories, warn,
+	// and exit 0: a CI gate on one repository went green the day it was
+	// renamed. A target that does not exist is a typo in the invocation.
+	var missing []string
+	for lower, spelled := range want.repositories {
+		if !found[lower] && !f.unlistedProject(strings.SplitN(lower, "/", 2)[0]) {
+			missing = append(missing, spelled)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("--repository %s: no such repository, or this token cannot see it", strings.Join(missing, ", "))
 	}
 	return projects, nil
+}
+
+// unlistedProject reports whether a project's repositories could not be
+// listed, so a missing --repository inside it is a gap, not a typo.
+func (f *Fetcher) unlistedProject(key string) bool {
+	f.warnMu.Lock()
+	defer f.warnMu.Unlock()
+	for _, k := range f.unlisted {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchRepositories lists and then fully populates the repositories of one
@@ -532,7 +568,19 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, wan
 	f.logf("listing repositories in %s", project.Key)
 	apiRepos, err := getPaged[apiRepository](ctx, f.client, "/api/1.0/projects/"+url.PathEscape(project.Key)+"/repos", nil)
 	if err != nil {
-		return nil, fmt.Errorf("list repositories in %s: %w", project.Key, err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// One project that would not list its repositories used to abort the
+		// whole scan with nothing written. Its repositories are now missing
+		// from the snapshot — which no rule can report as MANUAL, since they
+		// are not there to evaluate — so the gap is recorded by name and the
+		// scan exits 2 unless scan.allowIncomplete accepts it.
+		f.warnMu.Lock()
+		f.unlisted = append(f.unlisted, project.Key)
+		f.warnMu.Unlock()
+		f.warn("the repositories of project %s could not be listed (%v); none of them is in this report", project.Key, err)
+		return nil, nil
 	}
 
 	selected := make([]apiRepository, 0, len(apiRepos))
@@ -1197,8 +1245,9 @@ type targets struct {
 	// wholeProjects holds the lowercased keys named by --project, which select
 	// every repository beneath them.
 	wholeProjects map[string]bool
-	// repositories holds lowercased "project/slug" entries from --repository.
-	repositories map[string]bool
+	// repositories holds lowercased "project/slug" entries from --repository,
+	// mapped to the spelling the user gave, for error messages.
+	repositories map[string]string
 }
 
 // selects reports whether a repository is in scope.
@@ -1211,7 +1260,8 @@ func (t targets) selects(projectKey, slug string) bool {
 	if t.wholeProjects[strings.ToLower(projectKey)] {
 		return true
 	}
-	return t.repositories[strings.ToLower(projectKey+"/"+slug)]
+	_, ok := t.repositories[strings.ToLower(projectKey+"/"+slug)]
+	return ok
 }
 
 // keys returns the project keys to fetch, in a stable order.
@@ -1236,7 +1286,7 @@ func parseTargets(opts FetchOptions) (targets, error) {
 	t := targets{
 		projects:      map[string]string{},
 		wholeProjects: map[string]bool{},
-		repositories:  map[string]bool{},
+		repositories:  map[string]string{},
 	}
 	addProject := func(key string) {
 		lower := strings.ToLower(key)
@@ -1266,7 +1316,7 @@ func parseTargets(opts FetchOptions) (targets, error) {
 		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(slug) == "" {
 			return targets{}, fmt.Errorf("--repository %q must be PROJECT/slug", r)
 		}
-		t.repositories[strings.ToLower(r)] = true
+		t.repositories[strings.ToLower(r)] = r
 		// Naming a repository implies scanning its project.
 		addProject(key)
 	}

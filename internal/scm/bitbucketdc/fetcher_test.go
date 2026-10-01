@@ -1034,7 +1034,7 @@ func TestProjectAndRepositoryFiltersAreAdditive(t *testing.T) {
 	whole := targets{
 		projects:      map[string]string{"platform": "PLATFORM", "other": "OTHER"},
 		wholeProjects: map[string]bool{"platform": true},
-		repositories:  map[string]bool{"other/app": true},
+		repositories:  map[string]string{"other/app": "OTHER/app"},
 	}
 	for _, tc := range []struct {
 		project, slug string
@@ -1501,5 +1501,45 @@ func TestExemptAccessKeysKeepTheirIdentity(t *testing.T) {
 	}
 	if got := restrictions[1].ExemptAccessKeyIDs; !slices.Equal(got, []int{2}) {
 		t.Errorf("top-level key ids = %v, want [2]", got)
+	}
+}
+
+// A project that will not list its repositories used to abort the whole scan,
+// with nothing written. It is now recorded by name — its repositories are not
+// in the snapshot, so nothing else could say they were missed — and the rest
+// of the scan goes on.
+func TestUnlistableProjectIsRecordedAndTheScanGoesOn(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects", `{"size":2,"limit":100,"isLastPage":true,"start":0,"values":[
+		{"key":"PRJ","id":1,"name":"Project","public":false,"type":"NORMAL"},
+		{"key":"LOCKED","id":2,"name":"Locked","public":false,"type":"NORMAL"}
+	]}`)
+	f.handle("/api/1.0/projects/LOCKED/repos", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"errors":[{"message":"boom"}]}`)
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	if !slices.Equal(snapshot.Metadata.Unlisted, []string{"LOCKED"}) {
+		t.Errorf("unlisted = %v, want [LOCKED]", snapshot.Metadata.Unlisted)
+	}
+	if got := countRepositories(snapshot.Projects); got != 1 {
+		t.Errorf("scanned %d repositories, want PRJ/app still scanned", got)
+	}
+}
+
+// A --repository naming nothing used to scan zero repositories and exit 0: a
+// CI gate on one repository went green the day it was renamed.
+func TestMissingRepositoryTargetIsAnError(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ", `{"key":"PRJ","id":1,"name":"Project","public":false,"type":"NORMAL"}`)
+	server := f.start()
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{Repositories: []string{"PRJ/app", "PRJ/renamed"}})
+	if err == nil || !strings.Contains(err.Error(), "PRJ/renamed") || !strings.Contains(err.Error(), "no such repository") {
+		t.Fatalf("err = %v, want the missing repository named", err)
 	}
 }

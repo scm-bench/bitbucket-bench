@@ -1033,3 +1033,42 @@ func TestScanDemoAndReplayLeaveNoCache(t *testing.T) {
 		t.Errorf("cache after demo and replay: path = %q, err = %v; want none", path, err)
 	}
 }
+
+// A scan that evaluated no repository audited nothing the repository controls
+// cover, and a scan that could not list a project's repositories is missing
+// them without a trace in any finding. Both used to exit 0. The report is
+// still written; the exit code is what a pipeline reads.
+func TestScansThatCannotVouchForTheirCoverageExitTwo(t *testing.T) {
+	empty := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Projects = nil })
+	partial := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Metadata.Unlisted = []string{"LOCKED"} })
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+		msg  string
+	}{
+		{"no repository", []string{"scan", "--snapshot-in", empty, "-c", configWithFailOn(t, "none")}, ExitError, "evaluated no repository"},
+		{"unlisted project", []string{"scan", "--snapshot-in", partial, "-c", configWithFailOn(t, "none")}, ExitError, "LOCKED"},
+		{"unlisted project accepted", []string{"scan", "--snapshot-in", partial, "-c", configWithScan(t, "failOn: none", "allowIncomplete: true")}, ExitOK, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			root := NewRootCommand()
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetIn(strings.NewReader(""))
+			root.SetArgs(tc.args)
+			err := root.Execute()
+			if code := ExitCode(err); code != tc.want {
+				t.Errorf("exit code = %d, want %d (err %v)", code, tc.want, err)
+			}
+			if tc.msg != "" && (err == nil || !strings.Contains(err.Error(), tc.msg)) {
+				t.Errorf("error %v does not mention %q", err, tc.msg)
+			}
+			if strings.TrimSpace(stdout.String()) == "" {
+				t.Error("the report must still be written")
+			}
+		})
+	}
+}

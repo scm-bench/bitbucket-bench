@@ -111,6 +111,11 @@ type Scan struct {
 	// snapshot is a map of the instance's weak points, which is why this is
 	// a config key at all: false keeps it off disk.
 	Cache bool `yaml:"cache"`
+	// AllowIncomplete accepts a scan that could not list the repositories of
+	// every project. Off by default: those repositories are not in the report
+	// at all, so nothing in it would say they were missed, and a CI gate
+	// would pass on what it never looked at.
+	AllowIncomplete bool `yaml:"allowIncomplete"`
 }
 
 // Duration is time.Duration that reads YAML the way people write durations:
