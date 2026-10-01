@@ -248,6 +248,9 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 	for _, e := range rep.Errors {
 		notifications = append(notifications, sarifNotification{Level: "error", Message: sarifText{Text: e}})
 	}
+	if rep.Repositories == 0 {
+		notifications = append(notifications, sarifNotification{Level: "error", Message: sarifText{Text: noRepositoryEvaluated}})
+	}
 	if len(rep.Metadata.Unlisted) > 0 {
 		notifications = append(notifications, sarifNotification{Level: "error", Message: sarifText{Text: fmt.Sprintf(
 			"the repositories of %s could not be listed and are missing from this run",
@@ -259,9 +262,10 @@ func writeSARIF(w io.Writer, rep *engine.Report, opts Options) error {
 			withheld, maxSARIFResults)}})
 	}
 	run.Invocations = []sarifInvocation{{
-		// A run that could not list every project did not succeed in what it
-		// set out to do, whatever it found in the rest.
-		ExecutionSuccessful:        len(rep.Errors) == 0 && len(rep.Metadata.Unlisted) == 0,
+		// A run that could not list every project, or evaluated no repository
+		// at all, did not succeed in what it set out to do, whatever it found
+		// in the rest.
+		ExecutionSuccessful:        len(rep.Errors) == 0 && len(rep.Metadata.Unlisted) == 0 && rep.Repositories > 0,
 		ToolExecutionNotifications: notifications,
 	}}
 

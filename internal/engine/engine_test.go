@@ -410,6 +410,37 @@ func TestRequiredBuildExemptingDefaultBranchFails(t *testing.T) {
 	assertStatuses(t, got, "PRJ/hardened", map[string]engine.Status{"CIS-1.1.9": engine.StatusFail})
 }
 
+// The report says how many repositories its repository controls covered,
+// counting what was evaluated rather than what the snapshot holds: the CLI's
+// "audited nothing" exit and the machine formats' coverage failure both read
+// it, and an archived repository skipped by configuration was audited by
+// nothing.
+func TestReportCountsTheRepositoriesItEvaluated(t *testing.T) {
+	ctx := context.Background()
+	archived := hardenedRepo()
+	archived.Slug, archived.FullName, archived.Archived = "old", "PRJ/old", true
+	snapshot := snapshotWith([]scm.Repository{hardenedRepo(), openRepo(), archived}, healthyOrg())
+
+	for _, tc := range []struct {
+		skip bool
+		want int
+	}{{false, 3}, {true, 2}} {
+		cfg := config.Default()
+		cfg.SkipArchivedRepositories = tc.skip
+		eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+		if err != nil {
+			t.Fatalf("build engine: %v", err)
+		}
+		rep, err := eng.Evaluate(ctx, snapshot)
+		if err != nil {
+			t.Fatalf("evaluate: %v", err)
+		}
+		if rep.Repositories != tc.want {
+			t.Errorf("skipArchivedRepositories=%v: Repositories = %d, want %d", tc.skip, rep.Repositories, tc.want)
+		}
+	}
+}
+
 func TestConfigThresholdsAreHonoured(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

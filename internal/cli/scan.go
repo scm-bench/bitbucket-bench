@@ -522,7 +522,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return err
 	}
 
-	if err := coverageStatus(snapshot, opts); err != nil {
+	if err := coverageStatus(snapshot, rep, opts); err != nil {
 		return err
 	}
 	return exitStatus(rep, opts)
@@ -537,12 +537,11 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 // snapshot entirely, and with it every finding nobody could now report as
 // MANUAL. The report is still written in both cases; the exit code is what a
 // pipeline reads.
-func coverageStatus(snapshot *scm.Snapshot, opts *scanOptions) error {
-	repositories := 0
-	for _, p := range snapshot.Projects {
-		repositories += len(p.Repositories)
-	}
-	if repositories == 0 {
+func coverageStatus(snapshot *scm.Snapshot, rep *engine.Report, opts *scanOptions) error {
+	// Counted from what was evaluated, not from the snapshot: with
+	// skipArchivedRepositories, a snapshot holding only archived repositories
+	// evaluates none of them.
+	if rep.Repositories == 0 {
 		return &exitCodeError{
 			code: ExitError,
 			msg: "the scan evaluated no repository, so it audited nothing the repository controls cover\n" +

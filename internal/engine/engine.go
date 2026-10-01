@@ -88,6 +88,13 @@ type Report struct {
 	Metadata scm.Metadata `json:"metadata"`
 	Findings []Finding    `json:"findings"`
 	Score    Score        `json:"score"`
+	// Repositories is how many repositories the repository-scope controls
+	// were evaluated against. Zero means they audited nothing — a --project
+	// nobody can read, a token that sees nothing — and the machine-read
+	// formats say so themselves: a report holding only instance-level findings
+	// otherwise renders as a clean run to a CI view that never sees the exit
+	// code.
+	Repositories int `json:"repositories"`
 	// Errors records policies that failed to evaluate. They surface as MANUAL
 	// findings too, so a broken rule is loud but not fatal.
 	Errors []string `json:"errors,omitempty"`
@@ -240,6 +247,7 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 			repoInputs = append(repoInputs, repoInput{name: repo.FullName, value: repoValue, proj: projValue})
 		}
 	}
+	report.Repositories = len(repoInputs)
 
 	for _, check := range e.selected {
 		pq := e.prepared[check.ID]

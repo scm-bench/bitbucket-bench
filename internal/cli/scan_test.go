@@ -1041,6 +1041,17 @@ func TestScanDemoAndReplayLeaveNoCache(t *testing.T) {
 func TestScansThatCannotVouchForTheirCoverageExitTwo(t *testing.T) {
 	empty := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Projects = nil })
 	partial := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Metadata.Unlisted = []string{"LOCKED"} })
+	onlyArchived := writeSnapshotWith(t, func(s *scm.Snapshot) {
+		for i := range s.Projects {
+			for j := range s.Projects[i].Repositories {
+				s.Projects[i].Repositories[j].Archived = true
+			}
+		}
+	})
+	skipArchived := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
+	if err := os.WriteFile(skipArchived, []byte("skipArchivedRepositories: true\nscan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		name string
@@ -1049,6 +1060,8 @@ func TestScansThatCannotVouchForTheirCoverageExitTwo(t *testing.T) {
 		msg  string
 	}{
 		{"no repository", []string{"scan", "--snapshot-in", empty, "-c", configWithFailOn(t, "none")}, ExitError, "evaluated no repository"},
+		// Every repository the snapshot holds is skipped by configuration.
+		{"only skipped repositories", []string{"scan", "--snapshot-in", onlyArchived, "-c", skipArchived}, ExitError, "evaluated no repository"},
 		{"unlisted project", []string{"scan", "--snapshot-in", partial, "-c", configWithFailOn(t, "none")}, ExitError, "LOCKED"},
 		{"unlisted project accepted", []string{"scan", "--snapshot-in", partial, "-c", configWithScan(t, "failOn: none", "allowIncomplete: true")}, ExitOK, ""},
 	} {

@@ -65,8 +65,9 @@ func sampleReport() *engine.Report {
 			BaseURL: "https://bitbucket.example.com", GeneratedAt: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
 			Warnings: []string{"the user directory is not readable"},
 		},
-		Findings: findings,
-		Score:    engine.Compute(findings),
+		Findings:     findings,
+		Score:        engine.Compute(findings),
+		Repositories: 2,
 	}
 }
 
@@ -1439,6 +1440,7 @@ type sarifShape struct {
 		Invocations []struct {
 			ExecutionSuccessful        bool `json:"executionSuccessful"`
 			ToolExecutionNotifications []struct {
+				Level   string `json:"level"`
 				Message struct {
 					Text string `json:"text"`
 				} `json:"message"`
@@ -1511,9 +1513,35 @@ func TestSARIFCapsResultsMostSevereFirst(t *testing.T) {
 
 // A run that could not list every project did not do what it set out to.
 func TestSARIFMarksAnIncompleteScanUnsuccessful(t *testing.T) {
-	rep := &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com", Unlisted: []string{"LOCKED"}}}
+	rep := &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com", Unlisted: []string{"LOCKED"}}, Repositories: 3}
 	if log := renderSARIF(t, rep); log.Runs[0].Invocations[0].ExecutionSuccessful {
 		t.Error("executionSuccessful = true for a scan missing a project")
+	}
+}
+
+// Nor did one that evaluated no repository: its instance-level findings may
+// all pass, and code scanning would show a clean run for a scan that audited
+// none of what the repository controls cover.
+func TestSARIFMarksAScanOfNoRepositoryUnsuccessful(t *testing.T) {
+	rep := &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"}, Findings: []engine.Finding{
+		{CheckID: "CIS-1.3.3", Severity: "HIGH", Status: engine.StatusPass, Resource: "instance", ResourceType: engine.ResourceOrganization, Details: "3 administrators"},
+	}}
+	log := renderSARIF(t, rep)
+	inv := log.Runs[0].Invocations[0]
+	if inv.ExecutionSuccessful {
+		t.Error("executionSuccessful = true for a scan that evaluated no repository")
+	}
+	said := false
+	for _, n := range inv.ToolExecutionNotifications {
+		said = said || (n.Level == "error" && strings.Contains(n.Message.Text, "evaluated no repository"))
+	}
+	if !said {
+		t.Errorf("no error notification says why: %+v", inv.ToolExecutionNotifications)
+	}
+
+	rep.Repositories = 1
+	if log := renderSARIF(t, rep); !log.Runs[0].Invocations[0].ExecutionSuccessful {
+		t.Error("executionSuccessful = false for a complete scan")
 	}
 }
 
@@ -1569,7 +1597,8 @@ func TestSARIFCarriesAcceptedFindingsAsSuppressed(t *testing.T) {
 // an unaccepted FAIL is a failure.
 func TestJUnitCountsEveryFindingAndFailsOnlyRealFailures(t *testing.T) {
 	rep := &engine.Report{
-		Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com", Platform: scm.PlatformBitbucketDC},
+		Metadata:     scm.Metadata{BaseURL: "https://bitbucket.example.com", Platform: scm.PlatformBitbucketDC},
+		Repositories: 4,
 		Findings: []engine.Finding{
 			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusFail, Resource: "PRJ/a", Details: "pushable", Remediation: "Add a restriction."},
 			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusPass, Resource: "PRJ/b", Details: "fine"},
@@ -1638,8 +1667,26 @@ func TestJUnitCountsEveryFindingAndFailsOnlyRealFailures(t *testing.T) {
 // incomplete scan carries a failing case of its own rather than rendering as
 // a clean run.
 func TestJUnitFailsAnIncompleteScan(t *testing.T) {
-	out := renderReport(t, &engine.Report{Metadata: scm.Metadata{Unlisted: []string{"LOCKED"}}}, Options{Format: FormatJUnit})
-	if !strings.Contains(out, `classname="scan.coverage"`) || !strings.Contains(out, `failures="1"`) {
+	out := renderReport(t, &engine.Report{Metadata: scm.Metadata{Unlisted: []string{"LOCKED"}}, Repositories: 3}, Options{Format: FormatJUnit})
+	if !strings.Contains(out, `<testcase name="LOCKED" classname="scan.coverage">`) || !strings.Contains(out, `failures="1"`) {
 		t.Errorf("an incomplete scan does not fail in JUnit:\n%s", out)
+	}
+}
+
+// A scan that evaluated no repository has nothing to show for the repository
+// controls but instance-level cases, which may all pass. The CLI exits 2; a
+// test view that only reads the XML must not show green either.
+func TestJUnitFailsAScanOfNoRepository(t *testing.T) {
+	rep := &engine.Report{Findings: []engine.Finding{
+		{CheckID: "CIS-1.3.3", Severity: "HIGH", Status: engine.StatusPass, Resource: "instance", ResourceType: engine.ResourceOrganization, Details: "3 administrators"},
+	}}
+	out := renderReport(t, rep, Options{Format: FormatJUnit})
+	if !strings.Contains(out, `<testcase name="repositories" classname="scan.coverage">`) || !strings.Contains(out, `<testsuites name="bitbucket-bench" tests="2" failures="1"`) {
+		t.Errorf("a scan of no repository does not fail in JUnit:\n%s", out)
+	}
+
+	rep.Repositories = 1
+	if out := renderReport(t, rep, Options{Format: FormatJUnit}); strings.Contains(out, "scan.coverage") {
+		t.Errorf("a complete scan carries a coverage failure:\n%s", out)
 	}
 }
