@@ -1,0 +1,21 @@
+internal/engine/engine.go
+  s_48d8fa1c49bfb6::t_abfb57af8408f4 241,276,458-463
+  s_48d8fa1c49bfb6::t_90a4c295df6037 208-214,216,220,224-227,231-238,242-244,246,252,265-272,277-278,346,361,445-457,464
+  s_48d8fa1c49bfb6::t_12e45dc4e3dbee 465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34608bc3b80d3f7d63900aff4e96abfbff812108",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
