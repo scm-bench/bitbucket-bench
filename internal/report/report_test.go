@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"encoding/xml"
 	"github.com/scm-bench/bitbucket-bench/internal/engine"
 	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
@@ -1560,5 +1561,85 @@ func TestSARIFCarriesAcceptedFindingsAsSuppressed(t *testing.T) {
 	s := log.Runs[0].Results[0].Suppressions
 	if len(s) != 1 || s[0].Kind != "external" || s[0].Status != "accepted" || !strings.Contains(s[0].Justification, "release tooling") {
 		t.Errorf("suppressions = %+v", s)
+	}
+}
+
+// JUnit is for the CI systems that draw test results natively. Every finding
+// is a test case, so the totals add up and nothing is silently dropped; only
+// an unaccepted FAIL is a failure.
+func TestJUnitCountsEveryFindingAndFailsOnlyRealFailures(t *testing.T) {
+	rep := &engine.Report{
+		Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com", Platform: scm.PlatformBitbucketDC},
+		Findings: []engine.Finding{
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusFail, Resource: "PRJ/a", Details: "pushable", Remediation: "Add a restriction."},
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusPass, Resource: "PRJ/b", Details: "fine"},
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusFail, Resource: "PRJ/c", Details: "pushable",
+				Waiver: &engine.Waiver{Reason: "migration", Expires: "2027-01-01"}},
+			{CheckID: "CIS-1.3.5", Title: "MFA", Severity: "HIGH", Status: engine.StatusManual, Resource: "instance", Details: "ask the IdP"},
+			{CheckID: "CIS-1.2.1", Title: "Security policy", Severity: "LOW", Status: engine.StatusNA, Resource: "PRJ/empty", Details: "empty"},
+		},
+	}
+	out := renderReport(t, rep, Options{Format: FormatJUnit, ToolVersion: "1.2.3"})
+
+	var suites struct {
+		Tests    int `xml:"tests,attr"`
+		Failures int `xml:"failures,attr"`
+		Skipped  int `xml:"skipped,attr"`
+		Suites   []struct {
+			Name  string `xml:"name,attr"`
+			Cases []struct {
+				Name    string `xml:"name,attr"`
+				Failure *struct {
+					Type string `xml:"type,attr"`
+					Text string `xml:",chardata"`
+				} `xml:"failure"`
+				Skipped *struct {
+					Message string `xml:"message,attr"`
+				} `xml:"skipped"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal([]byte(out), &suites); err != nil {
+		t.Fatalf("JUnit output does not parse: %v\n%s", err, out)
+	}
+	if suites.Tests != 5 || suites.Failures != 1 || suites.Skipped != 3 {
+		t.Errorf("totals tests=%d failures=%d skipped=%d, want 5/1/3", suites.Tests, suites.Failures, suites.Skipped)
+	}
+	cases := map[string]string{}
+	for _, s := range suites.Suites {
+		for _, c := range s.Cases {
+			switch {
+			case c.Failure != nil:
+				cases[c.Name] = "failure:" + c.Failure.Type
+				if !strings.Contains(c.Failure.Text, "Fix: Add a restriction.") {
+					t.Errorf("failure text %q carries no fix", c.Failure.Text)
+				}
+			case c.Skipped != nil:
+				cases[c.Name] = "skipped:" + c.Skipped.Message
+			default:
+				cases[c.Name] = "pass"
+			}
+		}
+	}
+	for name, want := range map[string]string{
+		"PRJ/a": "failure:HIGH", "PRJ/b": "pass", "instance": "skipped:MANUAL: ask the IdP",
+		"PRJ/empty": "skipped:not applicable: empty",
+	} {
+		if cases[name] != want {
+			t.Errorf("%s = %q, want %q", name, cases[name], want)
+		}
+	}
+	if !strings.HasPrefix(cases["PRJ/c"], "skipped:FAIL, accepted until 2027-01-01: migration") {
+		t.Errorf("accepted failure = %q", cases["PRJ/c"])
+	}
+}
+
+// Repositories a scan could not list have no test case to fail, so an
+// incomplete scan carries a failing case of its own rather than rendering as
+// a clean run.
+func TestJUnitFailsAnIncompleteScan(t *testing.T) {
+	out := renderReport(t, &engine.Report{Metadata: scm.Metadata{Unlisted: []string{"LOCKED"}}}, Options{Format: FormatJUnit})
+	if !strings.Contains(out, `classname="scan.coverage"`) || !strings.Contains(out, `failures="1"`) {
+		t.Errorf("an incomplete scan does not fail in JUnit:\n%s", out)
 	}
 }
