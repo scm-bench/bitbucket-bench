@@ -1,0 +1,23 @@
+internal/report/report_test.go
+  s_48d8fa1c49bfb6::t_9472bc2508017a 1351,1358
+internal/report/table.go
+  s_48d8fa1c49bfb6::t_9472bc2508017a 465
+examples/snapshot.json
+  s_48d8fa1c49bfb6::t_0c00d7dd9aa1e7 14-21,23-77,79-84,93,114-123,128-172,175-184,187-194,197-212,215-220,223-227,229-230,232-233,236-246,266-275,280-305,309-316,319-342,346-353,356,360-366,368-378,404-415,417-426,432-461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d049e4bce1fc428fb29a5aab37c9d797e5abb63d",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
