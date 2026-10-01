@@ -1,0 +1,21 @@
+internal/checks/policies/bitbucketdc/cis-1.3.1/check_test.rego
+  s_48d8fa1c49bfb6::t_6fcfe2eb5d1662 52-54,60-62,92-93
+internal/checks/policies/bitbucketdc/cis-1.3.1/check.rego
+  s_48d8fa1c49bfb6::t_6fcfe2eb5d1662 41-51,53-55,58-63,83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2006da83d2c30fac5ca85a579bee680598e886b8",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
