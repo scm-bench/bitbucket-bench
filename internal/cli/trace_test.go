@@ -198,7 +198,7 @@ func TestQueryContextDistinguishesOtherwiseIdenticalRequests(t *testing.T) {
 		{"group expansion", url.Values{"limit": {"100"}, "context": {"bitbucket-admins"}}, "?context=bitbucket-admins"},
 		{"sorted", url.Values{"context": {"g"}, "start": {"100"}}, "?context=g&start=100"},
 	} {
-		if got := queryContext(tc.query); got != tc.want {
+		if got := queryContext(tc.query, false); got != tc.want {
 			t.Errorf("%s: queryContext(%v) = %q, want %q", tc.name, tc.query, got, tc.want)
 		}
 	}
@@ -235,4 +235,20 @@ func stripANSI(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+// Inside a repository's group the project and slug of a permission query are
+// the heading already; the line keeps only what tells it from its neighbours.
+func TestQueryContextDropsTheRepositoryInItsOwnGroup(t *testing.T) {
+	q := url.Values{
+		"permission.1": {"LICENSED_USER"}, "permission.2": {"REPO_WRITE"},
+		"permission.2.projectKey": {"HARD"}, "permission.2.repositorySlug": {"payments-api"},
+		"start": {"9"}, "limit": {"1"},
+	}
+	if got, want := queryContext(q, true), "?permission.1=LICENSED_USER&permission.2=REPO_WRITE&start=9"; got != want {
+		t.Errorf("in group: %q, want %q", got, want)
+	}
+	if got := queryContext(q, false); !strings.Contains(got, "projectKey=HARD") {
+		t.Errorf("outside a group the repository must stay: %q", got)
+	}
 }

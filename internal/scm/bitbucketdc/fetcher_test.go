@@ -1599,3 +1599,25 @@ func TestRepositoriesOfDifferentProjectsAreFetchedConcurrently(t *testing.T) {
 		}
 	}
 }
+
+// The paths are probed in priority order and one policy is the answer: a
+// repository with SECURITY.md at its root costs one browse, not six.
+func TestSecurityPolicyProbeStopsAtTheFirstPolicy(t *testing.T) {
+	f := standardInstance(t)
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+	if !slices.Equal(repo.Files.Probed, []string{"SECURITY.md"}) {
+		t.Errorf("probed %v, want only SECURITY.md once it was found", repo.Files.Probed)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	browses := 0
+	for _, path := range f.requests {
+		if strings.Contains(path, "/browse/") {
+			browses++
+		}
+	}
+	if browses != 1 {
+		t.Errorf("made %d browse requests, want 1", browses)
+	}
+}

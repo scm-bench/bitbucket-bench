@@ -1109,7 +1109,12 @@ func (f *Fetcher) fetchSecurityPolicy(ctx context.Context, base string, repo *sc
 			break
 		}
 		if resp.isFile() {
+			// One policy is the answer; the paths are in priority order, so
+			// the first found is the one reported. Probing the rest cost five
+			// requests per repository that already had one — on a large
+			// instance, a quarter of everything the scan sent.
 			repo.Files.SecurityPolicyPaths = append(repo.Files.SecurityPolicyPaths, path)
+			break
 		}
 	}
 	repo.Available["files"] = available
