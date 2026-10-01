@@ -499,8 +499,12 @@ func TestUnknownCheckIDIsRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := config.Default()
 			mutate(&cfg)
-			if _, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC); err == nil {
-				t.Error("engine.New accepted a check ID that is not in the bundle")
+			_, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+			if err == nil {
+				t.Fatal("engine.New accepted a check ID that is not in the bundle")
+			}
+			if name == "exception" && !strings.Contains(err.Error(), "exceptions[0]: control CIS-1.1.31") {
+				t.Errorf("the error does not name the exception entry: %v", err)
 			}
 		})
 	}
