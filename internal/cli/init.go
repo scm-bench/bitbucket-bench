@@ -74,7 +74,7 @@ scan:
 #forcePushHookKeys: [com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook]
 
 # Merge strategies that break linear history (CIS-1.1.13).
-#nonLinearMergeStrategies: [no-ff, rebase-no-ff]
+#nonLinearMergeStrategies: [no-ff, ff, rebase-no-ff]
 
 # Paths probed on the default branch for a security policy (CIS-1.2.1).
 #securityPolicyPaths: [SECURITY.md, .github/SECURITY.md, docs/SECURITY.md, SECURITY.rst, SECURITY.txt, SECURITY]

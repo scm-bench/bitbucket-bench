@@ -199,10 +199,14 @@ func Default() Config {
 		ForcePushHookKeys: []string{
 			BundledForcePushHook,
 		},
-		// "ff" is deliberately absent: it falls back to a merge commit only
-		// when the target has moved, which is the normal cost of an otherwise
-		// linear workflow. "no-ff" and "rebase-no-ff" always create one.
-		NonLinearMergeStrategies: []string{"no-ff", "rebase-no-ff"},
+		// "no-ff" and "rebase-no-ff" always create a merge commit; "ff"
+		// creates one whenever the target has moved, which on a repository
+		// with two pull requests in flight is most merges. It used to be left
+		// out as "the normal cost of an otherwise linear workflow", but the
+		// control asks for linear history to be required, and a strategy
+		// that produces merge commits as a matter of course does not require
+		// it. Squash, squash-ff-only, ff-only and rebase-ff-only never do.
+		NonLinearMergeStrategies: []string{"no-ff", "ff", "rebase-no-ff"},
 		SecurityPolicyPaths: []string{
 			"SECURITY.md",
 			".github/SECURITY.md",

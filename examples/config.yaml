@@ -96,12 +96,14 @@ signatureHookKeys:
 forcePushHookKeys:
   - com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook
 
-# CIS-1.1.13: merge strategy IDs that can introduce a merge commit. "ff" is
-# deliberately absent because it only falls back to a merge commit when the
-# target has moved. Add "squash" here if your team wants strictly linear
-# history through fast-forwards alone.
+# CIS-1.1.13: merge strategy IDs that can introduce a merge commit. "ff"
+# creates one whenever the target branch has moved since the pull request was
+# opened, which is most merges on a busy repository, so it counts. Remove it if
+# your team accepts that; add "squash" if you want history built from
+# fast-forwards alone.
 nonLinearMergeStrategies:
   - no-ff
+  - ff
   - rebase-no-ff
 
 # CIS-1.1.15/1.1.16/1.1.17: accounts that may hold a branch restriction

@@ -22,7 +22,7 @@ config := {
 	},
 	"signatureHookKeys": ["com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook"],
 	"forcePushHookKeys": ["com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook"],
-	"nonLinearMergeStrategies": ["no-ff", "rebase-no-ff"],
+	"nonLinearMergeStrategies": ["no-ff", "ff", "rebase-no-ff"],
 	"securityPolicyPaths": ["SECURITY.md", ".github/SECURITY.md"],
 	"allowedBypassPrincipals": [],
 	"maxDefaultPermission": "REPO_READ",
