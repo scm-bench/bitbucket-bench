@@ -68,6 +68,9 @@ type Fetcher struct {
 	// under warnMu.
 	unlisted []string
 
+	// repoSlots bounds repository fetches across every project at once.
+	repoSlots chan struct{}
+
 	// progress reports how far along the scan is. It is called from the
 	// repository goroutines, so it must be safe for concurrent use; nil means
 	// nobody is watching.
@@ -513,22 +516,58 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 		apiProjects = all
 	}
 
-	projects := make([]scm.Project, 0, len(apiProjects))
-	found := map[string]bool{}
+	// Projects are fetched concurrently, every repository of every project
+	// drawing on one shared bound. One project at a time ran an instance of a
+	// thousand small projects one or two requests wide however high
+	// scan.concurrency was set: the bound only ever applied inside a project.
+	f.repoSlots = make(chan struct{}, f.concurrency)
+	projects := make([]scm.Project, len(apiProjects))
+	projectSlots := make(chan struct{}, f.concurrency)
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
 	for i, ap := range apiProjects {
-		project := scm.Project{
-			Key:    ap.Key,
-			Name:   ap.Name,
-			Type:   ap.Type,
-			Public: ap.Public,
-		}
-		repos, err := f.fetchRepositories(ctx, ap, want, scanPosition{project: i + 1, projects: len(apiProjects)})
-		if err != nil {
-			return nil, err
-		}
-		project.Repositories = repos
-		projects = append(projects, project)
-		for _, repo := range repos {
+		wg.Add(1)
+		go func(i int, ap apiProject) {
+			defer wg.Done()
+			select {
+			case projectSlots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-projectSlots }()
+
+			repos, err := f.fetchRepositories(ctx, ap, want, scanPosition{project: i + 1, projects: len(apiProjects)})
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
+				return
+			}
+			projects[i] = scm.Project{
+				Key:          ap.Key,
+				Name:         ap.Name,
+				Type:         ap.Type,
+				Public:       ap.Public,
+				Repositories: repos,
+			}
+		}(i, ap)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	found := map[string]bool{}
+	for _, p := range projects {
+		for _, repo := range p.Repositories {
 			found[strings.ToLower(repo.FullName)] = true
 		}
 	}
@@ -596,7 +635,10 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, wan
 	}
 
 	out := make([]scm.Repository, len(selected))
-	sem := make(chan struct{}, f.concurrency)
+	sem := f.repoSlots
+	if sem == nil {
+		sem = make(chan struct{}, f.concurrency)
+	}
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex

@@ -14,6 +14,7 @@ import (
 
 	"github.com/scm-bench/bitbucket-bench/internal/config"
 	"github.com/scm-bench/bitbucket-bench/internal/scm"
+	"sync/atomic"
 )
 
 // fakeInstance is a stand-in Bitbucket Data Center. Handlers are keyed by the
@@ -1541,5 +1542,60 @@ func TestMissingRepositoryTargetIsAnError(t *testing.T) {
 	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{Repositories: []string{"PRJ/app", "PRJ/renamed"}})
 	if err == nil || !strings.Contains(err.Error(), "PRJ/renamed") || !strings.Contains(err.Error(), "no such repository") {
 		t.Fatalf("err = %v, want the missing repository named", err)
+	}
+}
+
+// An instance of many one-repository projects used to be scanned one request
+// wide whatever scan.concurrency said: projects ran one after another and the
+// bound applied only inside each. Repositories of different projects now run
+// side by side under one shared bound.
+func TestRepositoriesOfDifferentProjectsAreFetchedConcurrently(t *testing.T) {
+	f := standardInstance(t)
+	var projects, users []string
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("P%d", i)
+		projects = append(projects, fmt.Sprintf(`{"key":"%s","id":%d,"name":"%s","type":"NORMAL"}`, key, i+1, key))
+		f.json("/api/1.0/projects/"+key+"/repos", pageOf(fmt.Sprintf(`{"slug":"app","id":%d,"name":"app","project":{"key":"%s"}}`, 100+i, key)))
+		users = append(users, key)
+	}
+	f.json("/api/1.0/projects", fmt.Sprintf(`{"size":8,"limit":100,"isLastPage":true,"start":0,"values":[%s]}`, strings.Join(projects, ",")))
+
+	var inFlight, peak atomic.Int64
+	slow := func(w http.ResponseWriter, _ *http.Request) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		inFlight.Add(-1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"requiredApprovers":2,"mergeConfig":{"strategies":[]}}`)
+	}
+	for _, key := range users {
+		f.handle("/api/1.0/projects/"+key+"/repos/app/settings/pull-requests", slow)
+	}
+
+	server := f.start()
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second, Concurrency: 8})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	snapshot, err := NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{Concurrency: 8})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if got := countRepositories(snapshot.Projects); got != 8 {
+		t.Fatalf("fetched %d repositories, want 8", got)
+	}
+	if peak.Load() < 2 {
+		t.Errorf("at most %d repository fetch ran at once across 8 projects; projects are still serialised", peak.Load())
+	}
+	for i, p := range snapshot.Projects {
+		if p.Key != fmt.Sprintf("P%d", i) {
+			t.Errorf("project %d = %s; order must follow the listing", i, p.Key)
+		}
 	}
 }
