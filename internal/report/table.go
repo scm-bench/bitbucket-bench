@@ -462,7 +462,7 @@ func writeWarnings(w io.Writer, rep *engine.Report, p painter, width int) {
 		if unreadable {
 			blank(w)
 			prose(w, width, "  fix: ", 7,
-				"rerun with a token that has administrator read access, so the scan can evaluate what it could not see.")
+				"rerun with a token that can read what this one could not: Bitbucket shows branch permissions and hooks only to repository administrators, so give the token PROJECT_ADMIN or REPO_ADMIN on the repositories it scans.")
 		}
 	}
 	if len(rep.Errors) > 0 {

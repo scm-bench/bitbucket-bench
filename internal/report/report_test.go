@@ -1348,14 +1348,14 @@ func TestUnreadableWarningsCarryAFix(t *testing.T) {
 		"global user permissions are not readable (GET /x: 401 nope); rules will report MANUAL",
 	}
 	out := renderReport(t, rep, Options{Format: FormatTable})
-	if !containsText(out, "fix: rerun with a token that has administrator read access") {
+	if !containsText(out, "fix: rerun with a token that can read what this one could not") {
 		t.Errorf("unreadable warnings got no fix line\n---\n%s", out)
 	}
 
 	// A warning that is not about access gets no access advice.
 	rep.Metadata.Warnings = []string{"the scan covered 0 repositories"}
 	out = renderReport(t, rep, Options{Format: FormatTable})
-	if containsText(out, "administrator read access") {
+	if containsText(out, "rerun with a token that can read") {
 		t.Errorf("a non-access warning was answered with token advice\n---\n%s", out)
 	}
 }
