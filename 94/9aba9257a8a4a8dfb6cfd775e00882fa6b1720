@@ -1,0 +1,48 @@
+examples/config.yaml
+  s_48d8fa1c49bfb6::t_4421eef943121d 79-84,86-91
+internal/cli/init.go
+  s_48d8fa1c49bfb6::t_4421eef943121d 66-70
+internal/checks/policies/bitbucketdc/cis-1.1.16/metadata.json
+  s_48d8fa1c49bfb6::t_4421eef943121d 13-14
+internal/checks/policies/lib/fixtures_test.rego
+  s_48d8fa1c49bfb6::t_cdc1597e8975cf 23-24
+internal/config/config_test.go
+  s_48d8fa1c49bfb6::t_725d0b1462cf08 56,62,163-165,410-431
+  s_48d8fa1c49bfb6::t_19efcc3d801ec7 432-433
+internal/checks/policies/bitbucketdc/cis-1.1.12/metadata.json
+  s_48d8fa1c49bfb6::t_4421eef943121d 7-9,13-14
+internal/cli/examples_test.go
+  s_48d8fa1c49bfb6::t_725d0b1462cf08 93
+internal/checks/policies/bitbucketdc/cis-1.1.16/check_test.rego
+  s_48d8fa1c49bfb6::t_1eda9dc32c258a 100-189
+  s_48d8fa1c49bfb6::t_c1e2e6c2be2d0d 190-200
+internal/checks/policies/bitbucketdc/cis-1.1.12/check_test.rego
+  s_48d8fa1c49bfb6::t_1eda9dc32c258a 8-13,15,18-23,27-56,58,63
+internal/checks/policies/bitbucketdc/cis-1.1.12/check.rego
+  s_48d8fa1c49bfb6::t_7d772fa7e29906 7-14,16,21-22,40
+internal/config/config.go
+  s_48d8fa1c49bfb6::t_7d772fa7e29906 19-26,38-46,48-51,192-195,388-389,395,408-422
+  s_48d8fa1c49bfb6::t_509c32cf55bf04 423-425
+internal/checks/policies/bitbucketdc/cis-1.1.16/check.rego
+  s_48d8fa1c49bfb6::t_7d772fa7e29906 15-34,41-47,52-64,68,71,78,83,88-93
+examples/snapshot.json
+  s_48d8fa1c49bfb6::t_7b02a697f170c6 70
+internal/engine/engine_test.go
+  s_48d8fa1c49bfb6::t_a2b5aa4fc9eb33 125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "949aba9257a8a4a8dfb6cfd775e00882fa6b1720",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
