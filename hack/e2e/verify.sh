@@ -16,7 +16,12 @@ OUT=out
 # shellcheck disable=SC1091
 . "$OUT/tokens.env"
 
+# The fixture is the same on every release; what a release can report about
+# it is not, so expected.py is told which release it is describing.
+BITBUCKET_VERSION=$(curl -fsS "$BITBUCKET_URL/rest/api/latest/application-properties" | jq -r .version)
+export BITBUCKET_VERSION
 python3 expected.py >/dev/null
+echo "Bitbucket $BITBUCKET_VERSION"
 
 # A case rather than an associative array: macOS still ships bash 3.2.
 token_for() {

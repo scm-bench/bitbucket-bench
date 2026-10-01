@@ -82,12 +82,20 @@ FULL = {
     "PRIV/secret-sauce": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, P])),
 }
 
+# The fixture is the same on every release; what a release reports about it is
+# not. verify.sh reads the version off the instance; run by hand, this
+# describes the newest release the suite has been run against.
+VERSION = tuple(int(x) for x in os.environ.get("BITBUCKET_VERSION", "10.5.0").split(".")[:2])
+
 INSTANCE = {
     "CIS-1.2.2": M,
     "CIS-1.2.3": M,
     # Nobody has gone 90 days without signing in: eve never has, but her
     # account was created minutes ago, so she is new rather than dormant.
-    "CIS-1.3.1": P,
+    # Bitbucket before 10 reports no creation time for any account (measured
+    # on 8.19 and 9.4), so there "never signed in" cannot be told from "new"
+    # and the control has to ask a person.
+    "CIS-1.3.1": P if VERSION >= (10, 0) else M,
     # admin (SYS_ADMIN) plus admin2 and admin3 through bb-admins: 3, within 2-5.
     "CIS-1.3.3": P,
     "CIS-1.3.5": M,
