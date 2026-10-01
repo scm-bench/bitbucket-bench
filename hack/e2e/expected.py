@@ -32,9 +32,9 @@ REPO_CONTROLS = [
 # a repository administrator may read.
 NEEDS_ADMIN_TOKEN = {"CIS-1.1.12", "CIS-1.1.15", "CIS-1.1.16", "CIS-1.1.17"}
 
-# CIS-1.1.4 is MANUAL everywhere: "Unapprove automatically on new changes" is
-# Atlassian's separately installed Auto Unapprove app, absent from this
-# instance, so Bitbucket reports no setting at all and nothing can be read.
+# CIS-1.1.4 FAILs everywhere: "Unapprove automatically on new changes" comes
+# from Atlassian's separately installed Auto Unapprove app, absent from this
+# instance, so nothing resets an approval — and Bitbucket reports no setting.
 # CIS-1.1.6 is MANUAL by design: Bitbucket has no code owners.
 
 # Truth as seen by a token that can read everything a token can.
@@ -43,24 +43,24 @@ FULL = {
     # Verify Commit Signature hooks, and restrictions on refs/heads/main.
     # Two project administrators (alice, bob); instance admins do not count
     # toward a repository's own administrators.
-    "HARD/payments-api": dict(zip(REPO_CONTROLS, [P, M, M, P, P, P, P, P, P, P, P, P, P, P])),
+    "HARD/payments-api": dict(zip(REPO_CONTROLS, [P, F, M, P, P, P, P, P, P, P, P, P, P, P])),
     # Empty: nothing to protect on a branch that does not exist yet, no branch
     # to go stale, no file to find, nothing to merge into. Merge checks that
     # are repository-wide (approvals, tasks, strategies, hooks) still apply.
-    "HARD/empty-service": dict(zip(REPO_CONTROLS, [P, M, M, N, N, P, P, P, N, N, N, N, P, P])),
+    "HARD/empty-service": dict(zip(REPO_CONTROLS, [P, F, M, N, N, P, P, P, N, N, N, N, P, P])),
     # Default branch "trunk": the project's restrictions name refs/heads/main,
     # so pushes and deletes are unprotected; force pushes are still refused by
     # the inherited hook. SECURITY.md lives under docs/.
-    "HARD/trunk-service": dict(zip(REPO_CONTROLS, [P, M, M, P, P, P, P, P, F, P, F, P, P, P])),
+    "HARD/trunk-service": dict(zip(REPO_CONTROLS, [P, F, M, P, P, P, P, P, F, P, F, P, P, P])),
     # Nothing configured, a branch untouched since 2020, one project admin,
     # and every licensed user may write.
-    "WEAK/legacy-billing": dict(zip(REPO_CONTROLS, [F, M, M, F, F, F, F, F, F, F, F, F, F, F])),
+    "WEAK/legacy-billing": dict(zip(REPO_CONTROLS, [F, F, M, F, F, F, F, F, F, F, F, F, F, F])),
     # Every restriction exists and every one exempts the five developers.
-    "WEAK/bypassed": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, F, F, P, F, F])),
+    "WEAK/bypassed": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, F])),
     # Verify Committer checks who pushed, not whether anything was signed.
-    "WEAK/committer-hook": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, F, F, P, F, F])),
+    "WEAK/committer-hook": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, F])),
     # No restriction, but the Reject Force Push hook refuses force pushes.
-    "WEAK/hook-protected": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, P, F, P, F, F])),
+    "WEAK/hook-protected": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, P, F, P, F, F])),
     # Archived: nothing can be pushed or merged, so every control about change
     # is not applicable, including who administers it; who can read it (1.3.8:
     # every licensed user may write to WEAK) still matters.
@@ -68,11 +68,11 @@ FULL = {
     # Configured default branch "master" was never pushed. With no restriction
     # anywhere, no branch is protected whichever is default; the security
     # policy can only be looked for on a default branch that exists.
-    "WEAK/wrong-default": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, F, F, M, F, F])),
+    "WEAK/wrong-default": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, M, F, F])),
     # Public: anonymous users can read it.
-    "PUB/docs-site": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, F, F, P, F, F])),
+    "PUB/docs-site": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, F])),
     # Private, unprotected, a single project admin.
-    "PRIV/secret-sauce": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, F, F, P, F, P])),
+    "PRIV/secret-sauce": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, P])),
 }
 
 INSTANCE = {

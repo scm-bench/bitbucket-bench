@@ -19,6 +19,15 @@ result := lib.archived_na if {
 } if {
 	enabled == true
 } else := {
+	# Bitbucket reports the setting only when the app that provides it is
+	# installed. Without it there is no mechanism that resets an approval, so
+	# this is a FAIL — with a different first move than an unticked box.
+	"status": "FAIL",
+	"details": "Approvals survive updates to the source branch, so code can be merged that nobody reviewed: Bitbucket reports no approval-reset setting, which comes from Atlassian's Auto Unapprove app.",
+	"evidence": ["unapproveOnUpdate not reported (the Auto Unapprove app is not installed or not enabled)"],
+} if {
+	not lib.available("unapproveOnUpdate")
+} else := {
 	"status": "FAIL",
 	"details": "Approvals survive updates to the source branch, so code can be merged that nobody reviewed.",
 	"evidence": ["unapproveOnUpdate = false"],

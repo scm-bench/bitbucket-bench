@@ -799,12 +799,16 @@ func (f *Fetcher) fetchPullRequestSettings(ctx context.Context, base string, rep
 		return
 	}
 	repo.Available["pullRequestSettings"] = true
+	// Recorded rather than inferred: an absent key and a false one lead to the
+	// same verdict, but not to the same fix — one needs a checkbox ticked, the
+	// other an app installed first — and the report has to say which.
+	repo.Available["unapproveOnUpdate"] = settings.UnapproveOnUpdate != nil
 	repo.PullRequestSettings = scm.PullRequestSettings{
 		RequiredApprovers:        settings.RequiredApprovers.Int(),
 		RequiredAllApprovers:     settings.RequiredAllApprovers.Bool(),
 		RequiredAllTasksComplete: settings.RequiredAllTasksComplete.Bool(),
 		RequiredSuccessfulBuilds: settings.RequiredSuccessfulBuilds.Int(),
-		UnapproveOnUpdate:        settings.UnapproveOnUpdate.Bool(),
+		UnapproveOnUpdate:        settings.UnapproveOnUpdate != nil && settings.UnapproveOnUpdate.Bool(),
 		DefaultStrategy:          settings.MergeConfig.DefaultStrategy.ID,
 	}
 	for _, s := range settings.MergeConfig.Strategies {

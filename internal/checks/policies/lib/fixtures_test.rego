@@ -50,6 +50,7 @@ config := {
 every_available := {
 	"defaultBranch": true,
 	"pullRequestSettings": true,
+	"unapproveOnUpdate": true,
 	"mergeStrategies": true,
 	"branchRestrictions": true,
 	"requiredBuilds": true,

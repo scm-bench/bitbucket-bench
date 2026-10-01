@@ -4,12 +4,14 @@
   "package": "scmbench.rules.cis_1_1_4",
   "scope": "repository",
   "severity": "MEDIUM",
-  "platforms": ["bitbucket-dc"],
+  "platforms": [
+    "bitbucket-dc"
+  ],
   "automated": true,
   "title": "Ensure previous approvals are dismissed when new changes are pushed",
   "description": "Without this, an author can collect approvals on a harmless diff and then push anything they like to the same branch before merging. The approval no longer refers to the code that ships.",
-  "remediation": "Repository settings -> Pull requests: enable \"Unapprove automatically on new changes\" (labelled \"Reset approvals when the source branch is modified\" on some versions). Set it at Project settings -> Pull requests to apply it project-wide.",
-  "fixSummary": "Enable \"Unapprove automatically on new changes\" at Repository settings -> Pull requests.",
+  "remediation": "\"Unapprove automatically on new changes\" is provided by Auto Unapprove, a free Atlassian app installed separately on recent Bitbucket Data Center versions (Administration -> Find new apps -> \"Auto Unapprove for Bitbucket Data Center\"). Once installed, enable it at Repository settings -> Pull requests, at Project settings -> Pull requests to apply it to every repository in the project, or at the instance level; repositories and projects inherit it from the level above unless they override it.",
+  "fixSummary": "Install the Auto Unapprove app, then enable it at Repository settings -> Pull requests.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/checks-for-merging-pull-requests-776640039.html"

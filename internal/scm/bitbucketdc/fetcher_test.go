@@ -1453,3 +1453,30 @@ func TestUnexpandableExemptGroupLeavesTheBypassSetIncomplete(t *testing.T) {
 		t.Error("the unexpandable group is not named in the snapshot")
 	}
 }
+
+// Bitbucket 10.4.1's /settings/pull-requests, verbatim apart from the merge
+// strategies: no unapproveOnUpdate key at all, because the setting belongs to
+// the separately installed Auto Unapprove app. Absence is recorded so the
+// report can name the app instead of an unticked box.
+func TestUnreportedApprovalResetIsRecorded(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos/app/settings/pull-requests", `{
+		"mergeConfig": {"defaultStrategy": {"id": "no-ff"}, "strategies": [{"id": "no-ff", "enabled": true}], "type": "DEFAULT"},
+		"com.atlassian.bitbucket.server.bitbucket-bundled-hooks:requiredApprovers": {"enable": true, "count": 2},
+		"requiredAllApprovers": false,
+		"needsWork": false,
+		"requiredApprovers": 2,
+		"requiredAllTasksComplete": false,
+		"com.atlassian.bitbucket.server.bitbucket-build:requiredBuilds": {"enable": false, "count": 0},
+		"requiredSuccessfulBuilds": 0
+	}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+	if !repo.Available["pullRequestSettings"] || repo.Available["unapproveOnUpdate"] {
+		t.Errorf("available = %v, want pull request settings read and the approval reset recorded as unreported", repo.Available)
+	}
+	if repo.PullRequestSettings.RequiredApprovers != 2 {
+		t.Errorf("requiredApprovers = %d, want 2", repo.PullRequestSettings.RequiredApprovers)
+	}
+}

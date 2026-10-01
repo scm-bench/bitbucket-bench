@@ -21,6 +21,18 @@ test_fails_when_the_setting_is_absent if {
 	r.status == "FAIL"
 }
 
+# Measured on Bitbucket 10.4: without Atlassian's Auto Unapprove app the key is
+# never reported. Approvals are then never reset, so it fails — but the first
+# move is installing the app, and the finding has to say so.
+test_names_the_app_when_bitbucket_does_not_report_the_setting if {
+	r := cis_1_1_4.result with input as testdata.repo_input({
+		"pullRequestSettings": {},
+		"available": testdata.without("unapproveOnUpdate"),
+	})
+	r.status == "FAIL"
+	contains(r.details, "Auto Unapprove")
+}
+
 test_manual_when_merge_checks_are_unreadable if {
 	r := cis_1_1_4.result with input as testdata.repo_input({"available": testdata.without("pullRequestSettings")})
 	r.status == "MANUAL"

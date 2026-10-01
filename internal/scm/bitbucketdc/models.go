@@ -154,8 +154,11 @@ type apiPullRequestSettings struct {
 	RequiredAllApprovers     flexBool `json:"requiredAllApprovers"`
 	RequiredAllTasksComplete flexBool `json:"requiredAllTasksComplete"`
 	RequiredSuccessfulBuilds flexInt  `json:"requiredSuccessfulBuilds"`
-	UnapproveOnUpdate        flexBool `json:"unapproveOnUpdate"`
-	MergeConfig              struct {
+	// UnapproveOnUpdate is a pointer because its absence means something:
+	// the setting belongs to Atlassian's separately installed Auto Unapprove
+	// app, and Bitbucket 10.4 without the app never reports the key at all.
+	UnapproveOnUpdate *flexBool `json:"unapproveOnUpdate"`
+	MergeConfig       struct {
 		DefaultStrategy flexID `json:"defaultStrategy"`
 		Strategies      []struct {
 			ID      string `json:"id"`
