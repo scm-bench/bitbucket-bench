@@ -1,0 +1,34 @@
+internal/report/report.go
+  s_48d8fa1c49bfb6::t_a642ee2bd8b9e2 66-69
+internal/engine/engine.go
+  s_48d8fa1c49bfb6::t_087afdf30ee876 91-97,250
+internal/report/sarif.go
+  s_48d8fa1c49bfb6::t_087afdf30ee876 251-253,265-268
+internal/cli/scan.go
+  s_48d8fa1c49bfb6::t_087afdf30ee876 525,540-544
+internal/report/junit.go
+  s_48d8fa1c49bfb6::t_087afdf30ee876 118-121,123-128
+internal/report/report_test.go
+  s_48d8fa1c49bfb6::t_c4d37137eacec4 68-70,1443,1516,1522-1547,1600-1601,1670-1671,1675-1691
+  s_48d8fa1c49bfb6::t_81607dd4417545 1692
+internal/cli/scan_test.go
+  s_48d8fa1c49bfb6::t_3b7136d5d201aa 1044-1054,1063-1064
+internal/engine/engine_test.go
+  s_48d8fa1c49bfb6::t_da825ffe307cad 413-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9ff20ed06a00f60668e3e6d1b80f9d5439165b7",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
