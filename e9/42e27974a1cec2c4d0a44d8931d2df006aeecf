@@ -1,0 +1,22 @@
+hack/e2e/README.md
+  s_48d8fa1c49bfb6::t_bfb3fa7b11a8fc 12
+  s_48d8fa1c49bfb6::t_dd9d408e310ab1 53-54,73-86
+hack/e2e/seed.sh
+  s_48d8fa1c49bfb6::t_b0986b5a1007cc 35-38,41-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e942e27974a1cec2c4d0a44d8931d2df006aeecf",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
