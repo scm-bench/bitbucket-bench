@@ -88,6 +88,21 @@ restrictions_of(kinds) := [r |
 	r.type in kinds
 ]
 
+# unresolved returns the restrictions of the given types whose coverage of the
+# default branch the fetcher could not decide — a model matcher with the
+# branch model unread. Such a restriction may protect the branch, or not.
+unresolved(kinds) := [r |
+	some r in restrictions_of(kinds)
+	object.get(r, "matchUnknown", false) == true
+]
+
+# match_unknown is the outcome when no restriction is known to cover the
+# default branch and at least one might.
+match_unknown := {
+	"status": "MANUAL",
+	"details": sprintf("A restriction may cover %s, but whether it does could not be decided: its branch-model matcher could not be resolved.", [default_branch_name]),
+}
+
 # default_branch_name is the short branch name, for use in messages.
 default_branch_name := name if {
 	name := object.get(resource, "defaultBranchDisplay", "")

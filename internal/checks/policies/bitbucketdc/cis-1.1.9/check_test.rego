@@ -126,3 +126,13 @@ test_manual_when_a_condition_exists_but_the_default_branch_is_unknown if {
 	})
 	r.status == "MANUAL"
 }
+
+# A condition whose coverage of the default branch — or whose exemption's —
+# could not be decided may be the one gating it: neither PASS nor FAIL.
+test_manual_when_a_condition_cannot_be_matched if {
+	r := cis_1_1_9.result with input as testdata.repo_input({
+		"requiredBuilds": [{"matchesDefaultBranch": false, "matchUnknown": true}],
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 0},
+	})
+	r.status == "MANUAL"
+}

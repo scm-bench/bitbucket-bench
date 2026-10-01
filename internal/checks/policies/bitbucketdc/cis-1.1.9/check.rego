@@ -32,6 +32,13 @@ fully_known if {
 	lib.available("requiredBuilds")
 	lib.available("pullRequestSettings")
 	lib.default_branch_known
+
+	# A condition whose coverage of the default branch could not be decided —
+	# including one whose exemption could not be — may be the one gating it.
+	count([c |
+		some c in lib.list("requiredBuilds")
+		object.get(c, "matchUnknown", false) == true
+	]) == 0
 }
 
 # Nothing gates a merge anywhere: no required-build condition on any branch and

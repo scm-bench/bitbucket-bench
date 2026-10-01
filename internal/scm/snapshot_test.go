@@ -47,8 +47,12 @@ func TestSnapshotJSONContract(t *testing.T) {
 		// mistaken for a result.
 		{scm.BranchRestriction{}, []string{
 			"id", "type", "matcherId", "matcherText", "matcherType", "scope",
-			"matchesDefaultBranch", "exemptUsers", "exemptGroups", "exemptAccessKeys",
+			"matchesDefaultBranch", "matchUnknown", "exemptUsers", "exemptGroups", "exemptAccessKeys",
 			"exemptPrincipals", "exemptAccessKeyIds",
+		}},
+		{scm.RequiredBuild{}, []string{
+			"id", "buildParentKeys", "matcherId", "matcherType", "matcherText", "exemptMatcherId",
+			"matchesDefaultBranch", "matchUnknown",
 		}},
 		{scm.EffectivePrincipals{}, []string{"users", "groups", "count", "complete"}},
 		{scm.Permissions{}, []string{"users", "groups", "defaultPermission", "defaultPermissionKnown", "publicAccess"}},

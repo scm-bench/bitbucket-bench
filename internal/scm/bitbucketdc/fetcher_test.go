@@ -1152,7 +1152,10 @@ func TestExemptGroupsAreExpandedToPeople(t *testing.T) {
 		"scope": {"type": "REPOSITORY", "resourceId": 10},
 		"users": [{"name": "build-bot"}],
 		"groups": ["developers"],
-		"accessKeys": [{"id": 7}, {"id": 9}]
+		"accessKeys": [
+			{"key": {"id": 7, "label": "deploy-one", "text": "ssh-ed25519 AAAA deploy-one"}},
+			{"key": {"id": 9, "label": "deploy-two", "text": "ssh-ed25519 AAAA deploy-two"}}
+		]
 	}`))
 	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1467,5 +1470,36 @@ func TestArchivedRepositoriesStillHaveTheirBaseAccessResolved(t *testing.T) {
 	perms := snapshot.Projects[0].Repositories[0].Permissions
 	if perms.DefaultPermission != "REPO_READ" || !perms.DefaultPermissionKnown {
 		t.Errorf("archived base access = %q (known %v), want REPO_READ, known", perms.DefaultPermission, perms.DefaultPermissionKnown)
+	}
+}
+
+// Bitbucket 10.4 nests an exempt key's identity: accessKeys[].key.id. Reading a
+// top-level id made every key 0, and two restrictions exempting two different
+// keys then intersected to "one key can bypass both" — a FAIL for a branch
+// nobody could get past. The top-level shape is still read when it is the only
+// one present.
+func TestExemptAccessKeysKeepTheirIdentity(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", `{"size":2,"limit":100,"isLastPage":true,"start":0,"values":[
+		{"id": 1, "type": "pull-request-only",
+		 "matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH", "name": "Branch"}, "active": true},
+		 "scope": {"type": "REPOSITORY", "resourceId": 10}, "users": [], "groups": [],
+		 "accessKeys": [{"key": {"id": 1, "label": "deploy-one", "text": "ssh-ed25519 AAAA deploy-one"}}]},
+		{"id": 2, "type": "fast-forward-only",
+		 "matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH", "name": "Branch"}, "active": true},
+		 "scope": {"type": "REPOSITORY", "resourceId": 10}, "users": [], "groups": [],
+		 "accessKeys": [{"id": 2}]}
+	]}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	restrictions := firstRepository(t, snapshot).BranchRestrictions
+	if len(restrictions) != 2 {
+		t.Fatalf("got %d restrictions, want 2", len(restrictions))
+	}
+	if got := restrictions[0].ExemptAccessKeyIDs; !slices.Equal(got, []int{1}) {
+		t.Errorf("nested key ids = %v, want [1]", got)
+	}
+	if got := restrictions[1].ExemptAccessKeyIDs; !slices.Equal(got, []int{2}) {
+		t.Errorf("top-level key ids = %v, want [2]", got)
 	}
 }

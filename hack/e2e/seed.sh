@@ -118,7 +118,7 @@ grant_user PRIV alice PROJECT_ADMIN
 repo HARD payments-api
 repo HARD empty-service
 repo HARD trunk-service trunk
-for r in legacy-billing bypassed committer-hook hook-protected archived-tool; do repo WEAK "$r"; done
+for r in legacy-billing bypassed committer-hook hook-protected archived-tool patterns deploy-keys; do repo WEAK "$r"; done
 # wrong-default: configured default branch "master", but only "main" is ever
 # pushed. Common after an upgrade, when git's own default moved to main and the
 # instance's did not. Bitbucket then reports a default branch that does not
@@ -187,6 +187,8 @@ push WEAK committer-hook main SECURITY.md
 push WEAK hook-protected main SECURITY.md
 push WEAK archived-tool main
 push WEAK wrong-default main SECURITY.md
+push WEAK patterns main SECURITY.md
+push WEAK deploy-keys main SECURITY.md
 push PUB docs-site main SECURITY.md
 push PRIV secret-sauce main SECURITY.md
 
@@ -234,6 +236,42 @@ hook_repo WEAK committer-hook "$HOOKS:verify-committer-hook"
 # hook-protected: no branch restriction at all, but force pushes are refused
 # by the bundled Reject Force Push hook, so CIS-1.1.16 is satisfied.
 hook_repo WEAK hook-protected "$HOOKS:force-push-hook"
+# patterns: every matcher kind the fetcher has to resolve itself.
+#   pull-request-only by PATTERN "heads/**/main" — Atlassian's own suffix
+#     example; a full-ref-or-short-name comparison never matched it.
+#   fast-forward-only by MODEL_BRANCH production, with the branch model's
+#     production branch set to main.
+#   no-deletes by MODEL_CATEGORY RELEASE, which does not cover main.
+#   a required build on every branch, exempting "heads/**/main": CI is not
+#     required on main after all.
+api PUT /rest/branch-utils/latest/projects/WEAK/repos/patterns/branchmodel/configuration \
+  '{"development":{"refId":null,"useDefault":true},"production":{"refId":"refs/heads/main","useDefault":false},"types":[{"id":"BUGFIX","enabled":true,"prefix":"bugfix/"},{"id":"FEATURE","enabled":true,"prefix":"feature/"},{"id":"HOTFIX","enabled":true,"prefix":"hotfix/"},{"id":"RELEASE","enabled":true,"prefix":"release/"}]}'
+restrict projects/WEAK/repos/patterns pull-request-only PATTERN 'heads/**/main'
+restrict projects/WEAK/repos/patterns fast-forward-only MODEL_BRANCH production
+restrict projects/WEAK/repos/patterns no-deletes MODEL_CATEGORY RELEASE
+api POST /rest/required-builds/latest/projects/WEAK/repos/patterns/condition \
+  '{"buildParentKeys":["ci-build"],"refMatcher":{"id":"ANY_REF_MATCHER_ID","type":{"id":"ANY_REF"}},"exemptRefMatcher":{"id":"heads/**/main","type":{"id":"PATTERN"}}}'
+
+# deploy-keys: two deploy keys, each exempt from a different direct-push
+# restriction on main. Nobody is exempt from both, so direct pushes are blocked
+# for everyone — but a fetcher reading every key's id as 0 sees one key exempt
+# from both. A third restriction lets the first key rewrite history.
+KEYS=$(mktemp -d)
+for k in deploy-one deploy-two; do
+  ssh-keygen -q -t ed25519 -N '' -C "$k" -f "$KEYS/$k"
+  api POST /rest/keys/latest/projects/WEAK/repos/deploy-keys/ssh "{\"key\":{\"text\":\"$(cat "$KEYS/$k.pub")\"},\"permission\":\"REPO_WRITE\"}"
+done
+rm -rf "$KEYS"
+key_id() { curl -fsS -b "$ADMIN_JAR" "$B/rest/keys/latest/projects/WEAK/repos/deploy-keys/ssh" | jq -r ".values[] | select(.key.label == \"$1\") | .key.id"; }
+KEY1=$(key_id deploy-one)
+KEY2=$(key_id deploy-two)
+api POST /rest/branch-permissions/2.0/projects/WEAK/repos/deploy-keys/restrictions \
+  "{\"type\":\"pull-request-only\",\"matcher\":{\"id\":\"refs/heads/main\",\"type\":{\"id\":\"BRANCH\"}},\"accessKeys\":[$KEY1]}"
+api POST /rest/branch-permissions/2.0/projects/WEAK/repos/deploy-keys/restrictions \
+  "{\"type\":\"pull-request-only\",\"matcher\":{\"id\":\"main\",\"type\":{\"id\":\"PATTERN\"}},\"accessKeys\":[$KEY2]}"
+api POST /rest/branch-permissions/2.0/projects/WEAK/repos/deploy-keys/restrictions \
+  "{\"type\":\"fast-forward-only\",\"matcher\":{\"id\":\"refs/heads/main\",\"type\":{\"id\":\"BRANCH\"}},\"accessKeys\":[$KEY1]}"
+
 # archived-tool: read-only from here on.
 api PUT /rest/api/latest/projects/WEAK/repos/archived-tool '{"archived":true}'
 

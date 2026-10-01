@@ -784,14 +784,16 @@ func (f *Fetcher) fetchBranchRestrictions(ctx context.Context, projectKey, slug 
 	}
 	repo.Available["branchRestrictions"] = true
 	for _, r := range restrictions {
+		matches, known := matchesDefaultBranch(r.Matcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
 		br := scm.BranchRestriction{
 			ID:                   r.ID,
-			Type:                 strings.ToLower(strings.TrimSpace(r.Type.ID)),
+			Type:                 normalizeRestrictionType(r.Type.ID),
 			MatcherID:            r.Matcher.ID,
 			MatcherType:          strings.ToUpper(strings.TrimSpace(r.Matcher.Type.ID)),
 			MatcherText:          r.Matcher.DisplayID,
 			Scope:                r.Scope.Type,
-			MatchesDefaultBranch: matchesDefaultBranch(r.Matcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model),
+			MatchesDefaultBranch: matches,
+			MatchUnknown:         !known && repo.Available["defaultBranch"],
 			ExemptAccessKeys:     len(r.AccessKeys),
 		}
 		for _, u := range r.Users {
@@ -799,7 +801,7 @@ func (f *Fetcher) fetchBranchRestrictions(ctx context.Context, projectKey, slug 
 		}
 		br.ExemptGroups = append(br.ExemptGroups, r.Groups...)
 		for _, k := range r.AccessKeys {
-			br.ExemptAccessKeyIDs = append(br.ExemptAccessKeyIDs, k.ID)
+			br.ExemptAccessKeyIDs = append(br.ExemptAccessKeyIDs, k.id())
 		}
 		// Expanding here rather than in the rule is the usual split: group
 		// membership is an API call, and a policy may not make one. The
@@ -808,6 +810,14 @@ func (f *Fetcher) fetchBranchRestrictions(ctx context.Context, projectKey, slug 
 		br.ExemptPrincipals = f.expandPrincipals(ctx, exemptGrants(br), true)
 		repo.BranchRestrictions = append(repo.BranchRestrictions, br)
 	}
+}
+
+// normalizeRestrictionType maps a restriction type to the hyphenated lower-case
+// form Bitbucket 8+ uses ("pull-request-only"). Older documentation shows the
+// enum spelling ("PULL_REQUEST_ONLY"), which lower-casing alone would leave as
+// "pull_request_only" and no rule would recognise.
+func normalizeRestrictionType(t string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(t)), "_", "-")
 }
 
 // exemptGrants renders a restriction's exempt users and groups as the grant
@@ -853,21 +863,30 @@ func (f *Fetcher) fetchRequiredBuilds(ctx context.Context, projectKey, slug stri
 	}
 	repo.Available["requiredBuilds"] = true
 	for _, c := range conditions {
+		matches, known := matchesDefaultBranch(c.RefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
 		rb := scm.RequiredBuild{
 			ID:                   c.ID,
 			BuildParentKeys:      c.BuildParentKeys,
 			MatcherID:            c.RefMatcher.ID,
 			MatcherType:          strings.ToUpper(strings.TrimSpace(c.RefMatcher.Type.ID)),
 			MatcherText:          c.RefMatcher.DisplayID,
-			MatchesDefaultBranch: matchesDefaultBranch(c.RefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model),
+			MatchesDefaultBranch: matches,
 		}
 		if c.ExemptRefMatcher != nil {
 			rb.ExemptMatcherID = c.ExemptRefMatcher.ID
-			// An exemption covering the default branch cancels the condition.
-			if matchesDefaultBranch(*c.ExemptRefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model) {
-				rb.MatchesDefaultBranch = false
+			exempt, exemptKnown := matchesDefaultBranch(*c.ExemptRefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
+			switch {
+			case exempt:
+				// An exemption covering the default branch cancels the condition.
+				matches = false
+			case !exemptKnown:
+				// It may cancel it: the condition cannot count as gating the
+				// default branch until somebody can tell.
+				known = false
 			}
+			rb.MatchesDefaultBranch = matches && known
 		}
+		rb.MatchUnknown = !known && repo.Available["defaultBranch"]
 		repo.RequiredBuilds = append(repo.RequiredBuilds, rb)
 	}
 }

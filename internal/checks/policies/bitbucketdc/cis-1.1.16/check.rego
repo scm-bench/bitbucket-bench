@@ -62,6 +62,9 @@ result := lib.archived_na if {
 	hook_known_absent
 } else := lib.default_branch_unknown if {
 	not lib.default_branch_known
+} else := lib.match_unknown if {
+	count(blocked) == 0
+	count(lib.unresolved(kinds)) > 0
 } else := {
 	"status": "FAIL",
 	"details": sprintf("%s can be force pushed, letting anyone with write access rewrite or erase merged history.", [lib.default_branch_name]),
@@ -76,6 +79,7 @@ result := lib.archived_na if {
 } if {
 	lib.bypass_exceeded(blocked)
 	hook_known_absent
+	count(lib.unresolved(kinds)) == 0
 } else := {
 	"status": "MANUAL",
 	"details": sprintf("History rewrites on %s are restricted, but a group holding an exemption could not be expanded, so whether the restriction binds everyone is unknown.", [lib.default_branch_name]),

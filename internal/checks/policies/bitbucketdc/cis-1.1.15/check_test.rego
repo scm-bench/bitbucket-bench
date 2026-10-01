@@ -173,3 +173,39 @@ test_manual_when_a_restriction_exists_but_the_default_branch_is_unknown if {
 	r.status == "MANUAL"
 	contains(r.details, "default branch could not be resolved")
 }
+
+# The only restriction of the right kind names a model branch, and the branch
+# model could not be read: it may cover the default branch or not. The fetcher
+# used to guess "development is the default branch", which passed a gitflow
+# repository whose development branch is develop.
+test_manual_when_the_only_restriction_cannot_be_matched if {
+	r := cis_1_1_15.result with input as testdata.repo_input({
+		"branchRestrictions": [{"type": "pull-request-only", "matchesDefaultBranch": false, "matchUnknown": true}],
+	})
+	r.status == "MANUAL"
+	contains(r.details, "could not be decided")
+}
+
+# One restriction binds everyone on the default branch; another, unresolved,
+# changes nothing — it can only add protection.
+test_a_resolved_binding_restriction_passes_beside_an_unresolved_one if {
+	r := cis_1_1_15.result with input as testdata.repo_input({
+		"branchRestrictions": [
+			testdata.restriction("pull-request-only", {}),
+			{"type": "pull-request-only", "matchesDefaultBranch": false, "matchUnknown": true},
+		],
+	})
+	r.status == "PASS"
+}
+
+# The known restriction exempts the team; the unresolved one may cover the
+# branch and bind them after all, so this is not yet a hole.
+test_a_bypass_is_not_a_hole_while_another_restriction_is_unresolved if {
+	r := cis_1_1_15.result with input as testdata.repo_input({
+		"branchRestrictions": [
+			testdata.restriction("pull-request-only", testdata.exempt(["alice", "bob"])),
+			{"type": "pull-request-only", "matchesDefaultBranch": false, "matchUnknown": true},
+		],
+	})
+	r.status == "MANUAL"
+}

@@ -185,6 +185,11 @@ type BranchRestriction struct {
 	// model and glob semantics. Policies read this boolean instead of trying
 	// to re-implement matcher matching in Rego.
 	MatchesDefaultBranch bool `json:"matchesDefaultBranch"`
+	// MatchUnknown is true when whether the matcher covers the default branch
+	// could not be decided — a model matcher with the branch model unread.
+	// MatchesDefaultBranch is false then, and a rule must not read that as
+	// "covers another branch".
+	MatchUnknown bool `json:"matchUnknown,omitempty"`
 	// Exempt principals can bypass the restriction, as granted — groups appear
 	// as groups.
 	ExemptUsers      []string `json:"exemptUsers,omitempty"`
@@ -211,6 +216,9 @@ type RequiredBuild struct {
 	MatcherText          string   `json:"matcherText,omitempty"`
 	ExemptMatcherID      string   `json:"exemptMatcherId,omitempty"`
 	MatchesDefaultBranch bool     `json:"matchesDefaultBranch"`
+	// MatchUnknown: as on BranchRestriction, including an exemption whose
+	// coverage of the default branch could not be decided.
+	MatchUnknown bool `json:"matchUnknown,omitempty"`
 }
 
 // Hook is a repository hook (pre- or post-receive), enabled or not.

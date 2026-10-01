@@ -69,6 +69,13 @@ FULL = {
     # anywhere, no branch is protected whichever is default; the security
     # policy can only be looked for on a default branch that exists.
     "WEAK/wrong-default": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, M, F, F])),
+    # Matchers resolved by the fetcher: the suffix pattern covers main, the
+    # production model branch is main, the RELEASE category is not; the
+    # required build exempts main through a suffix pattern.
+    "WEAK/patterns": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, P, P, F, P, F, F])),
+    # Each direct-push restriction exempts a different deploy key, so nobody
+    # is exempt from both; the history-rewrite one lets a key through.
+    "WEAK/deploy-keys": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, P, F, F, P, F, F])),
     # Public: anonymous users can read it.
     "PUB/docs-site": dict(zip(REPO_CONTROLS, [F, F, M, P, F, F, F, F, F, F, F, P, F, F])),
     # Private, unprotected, a single project admin.
