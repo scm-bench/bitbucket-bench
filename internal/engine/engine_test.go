@@ -213,10 +213,10 @@ func healthyOrg() scm.Organization {
 		},
 		EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"alice", "bob"}, Count: 2, Complete: true},
 		Users: []scm.User{
-			{Name: "alice", Active: true, HasRepositoryAccess: true, InactiveDays: 1},
-			{Name: "bob", Active: true, HasRepositoryAccess: true, InactiveDays: 20},
+			{Name: "alice", Active: true, Licensed: true, InactiveDays: 1},
+			{Name: "bob", Active: true, Licensed: true, InactiveDays: 20},
 		},
-		Available: map[string]bool{"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true},
+		Available: map[string]bool{"admins": true, "users": true, "userActivity": true, "licensedUsers": true},
 	}
 }
 
@@ -356,7 +356,7 @@ func TestDormantUserDetection(t *testing.T) {
 	t.Run("dormant user with access fails", func(t *testing.T) {
 		org := healthyOrg()
 		org.Users = append(org.Users, scm.User{
-			Name: "ghost", Active: true, HasRepositoryAccess: true, InactiveDays: 400,
+			Name: "ghost", Active: true, Licensed: true, InactiveDays: 400,
 		})
 		got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
 		assertStatuses(t, got, engine.InstanceResourceName, map[string]engine.Status{"CIS-1.3.1": engine.StatusFail})
@@ -365,7 +365,7 @@ func TestDormantUserDetection(t *testing.T) {
 	t.Run("dormant user without repository access is ignored", func(t *testing.T) {
 		org := healthyOrg()
 		org.Users = append(org.Users, scm.User{
-			Name: "service-account", Active: true, HasRepositoryAccess: false, InactiveDays: 400,
+			Name: "service-account", Active: true, Licensed: false, InactiveDays: 400,
 		})
 		got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
 		assertStatuses(t, got, engine.InstanceResourceName, map[string]engine.Status{"CIS-1.3.1": engine.StatusPass})
@@ -553,7 +553,7 @@ func TestZeroMaxOrgAdminsMeansNoUpperLimit(t *testing.T) {
 		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"a", "b", "c"}, Count: 3, Complete: true},
-			Available:       map[string]bool{"adminUsers": true, "adminGroups": true},
+			Available:       map[string]bool{"admins": true},
 		},
 	}
 

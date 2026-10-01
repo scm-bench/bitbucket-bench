@@ -30,7 +30,7 @@ func TestSnapshotJSONContract(t *testing.T) {
 		{scm.Snapshot{}, []string{"schemaVersion", "metadata", "organization", "projects"}},
 		{scm.Metadata{}, []string{"tool", "toolVersion", "platform", "baseUrl", "generatedAt", "warnings"}},
 		{scm.Organization{}, []string{"admins", "effectiveAdmins", "users", "available"}},
-		{scm.User{}, []string{"name", "displayName", "emailAddress", "active", "lastActivityEpoch", "inactiveDays", "hasRepositoryAccess"}},
+		{scm.User{}, []string{"name", "displayName", "emailAddress", "active", "lastActivityEpoch", "inactiveDays", "neverSignedIn", "createdEpoch", "ageDays", "licensed"}},
 		{scm.Project{}, []string{"key", "name", "type", "public", "permissions", "repositories"}},
 		{scm.Repository{}, []string{
 			"slug", "name", "projectKey", "fullName", "public", "archived", "forkable", "empty",

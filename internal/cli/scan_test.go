@@ -62,9 +62,9 @@ func writeSnapshotWith(t *testing.T, mutate func(*scm.Snapshot)) string {
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"alice", "bob"}, Count: 2, Complete: true},
 			Users: []scm.User{
-				{Name: "alice", Active: true, HasRepositoryAccess: true, InactiveDays: 1},
+				{Name: "alice", Active: true, Licensed: true, InactiveDays: 1},
 			},
-			Available: map[string]bool{"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true},
+			Available: map[string]bool{"admins": true, "users": true, "userActivity": true, "licensedUsers": true},
 		},
 		Projects: []scm.Project{{
 			Key:  "PRJ",
@@ -561,9 +561,9 @@ func TestStderrWriterHonoursNoColor(t *testing.T) {
 // MANUAL is excluded from both sides of the score, which is right control by
 // control — an instance should not be marked down for a question its API
 // cannot answer — and perverse in aggregate, because it shrinks the
-// denominator. The fixture below makes the point: with nothing readable, three
-// controls stay decidable, all three pass, and a scan that saw almost nothing
-// reports a perfect 100 and exits 0.
+// denominator. The fixture below makes the point: with nothing readable, one
+// control stays decidable (default access, from the public flag), it passes,
+// and a scan that saw almost nothing reports a perfect 100 and exits 0.
 //
 // Note which threshold catches it. --fail-under cannot: the score is 100.
 // Only --max-manual asks the question that matters here, which is not "is the
@@ -601,7 +601,7 @@ func TestScanThresholds(t *testing.T) {
 		{"blind scan passes by default", []string{"scan", "--snapshot-in", blind}, ExitOK},
 		{"failUnder cannot catch a blind scan", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "failUnder: 100")}, ExitOK},
 		{"maxManual catches it", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 50")}, ExitFindings},
-		{"maxManual generous enough", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 90")}, ExitOK},
+		{"maxManual generous enough", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 95")}, ExitOK},
 
 		{"failUnder out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "failUnder: 101")}, ExitError},
 		{"maxManual out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "maxManual: -2")}, ExitError},

@@ -4,12 +4,14 @@
   "package": "scmbench.rules.cis_1_3_8",
   "scope": "repository",
   "severity": "MEDIUM",
-  "platforms": ["bitbucket-dc"],
+  "platforms": [
+    "bitbucket-dc"
+  ],
   "automated": true,
   "title": "Ensure default repository access is restricted",
   "description": "Blanket grants are the quietest way for access to spread: nobody requests them, nobody reviews them, and they apply to accounts created long after the decision was made. Access should be granted deliberately, to named people or groups.",
-  "remediation": "Project settings -> Project permissions: clear the default permission granted to all licensed users, or reduce it to Read, and grant Write/Admin to specific groups instead. To remove anonymous access, uncheck \"Public access\" at Repository settings -> Repository details and at Project settings -> Project details. For instances that intentionally publish code, set allowPublicRepositories: true in bitbucket-bench's config.",
-  "fixSummary": "Clear the default permission for all licensed users at Project settings -> Project permissions.",
+  "remediation": "A permission every licensed user holds comes from one of two places: the project's default permission at Project settings -> Project permissions (\"Default permissions\"), or a grant to a group that holds everyone — typically stash-users or an all-staff directory group — at Project settings -> Project permissions or Repository settings -> Repository permissions. Reduce either to Read, or remove it, and grant Write and Admin to specific groups instead. To remove anonymous access, uncheck \"Public access\" at Repository settings -> Repository details and at Project settings -> Project details. For instances that intentionally publish code, set allowPublicRepositories: true in bitbucket-bench's config.",
+  "fixSummary": "Reduce the default permission at Project settings -> Project permissions to Read.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-project-permissions-776639801.html"

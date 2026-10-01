@@ -270,9 +270,12 @@ type apiUser struct {
 	EmailAddress string `json:"emailAddress"`
 	Active       bool   `json:"active"`
 	Type         string `json:"type"`
-	// LastAuthenticationTimestamp is milliseconds since epoch and is only
-	// present on instances that expose it to admins.
+	// LastAuthenticationTimestamp is milliseconds since epoch. Bitbucket 10.4
+	// omits the key — rather than sending null — for an account that has never
+	// authenticated, by password, token or session alike.
 	LastAuthenticationTimestamp *int64 `json:"lastAuthenticationTimestamp"`
+	// CreatedTimestamp is milliseconds since epoch, when reported.
+	CreatedTimestamp *int64 `json:"createdTimestamp"`
 }
 
 // apiUserPermission pairs a user with a granted permission.

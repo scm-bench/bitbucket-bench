@@ -25,8 +25,9 @@ range_note := sprintf("within the recommended range of %d to %d", [minimum, maxi
 	maximum > 0
 } else := sprintf("at or above the recommended minimum of %d (no upper limit configured)", [minimum])
 
-# effectiveAdmins expands admin groups to their members. When a group could not
-# be expanded, complete is false and the count is a lower bound.
+# effectiveAdmins is Bitbucket's own answer to "who holds ADMIN or SYS_ADMIN",
+# groups resolved and inactive accounts left out. complete is false when it is
+# a lower bound.
 total := object.get(lib.resource, ["effectiveAdmins", "count"], 0)
 
 complete := object.get(lib.resource, ["effectiveAdmins", "complete"], false)
@@ -34,7 +35,7 @@ complete := object.get(lib.resource, ["effectiveAdmins", "complete"], false)
 admins := lib.list(["effectiveAdmins", "users"])
 
 decidable if {
-	lib.available("adminUsers")
+	lib.available("admins")
 	complete
 }
 
@@ -48,7 +49,7 @@ result := {
 	over_limit
 } else := {
 	"status": "MANUAL",
-	"details": "Global permissions could not be fully read (the token may lack admin rights, or an admin group could not be expanded), so the administrator count is unknown.",
+	"details": "The instance administrators could not be resolved, so their number is unknown.",
 } if {
 	not decidable
 } else := {

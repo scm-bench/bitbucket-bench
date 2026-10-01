@@ -48,14 +48,22 @@ type Metadata struct {
 // Organization is the instance-level view: who administers it and who can log in.
 type Organization struct {
 	// Admins holds principals with SYS_ADMIN or ADMIN global permission, as
-	// granted — groups appear as groups.
+	// granted — groups appear as groups. Only a password session of an
+	// instance administrator can read the grant table; it is evidence, and
+	// nothing decides a verdict from it.
 	Admins []PrincipalPermission `json:"admins,omitempty"`
-	// EffectiveAdmins is the same set with groups expanded to their members,
-	// which is what an administrator count has to be based on.
+	// EffectiveAdmins is the set of people who hold instance administrator
+	// rights, groups resolved — what an administrator count has to be based
+	// on. Bitbucket answers it itself (users?permission=ADMIN), for any token.
 	EffectiveAdmins EffectivePrincipals `json:"effectiveAdmins"`
 	// Users is the full user directory, when readable.
 	Users []User `json:"users,omitempty"`
-	// Available marks which instance-level fetches succeeded.
+	// Available marks which instance-level fetches succeeded:
+	//   admins         the effective administrator set (EffectiveAdmins)
+	//   adminGrants    the global grant table (Admins)
+	//   users          the user directory
+	//   userActivity   the platform reports last-authentication times
+	//   licensedUsers  which users are licensed (Users[].Licensed)
 	Available map[string]bool `json:"available"`
 }
 
@@ -73,9 +81,23 @@ type User struct {
 	// InactiveDays is derived from LastActivityEpoch at capture time.
 	// -1 means unknown.
 	InactiveDays int `json:"inactiveDays"`
-	// HasRepositoryAccess is true when the user holds any global, project or
-	// repository grant that gives them access to code.
-	HasRepositoryAccess bool `json:"hasRepositoryAccess"`
+	// NeverSignedIn is true only when the platform establishes that the
+	// account has never authenticated: on Bitbucket, the instance reports
+	// last-authentication times (some account carries one) and this account
+	// has none. LastActivityEpoch == 0 without it still means unknown.
+	NeverSignedIn bool `json:"neverSignedIn"`
+	// CreatedEpoch is when the account was created, in Unix seconds; 0 when
+	// unknown. It is what tells a dormant account that never signed in from
+	// one created this morning.
+	CreatedEpoch int64 `json:"createdEpoch"`
+	// AgeDays is days since CreatedEpoch at capture time; -1 when unknown.
+	AgeDays int `json:"ageDays"`
+	// Licensed is true when the account may sign in and use the instance
+	// (Bitbucket's LICENSED_USER). The dormant-account control reviews every
+	// active, licensed account: each can sign in, read everything open to all
+	// users and create personal repositories, and each is a credential an
+	// attacker can use.
+	Licensed bool `json:"licensed"`
 }
 
 // Project is a Bitbucket project (a GitHub organization is the closest analogue).

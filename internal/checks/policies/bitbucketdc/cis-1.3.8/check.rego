@@ -38,7 +38,10 @@ anonymous_violation := ["the repository is readable by anonymous users"] if {
 	not allow_public
 } else := []
 
-default_violation := [sprintf("every licensed user is granted %s by default (ceiling is %s)", [granted, ceiling])] if {
+# defaultPermission is the highest permission every licensed user holds on this
+# repository, however they came by it: a project's default permission, or a
+# grant to a group that holds everyone, which hands access out just the same.
+default_violation := [sprintf("every licensed user holds %s on it (ceiling is %s)", [granted, ceiling])] if {
 	granted_rank > ceiling_rank
 } else := []
 
@@ -56,16 +59,16 @@ result := {
 	count(violations) > 0
 } else := {
 	"status": "MANUAL",
-	"details": "The project's default permission could not be read, so it is unknown whether every licensed user is granted access by default.",
+	"details": "Whether every licensed user can reach this repository could not be determined, so its base permission is unknown.",
 } if {
 	not default_known
 } else := {
 	"status": "MANUAL",
-	"details": sprintf("The project grants %q by default, which is not listed in permissionRank, so it cannot be compared against the %q ceiling. Add it to permissionRank in bitbucket-bench's config.", [granted, ceiling]),
+	"details": sprintf("Every licensed user holds %q, which is not listed in permissionRank, so it cannot be compared against the %q ceiling. Add it to permissionRank in bitbucket-bench's config.", [granted, ceiling]),
 	"evidence": [sprintf("unknown permission %q", [granted])],
 } if {
 	not granted_known
 } else := {
 	"status": "PASS",
-	"details": sprintf("The repository is not anonymously readable and grants no default permission above %s.", [ceiling]),
+	"details": sprintf("The repository is not anonymously readable, and no permission above %s is held by every licensed user.", [ceiling]),
 }
