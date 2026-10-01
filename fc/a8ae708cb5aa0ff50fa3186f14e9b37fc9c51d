@@ -1,0 +1,27 @@
+examples/config.yaml
+  s_48d8fa1c49bfb6::t_1b75a1d24c6cc7 99-103,106
+internal/checks/policies/bitbucketdc/cis-1.1.13/check_test.rego
+  s_48d8fa1c49bfb6::t_487ad250474958 11-12,17-28
+internal/checks/policies/lib/fixtures_test.rego
+  s_48d8fa1c49bfb6::t_253cbe0bd39140 25
+internal/cli/init.go
+  s_48d8fa1c49bfb6::t_cef09d195bd5b7 77
+internal/config/config.go
+  s_48d8fa1c49bfb6::t_e4c45a115891b6 202-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fca8ae708cb5aa0ff50fa3186f14e9b37fc9c51d",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
