@@ -35,20 +35,31 @@ never := [sprintf("%s (never authenticated; created %d days ago)", [u.name, u.ag
 
 dormant := array.concat(idle, never)
 
-known(u) if object.get(u, "inactiveDays", -1) >= 0
-
-known(u) if {
-	object.get(u, "neverSignedIn", false) == true
-	object.get(u, "ageDays", -1) >= 0
-}
-
 # An account the platform reported no time for — and did not say "never" — is
 # unknown, not fresh. Letting it fall through to PASS would turn a hole in the
 # data into a clean bill of health for exactly the accounts nobody is watching.
-unknown := [u.name |
+time_unknown := [sprintf("%s (no last-authentication time recorded)", [u.name]) |
 	some u in population
-	not known(u)
+	object.get(u, "neverSignedIn", false) != true
+	object.get(u, "inactiveDays", -1) < 0
 ]
+
+# "Never", with no creation time to measure it against, is unknown too: a new
+# account and a long-dormant one look the same. Measured on Bitbucket 8.19 and
+# 9.4, which report no creation time for any account; 10.4 does. The reason
+# travels with each name, because it changes what the reviewer has to check.
+age_unknown := [sprintf("%s (never authenticated; creation date not reported)", [u.name]) |
+	some u in population
+	object.get(u, "neverSignedIn", false) == true
+	object.get(u, "inactiveDays", -1) < 0
+	object.get(u, "ageDays", -1) < 0
+]
+
+unknown := array.concat(age_unknown, time_unknown)
+
+age_note := sprintf(" An account that never authenticated counts as dormant once it is %d days old, and this Bitbucket version does not report when an account was created.", [threshold]) if {
+	count(age_unknown) > 0
+} else := ""
 
 decidable if {
 	lib.available("users")
@@ -69,7 +80,7 @@ result := {
 	count(dormant) > 0
 } else := {
 	"status": "MANUAL",
-	"details": sprintf("%d active, licensed account(s) have no last-authentication time recorded, so their dormancy cannot be assessed: %s. Check them under Administration -> Users.", [count(unknown), lib.joined(unknown, 10)]),
+	"details": sprintf("%d active, licensed account(s) cannot be assessed for dormancy: %s.%s Check them under Administration -> Users.", [count(unknown), lib.joined(unknown, 10), age_note]),
 	"evidence": sort(unknown),
 } if {
 	count(unknown) > 0

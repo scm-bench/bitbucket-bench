@@ -49,12 +49,17 @@ test_passes_for_a_new_account_that_never_signed_in if {
 }
 
 # "Never", with no creation time to measure it against, is still unknown.
+# Measured on Bitbucket 8.19 and 9.4, which report no creation time at all: the
+# verdict says why, since "no time recorded" would send the reviewer to look
+# for a sign-in that never happened.
 test_never_signed_in_without_a_creation_time_is_manual if {
 	r := cis_1_3_1.result with input as org([
 		{"name": "eve", "active": true, "licensed": true, "inactiveDays": -1, "neverSignedIn": true, "ageDays": -1},
 	])
 	r.status == "MANUAL"
-	contains(r.details, "eve")
+	contains(r.details, "eve (never authenticated; creation date not reported)")
+	contains(r.details, "does not report when an account was created")
+	r.evidence == ["eve (never authenticated; creation date not reported)"]
 }
 
 # An unlicensed account cannot sign in at all, so its dormancy exposes nothing.
@@ -84,7 +89,8 @@ test_unknown_last_authentication_is_manual if {
 		{"name": "mallory", "active": true, "licensed": true, "inactiveDays": -1, "ageDays": 365},
 	])
 	r.status == "MANUAL"
-	contains(r.details, "mallory")
+	contains(r.details, "mallory (no last-authentication time recorded)")
+	not contains(r.details, "creation")
 }
 
 # A confirmed dormant account settles the question, so unknowns alongside it do
