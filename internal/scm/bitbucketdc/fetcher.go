@@ -2,6 +2,7 @@ package bitbucketdc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -179,8 +180,8 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 	return snapshot, nil
 }
 
-// verifyCredentials fails the scan before any work is done when the instance
-// rejects the credential outright.
+// verifyCredentials fails the scan before any work is done unless the instance
+// accepted the credential as some user.
 //
 // Without this, a mistyped token produces a complete-looking report: every
 // control reports MANUAL because nothing could be read, the score is 0, and the
@@ -188,22 +189,57 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 // output for an audit tool — it is indistinguishable from a real result unless
 // the reader notices that *everything* is MANUAL.
 //
-// Only a 401 is fatal here. Anything else means the credential was accepted and
-// this particular endpoint was not reachable, which is the ordinary case the
-// rest of the scan is built to degrade through.
+// The question is asked of /users because it answers only an authenticated
+// caller. This used to ask /application-properties, which answers anonymous
+// callers too — and Bitbucket does not reject a bearer token it does not
+// recognise, it serves the request as anonymous. Against Bitbucket 10.4 a
+// revoked or mistyped token passed the preflight with a 200, every admin
+// endpoint's 401 was then filed as "this token lacks admin rights", and on an
+// instance with public projects the scan went on to audit exactly what an
+// anonymous visitor can see, presented as an audit of the instance.
+//
+// Anything but a 2xx is fatal here, for the same reason: nothing has been
+// fetched yet, so failing costs nothing, while carrying on lets every later
+// request fail in a way that reads like a finding.
 func (f *Fetcher) verifyCredentials(ctx context.Context) error {
 	f.logf("verifying credentials")
-	err := f.client.get(ctx, "/api/1.0/application-properties", nil, nil)
-	if IsUnauthorized(err) {
-		return fmt.Errorf("the instance rejected the credentials: %w\n"+
-			"check --token (BITBUCKET_TOKEN), or --username/--password (BITBUCKET_USERNAME/BITBUCKET_PASSWORD)", err)
+	err := f.client.get(ctx, "/api/1.0/users", url.Values{"limit": []string{"1"}}, nil)
+	switch {
+	case err == nil:
+		f.credentialsVerified = true
+		return nil
+	case basicAuthDisabled(err):
+		// The default on Bitbucket 10 for a fresh install, and something
+		// administrators switch on elsewhere. The instance's own message says
+		// what happened but not what to do instead.
+		return fmt.Errorf("this instance does not accept passwords over its REST API (%w)\n"+
+			"create an HTTP access token (Profile -> Manage account -> HTTP access tokens) and pass it with --token (BITBUCKET_TOKEN)", err)
+	case IsUnauthorized(err), IsForbidden(err):
+		return fmt.Errorf("the instance did not accept the credentials: %w\n"+
+			"check --token (BITBUCKET_TOKEN), or --username/--password (BITBUCKET_USERNAME/BITBUCKET_PASSWORD); "+
+			"a token that has expired, been revoked or belongs to another instance is answered this way", err)
+	case IsNotFound(err):
+		return fmt.Errorf("no Bitbucket REST API answered at %s/rest (%w)\n"+
+			"check --url, including the context path if Bitbucket is served under one (https://host/bitbucket)", f.client.BaseURL(), err)
+	default:
+		return fmt.Errorf("could not verify the credentials: %w", err)
 	}
-	// Verified only by an HTTP answer. A transport error or a 5xx proves
-	// nothing about the credential, and marking it verified anyway would send
-	// a genuinely rejected token down the "authorized but forbidden" path
-	// later, past the curated message above.
-	f.credentialsVerified = err == nil || IsUnavailable(err)
-	return nil
+}
+
+// basicAuthDisabled recognises the instance refusing a password outright. It
+// arrives as a 403 with nothing but this sentence to tell it apart from any
+// other refusal.
+func basicAuthDisabled(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	for _, m := range apiErr.Messages {
+		if strings.Contains(strings.ToLower(m), "basic authentication has been disabled") {
+			return true
+		}
+	}
+	return false
 }
 
 // unreadable reports whether err means "this credential could not read that",

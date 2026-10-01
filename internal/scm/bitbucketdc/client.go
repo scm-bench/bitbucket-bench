@@ -561,6 +561,13 @@ func parseErrorMessages(body []byte) []string {
 			Message       string `json:"message"`
 			ExceptionName string `json:"exceptionName"`
 		} `json:"errors"`
+		// Some refusals skip the errors array and carry one top-level message,
+		// e.g. Bitbucket 10's {"message":"Basic Authentication has been
+		// disabled on this instance."}.
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Errors) == 0 && strings.TrimSpace(envelope.Message) != "" {
+		return []string{strings.TrimSpace(envelope.Message)}
 	}
 	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Errors) > 0 {
 		msgs := make([]string, 0, len(envelope.Errors))

@@ -72,6 +72,8 @@ func (f *fakeInstance) start() *httptest.Server {
 func standardInstance(t *testing.T) *fakeInstance {
 	f := newFakeInstance(t)
 
+	// The preflight: /users answers only an authenticated caller.
+	f.json("/api/1.0/users", pageOf(`{"name":"scanner","displayName":"Scanner","active":true}`))
 	f.json("/api/1.0/admin/permissions/users", pageOf(`{"user":{"name":"alice","displayName":"Alice","active":true},"permission":"SYS_ADMIN"}`))
 	f.json("/api/1.0/admin/permissions/groups", pageOf(`{"group":{"name":"bitbucket-admins"},"permission":"ADMIN"}`))
 	f.json("/api/1.0/admin/groups/more-members", pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
@@ -320,7 +322,7 @@ func TestRequiredBuildsFallsBackToLegacyEndpoint(t *testing.T) {
 // reader notices that nothing at all could be read.
 func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	f := newFakeInstance(t)
-	f.handle("/api/1.0/application-properties", func(w http.ResponseWriter, _ *http.Request) {
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"errors":[{"message":"Authentication failed"}]}`)
 	})
@@ -334,7 +336,7 @@ func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	if err == nil {
 		t.Fatal("Fetch succeeded with credentials the instance rejected")
 	}
-	if !strings.Contains(err.Error(), "rejected the credentials") {
+	if !strings.Contains(err.Error(), "did not accept the credentials") {
 		t.Errorf("error = %v, want it to name the credentials as the cause", err)
 	}
 
@@ -344,6 +346,73 @@ func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.requests) != 1 {
 		t.Errorf("made %d requests after a 401 (%v); want only the credential check", len(f.requests), f.requests)
+	}
+}
+
+// Measured on Bitbucket 10.4.1: a bearer token the instance does not recognise
+// is not refused, it is served as anonymous. /application-properties — what
+// the preflight used to ask — answers anonymous callers with a 200, so a
+// revoked token sailed through it and every later 401 was filed as a missing
+// permission. The preflight now asks an endpoint anonymous callers cannot read.
+func TestUnrecognisedTokenServedAsAnonymousFailsTheScan(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/application-properties", `{"version":"10.4.1","displayName":"Bitbucket"}`)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource","exceptionName":"com.atlassian.plugins.rest.api.security.exception.AuthenticationRequiredException"}]}`)
+	})
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "revoked", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil || !strings.Contains(err.Error(), "did not accept the credentials") {
+		t.Fatalf("err = %v, want the scan refused for a credential served as anonymous", err)
+	}
+}
+
+// Bitbucket 10 ships with password authentication disabled on the REST API and
+// answers a basic-auth request with a 403 and one sentence. The scan has to
+// say what to do instead, not just repeat the sentence.
+func TestDisabledBasicAuthenticationNamesTheFix(t *testing.T) {
+	f := standardInstance(t)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"Basic Authentication has been disabled on this instance."}`)
+	})
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Username: "admin", Password: "pw", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil {
+		t.Fatal("Fetch succeeded although the instance refused basic authentication")
+	}
+	for _, want := range []string{"does not accept passwords", "HTTP access token", "--token", "Basic Authentication has been disabled"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// A base URL missing its context path reaches a web server that is not
+// Bitbucket's REST API. That is a typo in --url, and saying so beats the
+// generic 404 every later request would produce.
+func TestWrongBaseURLIsReportedAsSuch(t *testing.T) {
+	f := newFakeInstance(t) // nothing handled: every path is a 404
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil || !strings.Contains(err.Error(), "check --url") {
+		t.Fatalf("err = %v, want it to point at --url", err)
 	}
 }
 
@@ -422,7 +491,7 @@ func TestUnauthorizedAdminEndpointsDegradeOnceCredentialsAreProven(t *testing.T)
 // about the instance.
 func TestUnauthorizedPreflightIsStillFatal(t *testing.T) {
 	f := standardInstance(t)
-	f.handle("/api/1.0/application-properties", func(w http.ResponseWriter, _ *http.Request) {
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"errors":[{"message":"Authentication failed"}]}`)
 	})
