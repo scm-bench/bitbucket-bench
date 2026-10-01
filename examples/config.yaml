@@ -150,6 +150,30 @@ allowPublicRepositories: false
 # is still judged. Set to true to leave them out of the report entirely.
 skipArchivedRepositories: false
 
+# Exceptions: findings your organisation has decided to live with, for a
+# stated reason and until a stated date. Every field but owner is required —
+# an exception without a reason or an end date is how accepted risk becomes
+# forgotten risk.
+#
+# An accepted finding is still reported (under "Accepted by exceptions"),
+# still FAIL, and still counted in the score: the score describes the
+# instance, and accepting a finding does not change the instance. What it
+# stops doing is failing the run on scan.failOn — or, for a MANUAL finding,
+# counting against scan.maxManual. In SARIF it carries a suppression, which
+# code scanning shows as dismissed.
+#
+# The day after expires, it lapses and the finding fails the run again; an
+# exception that matches nothing is reported too, so the list cannot rot
+# quietly. resources are globs: * does not cross a "/", so PLAT/* is every
+# repository in PLAT; "instance" is an instance-level control.
+#
+# exceptions:
+#   - control: CIS-1.1.13
+#     resources: [PLAT/legacy-billing, PLAT/legacy-*]
+#     reason: Release tooling needs merge commits until the migration lands
+#     owner: platform-team@example.com
+#     expires: 2027-03-31
+
 # Narrow the run. exclude always wins over include, so you can pin a list and
 # still drop one entry from it.
 #

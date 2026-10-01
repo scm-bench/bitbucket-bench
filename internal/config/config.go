@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -78,6 +79,10 @@ type Config struct {
 	Exclude []string `yaml:"exclude" json:"exclude"`
 	// Include, when non-empty, restricts the run to these check IDs.
 	Include []string `yaml:"include" json:"include"`
+	// Exceptions accept findings an organisation has decided to live with,
+	// for a stated reason and until a stated date. They are applied after
+	// evaluation, so no rule sees them (json:"-").
+	Exceptions []Exception `yaml:"exceptions" json:"-"`
 }
 
 // Scan is the deployment-stable half of a scan's configuration.
@@ -120,6 +125,38 @@ type Scan struct {
 	// at all, so nothing in it would say they were missed, and a CI gate
 	// would pass on what it never looked at.
 	AllowIncomplete bool `yaml:"allowIncomplete"`
+}
+
+// Exception accepts the findings of one control on matching resources.
+//
+// An accepted finding is still reported, still FAIL, and still counts in the
+// score — the score describes the instance, and the instance has not changed.
+// What it stops doing is failing the run on scan.failOn (or, for a MANUAL
+// finding, counting against scan.maxManual). It lapses on its expiry date and
+// the finding fails the run again; there is no exception without one.
+type Exception struct {
+	// Control is the control ID, e.g. CIS-1.1.13.
+	Control string `yaml:"control"`
+	// Resources are glob patterns over resource names: PROJECT/slug for a
+	// repository, "instance" for an instance-level control. * does not cross
+	// a "/", so PLAT/* is every repository in PLAT.
+	Resources []string `yaml:"resources"`
+	// Reason is why the finding is accepted; it is printed beside it.
+	Reason string `yaml:"reason"`
+	// Owner is who answers for it.
+	Owner string `yaml:"owner"`
+	// Expires is the last day the exception applies, YYYY-MM-DD.
+	Expires string `yaml:"expires"`
+}
+
+// ExpiresAt is the moment the exception stops applying: the end of its
+// expiry day, UTC.
+func (e Exception) ExpiresAt() time.Time {
+	day, err := time.Parse("2006-01-02", e.Expires)
+	if err != nil {
+		return time.Time{}
+	}
+	return day.Add(24 * time.Hour)
 }
 
 // Duration is time.Duration that reads YAML the way people write durations:
@@ -424,6 +461,12 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	for i, ex := range c.Exceptions {
+		if err := ex.validate(); err != nil {
+			return fmt.Errorf("exceptions[%d]: %w", i, err)
+		}
+	}
+
 	// Hook lists hold full module keys. A config written for the old
 	// substring matching ("gpg", "signature") would now match nothing and
 	// quietly fail every repository; saying so at startup is cheaper than a
@@ -461,4 +504,34 @@ func (c Config) Selects(id string) bool {
 		}
 	}
 	return false
+}
+
+// validate checks an exception has everything it needs to be one. An
+// exception without a reason or an end date is how accepted risk turns into
+// forgotten risk, so neither is optional.
+func (e Exception) validate() error {
+	if strings.TrimSpace(e.Control) == "" {
+		return fmt.Errorf("control is required, e.g. control: CIS-1.1.13")
+	}
+	if len(e.Resources) == 0 {
+		return fmt.Errorf("%s: resources is required: the repositories (PROJECT/slug, globs allowed) or \"instance\" it applies to", e.Control)
+	}
+	for _, pattern := range e.Resources {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("%s: an empty resource pattern; remove it", e.Control)
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("%s: resource pattern %q: %w", e.Control, pattern, err)
+		}
+	}
+	if strings.TrimSpace(e.Reason) == "" {
+		return fmt.Errorf("%s: reason is required: it is printed beside every finding the exception accepts", e.Control)
+	}
+	if strings.TrimSpace(e.Expires) == "" {
+		return fmt.Errorf("%s: expires is required (YYYY-MM-DD): an exception without an end date is a finding nobody will look at again", e.Control)
+	}
+	if e.ExpiresAt().IsZero() {
+		return fmt.Errorf("%s: expires %q is not a date; use YYYY-MM-DD", e.Control, e.Expires)
+	}
+	return nil
 }

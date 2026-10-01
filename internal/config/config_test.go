@@ -441,3 +441,28 @@ func TestCAFileAndInsecureAreMutuallyExclusive(t *testing.T) {
 		t.Fatalf("err = %v, want caFile and insecure refused together", err)
 	}
 }
+
+// An exception without a reason or an end date is how accepted risk becomes
+// forgotten risk, so neither is optional, and a malformed one is refused at
+// load rather than silently matching nothing.
+func TestExceptionsAreValidated(t *testing.T) {
+	valid := "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: release tooling\n    expires: 2027-03-31\n"
+	if _, err := Load(writeConfig(t, valid)); err != nil {
+		t.Fatalf("a complete exception was refused: %v", err)
+	}
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"no control", "exceptions:\n  - resources: [PLAT/*]\n    reason: r\n    expires: 2027-03-31\n", "control is required"},
+		{"no resources", "exceptions:\n  - control: CIS-1.1.13\n    reason: r\n    expires: 2027-03-31\n", "resources is required"},
+		{"bad glob", "exceptions:\n  - control: CIS-1.1.13\n    resources: ['PLAT/[']\n    reason: r\n    expires: 2027-03-31\n", "PLAT/["},
+		{"no reason", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    expires: 2027-03-31\n", "reason is required"},
+		{"no expiry", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: r\n", "expires is required"},
+		{"bad expiry", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: r\n    expires: next spring\n", "not a date"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.yaml))
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "exceptions[0]") {
+				t.Errorf("err = %v, want it to mention exceptions[0] and %q", err, tc.want)
+			}
+		})
+	}
+}

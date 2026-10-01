@@ -475,6 +475,15 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	if err != nil {
 		return err
 	}
+	// Printed whatever the verbosity: a lapsed exception is a finding that
+	// starts failing the run today, and the exit code alone would not say why.
+	if len(rep.ExceptionWarnings) > 0 {
+		stderr := cmd.ErrOrStderr()
+		w := console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}
+		for _, warning := range rep.ExceptionWarnings {
+			w.Line(console.Warn, "%s", warning)
+		}
+	}
 
 	// The report is rendered into memory first so a write failure cannot leave
 	// a half-written file that looks like a complete report.
@@ -828,7 +837,9 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 		// What the gate measures is what the token failed to read.
 		unread := 0
 		for _, f := range rep.Findings {
-			if f.Status == engine.StatusManual && f.Automated {
+			// An accepted MANUAL finding is one somebody has reviewed by hand
+			// and recorded as such; it is no longer a gap in what was seen.
+			if f.Status == engine.StatusManual && f.Automated && f.Waiver == nil {
 				unread++
 			}
 		}
@@ -875,15 +886,19 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 // how far each has spread.
 func failureSummary(rep *engine.Report, failOn string) string {
 	controls := map[string]bool{}
+	failed := 0
 	for _, f := range rep.Findings {
-		if f.Status == engine.StatusFail {
+		// Accepted failures do not fail the run, so they are not what this
+		// line explains.
+		if f.Status == engine.StatusFail && f.Waiver == nil {
 			controls[f.CheckID] = true
+			failed++
 		}
 	}
 
 	msg := fmt.Sprintf("%s failed", console.Pluralize(len(controls), "control"))
-	if rep.Score.Failed > len(controls) {
-		msg += fmt.Sprintf(" across %s", console.Pluralize(rep.Score.Failed, "finding"))
+	if failed > len(controls) {
+		msg += fmt.Sprintf(" across %s", console.Pluralize(failed, "finding"))
 	}
 	return msg + fmt.Sprintf(", including at least one at or above %s severity", strings.ToUpper(failOn))
 }

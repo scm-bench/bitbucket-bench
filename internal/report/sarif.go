@@ -105,12 +105,22 @@ type sarifRuleProperty struct {
 }
 
 type sarifResult struct {
-	RuleID              string            `json:"ruleId"`
-	Level               string            `json:"level"`
-	Message             sarifText         `json:"message"`
-	Locations           []sarifLocation   `json:"locations,omitempty"`
-	PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
-	Properties          map[string]any    `json:"properties,omitempty"`
+	RuleID              string             `json:"ruleId"`
+	Level               string             `json:"level"`
+	Message             sarifText          `json:"message"`
+	Locations           []sarifLocation    `json:"locations,omitempty"`
+	PartialFingerprints map[string]string  `json:"partialFingerprints,omitempty"`
+	Suppressions        []sarifSuppression `json:"suppressions,omitempty"`
+	Properties          map[string]any     `json:"properties,omitempty"`
+}
+
+// sarifSuppression is SARIF's own way of saying a result was reviewed and
+// accepted, which is what an exception is; a consumer that understands it
+// shows the result as dismissed rather than open.
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Status        string `json:"status"`
+	Justification string `json:"justification"`
 }
 
 type sarifLocation struct {
@@ -391,6 +401,7 @@ func buildResult(f engine.Finding, where place) sarifResult {
 			"primaryLocationLineHash": fingerprint(where.host, f.CheckID, f.Resource) + ":1",
 			"scmBenchFindingV1":       fingerprint(f.CheckID, f.Resource),
 		},
+		Suppressions: suppressionsFor(f),
 		Properties: map[string]any{
 			"status":       string(f.Status),
 			"severity":     strings.ToUpper(f.Severity),
@@ -398,6 +409,13 @@ func buildResult(f engine.Finding, where place) sarifResult {
 			"resourceType": f.ResourceType,
 		},
 	}
+}
+
+func suppressionsFor(f engine.Finding) []sarifSuppression {
+	if f.Waiver == nil {
+		return nil
+	}
+	return []sarifSuppression{{Kind: "external", Status: "accepted", Justification: acceptedNote(f.Waiver)}}
 }
 
 // buildAggregateResult is the one result for a control no API can answer,

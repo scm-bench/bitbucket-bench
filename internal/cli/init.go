@@ -92,6 +92,18 @@ scan:
 # can read the code is still judged. Set to true to leave them out entirely.
 #skipArchivedRepositories: false
 
+# Accept findings your organisation has decided to live with, for a stated
+# reason and until a stated date. An accepted finding is still reported and
+# still counts in the score; it just does not fail the run on scan.failOn.
+# It lapses on its expiry date. resources are globs over PROJECT/slug, or
+# "instance" for an instance-level control.
+#exceptions:
+#  - control: CIS-1.1.13
+#    resources: [PLAT/legacy-*]
+#    reason: Release tooling needs merge commits until the migration lands
+#    owner: platform-team@example.com
+#    expires: 2027-03-31
+
 # Leave controls out of the run, or restrict the run to a list.
 #exclude: [CIS-1.1.8]
 #include: []

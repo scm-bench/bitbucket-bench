@@ -1531,3 +1531,34 @@ func TestSARIFArtifactURIsAreEscaped(t *testing.T) {
 		t.Errorf("uri = %q, want %q", got, want)
 	}
 }
+
+// An accepted finding carries SARIF's own suppression, which code scanning
+// shows as dismissed with the justification, rather than as an open alert.
+func TestSARIFCarriesAcceptedFindingsAsSuppressed(t *testing.T) {
+	out := renderReport(t, &engine.Report{
+		Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.1.13", Severity: "LOW", Status: engine.StatusFail, Automated: true,
+			Resource: "PLAT/legacy", ResourceType: engine.ResourceRepository, Details: "merge commits",
+			Waiver: &engine.Waiver{Reason: "release tooling", Owner: "platform", Expires: "2027-03-31"},
+		}},
+	}, Options{Format: FormatSARIF})
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				Suppressions []struct {
+					Kind          string `json:"kind"`
+					Status        string `json:"status"`
+					Justification string `json:"justification"`
+				} `json:"suppressions"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &log); err != nil {
+		t.Fatal(err)
+	}
+	s := log.Runs[0].Results[0].Suppressions
+	if len(s) != 1 || s[0].Kind != "external" || s[0].Status != "accepted" || !strings.Contains(s[0].Justification, "release tooling") {
+		t.Errorf("suppressions = %+v", s)
+	}
+}
