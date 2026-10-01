@@ -38,3 +38,11 @@ test_manual_when_merge_strategies_are_unreadable if {
 	})
 	r.status == "MANUAL"
 }
+
+# An archived repository takes no pushes and no pull requests: nothing about how
+# a change arrives applies, and none of its settings were read to say otherwise.
+test_not_applicable_when_archived if {
+	r := cis_1_1_13.result with input as testdata.archived_input
+	r.status == "NA"
+	contains(r.details, "archived")
+}

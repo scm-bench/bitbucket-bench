@@ -12,18 +12,28 @@ matching := array.concat(
 	lib.restrictions("read-only"),
 )
 
-decidable if {
-	lib.available("branchRestrictions")
-	lib.has_default_branch
-}
+# kinds are the restriction types that answer this control.
+kinds := {"pull-request-only", "read-only"}
 
-result := lib.branch_protection_na if {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := lib.branch_protection_na if {
 	lib.empty_repository
 } else := {
 	"status": "MANUAL",
 	"details": "Branch permissions could not be read, so direct-push restrictions on the default branch are unknown.",
 } if {
-	not decidable
+	not lib.available("branchRestrictions")
+} else := {
+	"status": "FAIL",
+	"details": sprintf("No branch restriction blocks direct pushes on any branch, so anyone with write access can push directly to %s, bypassing pull request review entirely.", [lib.default_branch_name]),
+	"evidence": [sprintf("no %s restriction exists on any branch", [concat(" or ", sort(kinds))])],
+} if {
+	# Nothing of either kind exists anywhere, so the default branch is
+	# unprotected whichever branch that turns out to be.
+	count(lib.restrictions_of(kinds)) == 0
+} else := lib.default_branch_unknown if {
+	not lib.default_branch_known
 } else := {
 	"status": "FAIL",
 	"details": sprintf("Anyone with write access can push directly to %s, bypassing pull request review entirely.", [lib.default_branch_name]),

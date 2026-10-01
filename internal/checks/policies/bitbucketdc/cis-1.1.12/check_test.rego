@@ -74,3 +74,11 @@ test_null_hooks_do_not_break_the_rule if {
 	r := cis_1_1_12.result with input as testdata.repo_input({"hooks": null})
 	r.status == "FAIL"
 }
+
+# An archived repository takes no pushes and no pull requests: nothing about how
+# a change arrives applies, and none of its settings were read to say otherwise.
+test_not_applicable_when_archived if {
+	r := cis_1_1_12.result with input as testdata.archived_input
+	r.status == "NA"
+	contains(r.details, "archived")
+}

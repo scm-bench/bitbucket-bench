@@ -138,3 +138,38 @@ test_null_exempt_users_do_not_erase_the_named_exemptions if {
 	}]})
 	r.status == "MANUAL"
 }
+
+# An archived repository takes no pushes and no pull requests: nothing about how
+# a change arrives applies, and none of its settings were read to say otherwise.
+test_not_applicable_when_archived if {
+	r := cis_1_1_15.result with input as testdata.archived_input
+	r.status == "NA"
+	contains(r.details, "archived")
+}
+
+# Measured on Bitbucket 10.4: a repository can point its default at a branch
+# nobody pushed. With no restriction of the right kind on any branch, whichever
+# branch is the default is unprotected, so that much is still a FAIL.
+test_fails_without_any_restriction_even_when_the_default_branch_is_unknown if {
+	r := cis_1_1_15.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"branchRestrictions": [],
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "FAIL"
+	contains(r.details, "any branch")
+}
+
+# A restriction exists, but which branch it should be compared against does
+# not: whether it covers the default branch cannot be known.
+test_manual_when_a_restriction_exists_but_the_default_branch_is_unknown if {
+	r := cis_1_1_15.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"branchRestrictions": [{"type": "pull-request-only", "matchesDefaultBranch": false}],
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "MANUAL"
+	contains(r.details, "default branch could not be resolved")
+}

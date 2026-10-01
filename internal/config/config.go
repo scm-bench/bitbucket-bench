@@ -43,7 +43,10 @@ type Config struct {
 	// AllowPublicRepositories relaxes the public-access rule, for instances
 	// that intentionally publish code.
 	AllowPublicRepositories bool `yaml:"allowPublicRepositories" json:"allowPublicRepositories"`
-	// SkipArchivedRepositories drops archived repositories from the scan.
+	// SkipArchivedRepositories drops archived repositories from the scan
+	// entirely. Off by default: an archived repository is reported, with every
+	// control about changes NA and its read access still judged, so the report
+	// accounts for every repository the token can see.
 	SkipArchivedRepositories bool `yaml:"skipArchivedRepositories" json:"skipArchivedRepositories"`
 	// PermissionRank lets Rego compare Bitbucket permission levels ordinally.
 	PermissionRank map[string]int `yaml:"permissionRank" json:"permissionRank"`
@@ -188,7 +191,7 @@ func Default() Config {
 		},
 		MaxDefaultPermission:     "REPO_READ",
 		AllowPublicRepositories:  false,
-		SkipArchivedRepositories: true,
+		SkipArchivedRepositories: false,
 		PermissionRank: map[string]int{
 			"":               0,
 			"LICENSED_USER":  1,

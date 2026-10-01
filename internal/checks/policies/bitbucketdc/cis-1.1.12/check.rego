@@ -29,7 +29,9 @@ matching := {h.key |
 	hook_matches(h)
 }
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "MANUAL",
 	"details": "Repository hooks could not be read, so signature verification cannot be confirmed.",
 } if {

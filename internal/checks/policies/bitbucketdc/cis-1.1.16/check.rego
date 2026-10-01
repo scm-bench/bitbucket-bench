@@ -17,7 +17,9 @@ decidable if {
 	lib.has_default_branch
 }
 
-result := lib.branch_protection_na if {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := lib.branch_protection_na if {
 	lib.empty_repository
 } else := {
 	"status": "MANUAL",

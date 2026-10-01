@@ -8,7 +8,9 @@ found := lib.list(["files", "securityPolicyPaths"])
 
 probed := lib.list(["files", "probed"])
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "NA",
 	"details": "Repository has no commits yet, so there is no default branch to hold a security policy.",
 } if {

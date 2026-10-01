@@ -26,7 +26,7 @@ config := {
 	"allowedBypassPrincipals": [],
 	"maxDefaultPermission": "REPO_READ",
 	"allowPublicRepositories": false,
-	"skipArchivedRepositories": true,
+	"skipArchivedRepositories": false,
 	"permissionRank": {
 		"": 0,
 		"LICENSED_USER": 1,
@@ -113,3 +113,12 @@ exempt_unresolved(group) := {
 	"exemptGroups": [group],
 	"exemptPrincipals": {"users": [], "groups": [group], "count": 0, "complete": false},
 }
+
+# archived_input is an archived repository as the fetcher leaves it: the
+# public flag and the project's default permission, and no setting read at all,
+# since an archived repository takes no change for those settings to govern.
+archived_input := input_for({
+	"fullName": "PRJ/old",
+	"archived": true,
+	"available": {},
+})

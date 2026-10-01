@@ -93,3 +93,36 @@ test_null_required_builds_do_not_break_the_rule if {
 	})
 	r.status == "FAIL"
 }
+
+# An archived repository takes no pushes and no pull requests: nothing about how
+# a change arrives applies, and none of its settings were read to say otherwise.
+test_not_applicable_when_archived if {
+	r := cis_1_1_9.result with input as testdata.archived_input
+	r.status == "NA"
+	contains(r.details, "archived")
+}
+
+# A repository pointing its default at a branch nobody pushed: with no build
+# condition on any branch and no minimum build count, nothing gates any merge.
+test_fails_when_nothing_gates_any_branch_even_with_the_default_branch_unknown if {
+	r := cis_1_1_9.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"requiredBuilds": [],
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 0},
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "FAIL"
+}
+
+# A condition exists, but which branch it should be compared against does not.
+test_manual_when_a_condition_exists_but_the_default_branch_is_unknown if {
+	r := cis_1_1_9.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"requiredBuilds": [{"matchesDefaultBranch": false}],
+		"pullRequestSettings": {"requiredSuccessfulBuilds": 0},
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "MANUAL"
+}

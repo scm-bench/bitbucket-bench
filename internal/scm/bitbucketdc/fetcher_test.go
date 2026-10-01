@@ -147,13 +147,18 @@ func standardInstance(t *testing.T) *fakeInstance {
 
 func fetchSnapshot(t *testing.T, f *fakeInstance) (*fakeInstance, *scm.Snapshot) {
 	t.Helper()
+	return fetchSnapshotWithConfig(t, f, config.Default())
+}
+
+func fetchSnapshotWithConfig(t *testing.T, f *fakeInstance, cfg config.Config) (*fakeInstance, *scm.Snapshot) {
+	t.Helper()
 	server := f.start()
 
 	client, err := NewClient(Options{BaseURL: server.URL, Token: "test-token", Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	fetcher := NewFetcher(client, config.Default())
+	fetcher := NewFetcher(client, cfg)
 	snapshot, err := fetcher.Fetch(context.Background(), FetchOptions{
 		ToolVersion: "test",
 		Now:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -588,13 +593,40 @@ func TestExhaustivePaginationFollowsNextPageStart(t *testing.T) {
 	}
 }
 
-func TestArchivedRepositoriesAreSkippedByDefault(t *testing.T) {
+// An archived repository is reported rather than dropped, so the report
+// accounts for every repository the token can see — but none of its settings
+// are fetched: every control about changes is NA for it, and the read-access
+// control needs only the public flag and the project's default permission.
+func TestArchivedRepositoriesAreReportedWithoutFetchingTheirSettings(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos", pageOf(`{"slug":"app","id":10,"name":"app","archived":true,"public":true,"project":{"key":"PRJ"}}`))
+
+	_, snapshot := fetchSnapshot(t, f)
+	repos := snapshot.Projects[0].Repositories
+	if len(repos) != 1 || !repos[0].Archived {
+		t.Fatalf("repositories = %+v, want the archived one reported", repos)
+	}
+	if !repos[0].Permissions.PublicAccess {
+		t.Error("an archived public repository must still say it is public")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, path := range f.requests {
+		if strings.Contains(path, "/repos/app/") || strings.Contains(path, "/repos/app?") {
+			t.Errorf("fetched %s for an archived repository", path)
+		}
+	}
+}
+
+func TestArchivedRepositoriesCanBeLeftOut(t *testing.T) {
 	f := standardInstance(t)
 	f.json("/api/1.0/projects/PRJ/repos", pageOf(`{"slug":"app","id":10,"name":"app","archived":true,"project":{"key":"PRJ"}}`))
 
-	_, snapshot := fetchSnapshot(t, f)
+	cfg := config.Default()
+	cfg.SkipArchivedRepositories = true
+	_, snapshot := fetchSnapshotWithConfig(t, f, cfg)
 	if len(snapshot.Projects[0].Repositories) != 0 {
-		t.Error("archived repositories should be skipped when skipArchivedRepositories is on")
+		t.Error("archived repositories should be left out when skipArchivedRepositories is on")
 	}
 }
 
@@ -812,6 +844,76 @@ func TestEmptyRepositoryMarksFilesAvailable(t *testing.T) {
 	}
 	if !repo.Available["files"] {
 		t.Error("an empty repository is a known state, so files should be available")
+	}
+}
+
+// The shapes below are Bitbucket 10.4.1's, recorded against a real instance.
+// /default-branch reports the configured branch whether or not anything was
+// ever pushed, so an empty repository answers 200 refs/heads/master — and was
+// taken for one with commits, failing its branch rules instead of reporting NA.
+func TestEmptyRepositoryIsDecidedFromTheBranchList(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos/app/default-branch", `{"id":"refs/heads/master","displayId":"master","type":"BRANCH"}`)
+	f.handle("/api/1.0/projects/PRJ/repos/app/branches/default", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	f.json("/api/1.0/projects/PRJ/repos/app/branches", `{"size":0,"limit":100,"isLastPage":true,"values":[],"start":0}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+
+	if !repo.Empty {
+		t.Fatal("a repository with no branches must be reported as empty, whatever /default-branch says")
+	}
+	if !repo.Available["defaultBranch"] || repo.DefaultBranchDisplay != "master" {
+		t.Errorf("default branch = %q (available %v), want the configured master, known",
+			repo.DefaultBranchDisplay, repo.Available["defaultBranch"])
+	}
+	if !repo.Available["files"] {
+		t.Error("an empty repository is a known state, so files should be available")
+	}
+}
+
+// A repository configured with a default branch nobody pushed: the instance
+// default stayed "master" while git's moved to "main". Bitbucket 10.4 answers
+// /default-branch with the missing master and refuses branches?details=true
+// outright, because ahead/behind is computed against the default branch.
+//
+// Before: the scan judged protection on master, probed master for SECURITY.md
+// and failed CIS-1.2.1 for a repository that has one, and lost every branch age
+// with the details listing.
+func TestConfiguredDefaultBranchThatDoesNotExist(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos/app/default-branch", `{"id":"refs/heads/master","displayId":"master","type":"BRANCH"}`)
+	f.handle("/api/1.0/projects/PRJ/repos/app/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("details") == "true" {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errors":[{"message":"No default branch is defined","exceptionName":"com.atlassian.bitbucket.repository.NoDefaultBranchException"}]}`)
+			return
+		}
+		fmt.Fprint(w, pageOf(`{"id":"refs/heads/main","displayId":"main","type":"BRANCH","latestCommit":"abc123","isDefault":false}`))
+	})
+	f.json("/api/1.0/projects/PRJ/repos/app/commits/abc123", `{"id":"abc123","committerTimestamp":1767139200000,"authorTimestamp":1767139200000}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+
+	if repo.Empty {
+		t.Fatal("a repository with a branch is not empty")
+	}
+	if repo.Available["defaultBranch"] || repo.DefaultBranch != "" {
+		t.Errorf("default branch = %q (available %v); a branch that does not exist must not be judged",
+			repo.DefaultBranch, repo.Available["defaultBranch"])
+	}
+	if !slices.ContainsFunc(repo.Errors, func(e string) bool { return strings.Contains(e, "master does not exist") }) {
+		t.Errorf("errors %q do not say the configured branch is missing", repo.Errors)
+	}
+	if repo.Available["files"] {
+		t.Error("no default branch exists to look for a security policy on, so files must be unavailable")
+	}
+	if !repo.Available["branchAges"] || len(repo.Branches) != 1 || repo.Branches[0].AgeDays != 1 {
+		t.Errorf("branches = %+v (ages available %v), want main dated through the commit lookup",
+			repo.Branches, repo.Available["branchAges"])
 	}
 }
 

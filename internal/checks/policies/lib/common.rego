@@ -41,11 +41,52 @@ empty_repository if {
 	object.get(resource, "empty", false) == true
 }
 
+# archived_repository is true for a repository that accepts no pushes and no
+# pull requests.
+archived_repository if {
+	object.get(resource, "archived", false) == true
+}
+
+# archived_na is the shared outcome for every control about how a change
+# arrives. It comes first in a rule's chain, ahead of MANUAL: nothing the scan
+# failed to read could make a control about changes apply to a repository that
+# takes none, which is also why the fetcher reads none of its settings.
+archived_na := {
+	"status": "NA",
+	"details": "Repository is archived: it accepts no pushes and no pull requests, so there is no change to control.",
+} if {
+	archived_repository
+}
+
 # has_default_branch is false for empty repositories and for any repository
 # whose default branch could not be resolved.
 has_default_branch if {
 	object.get(resource, "defaultBranch", "") != ""
 }
+
+# default_branch_known is true when the default branch was resolved to a
+# branch that exists. A repository can point its default at a branch nobody
+# pushed — the fetcher leaves defaultBranch empty then and marks it unavailable.
+default_branch_known if {
+	available("defaultBranch")
+	has_default_branch
+}
+
+# default_branch_unknown is the outcome for a branch rule that found
+# restrictions but cannot tell whether any of them covers the default branch.
+default_branch_unknown := {
+	"status": "MANUAL",
+	"details": "The default branch could not be resolved (see this repository's scan errors), so whether a restriction covers it is unknown.",
+}
+
+# restrictions_of returns every restriction of the given types, whichever
+# branch it covers. A rule needs it to tell "nothing restricts any branch",
+# which is a FAIL whatever the default branch is, from "a restriction exists and
+# may or may not cover the default branch".
+restrictions_of(kinds) := [r |
+	some r in list("branchRestrictions")
+	r.type in kinds
+]
 
 # default_branch_name is the short branch name, for use in messages.
 default_branch_name := name if {

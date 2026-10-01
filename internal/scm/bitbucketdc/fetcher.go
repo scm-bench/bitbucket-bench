@@ -669,8 +669,22 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	}
 	base := "/api/1.0/projects/" + url.PathEscape(project.Key) + "/repos/" + url.PathEscape(r.Slug)
 
-	// The default branch anchors nearly every other check, so resolve it first.
-	repo.DefaultBranch, repo.DefaultBranchDisplay, repo.Empty = f.fetchDefaultBranch(ctx, base, &repo)
+	repo.Permissions.PublicAccess = repo.Public
+	repo.Permissions.DefaultPermission = parent.perms.DefaultPermission
+	repo.Permissions.DefaultPermissionKnown = parent.perms.DefaultPermissionKnown
+
+	if r.Archived {
+		// An archived repository takes no pushes and no pull requests, so every
+		// control about how a change arrives is not applicable and none of its
+		// settings are fetched. Who can read the code still matters, and that is
+		// the public flag and the project's default permission, both in hand.
+		return repo, ctx.Err()
+	}
+
+	// The branch list anchors nearly every other check: it settles whether the
+	// repository is empty and which existing branch is the default.
+	branches := f.listBranches(ctx, base, &repo)
+	f.resolveDefaultBranch(ctx, base, branches, &repo)
 
 	model := f.fetchBranchModel(ctx, project.Key, r.Slug)
 
@@ -678,13 +692,8 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	f.fetchBranchRestrictions(ctx, project.Key, r.Slug, model, &repo)
 	f.fetchRequiredBuilds(ctx, project.Key, r.Slug, model, &repo)
 	f.fetchHooks(ctx, base, &repo)
-	f.fetchBranches(ctx, base, &repo)
 	f.fetchSecurityPolicy(ctx, base, &repo)
 	f.fetchRepositoryPermissions(ctx, base, parent, &repo)
-
-	repo.Permissions.PublicAccess = repo.Public
-	repo.Permissions.DefaultPermission = parent.perms.DefaultPermission
-	repo.Permissions.DefaultPermissionKnown = parent.perms.DefaultPermissionKnown
 
 	if err := ctx.Err(); err != nil {
 		return repo, err
@@ -692,48 +701,71 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	return repo, nil
 }
 
-// fetchDefaultBranch tries the modern endpoint, then the legacy one.
-func (f *Fetcher) fetchDefaultBranch(ctx context.Context, base string, repo *scm.Repository) (ref, display string, empty bool) {
+// resolveDefaultBranch settles which existing branch is the default.
+//
+// The branch list decides, through isDefault, because it describes what exists.
+// /default-branch only says what is configured, and on Bitbucket 10.4 that is
+// refs/heads/master for a repository whose one branch is main — the state any
+// repository ends up in when git's default moved to main and the instance's did
+// not. Believing it sent every default-branch rule at a branch that is not
+// there: the security-policy probe looked on master, found nothing, and failed
+// CIS-1.2.1 for a repository with SECURITY.md at its root; and an empty
+// repository, which /default-branch answers just the same, was taken for one
+// with commits, so its branch rules failed instead of reporting NA.
+//
+// The configured name is asked for only when no listed branch is the default,
+// to say which branch is missing.
+func (f *Fetcher) resolveDefaultBranch(ctx context.Context, base string, branches []apiBranch, repo *scm.Repository) {
+	if !repo.Available["branches"] {
+		repo.Available["defaultBranch"] = false
+		repo.Errors = append(repo.Errors, "default branch unknown: the branch list could not be read")
+		return
+	}
+	for _, b := range branches {
+		if b.IsDefault {
+			repo.DefaultBranch = b.ID
+			repo.DefaultBranchDisplay = fallbackDisplay(apiRef{ID: b.ID, DisplayID: b.DisplayID})
+			repo.Available["defaultBranch"] = true
+			return
+		}
+	}
+
+	configured, known := f.configuredDefaultBranch(ctx, base)
+	if repo.Empty {
+		// Nothing has been pushed yet. The configured name is all there is,
+		// and the branch rules report NA without needing it.
+		repo.DefaultBranch = configured.ID
+		repo.DefaultBranchDisplay = fallbackDisplay(configured)
+		repo.Available["defaultBranch"] = true
+		return
+	}
+
+	// Branches exist and none of them is the default. Leaving DefaultBranch
+	// empty is deliberate: a rule handed the configured name would judge the
+	// protection of a branch nobody can push to or merge into.
+	repo.Available["defaultBranch"] = false
+	if known && configured.ID != "" {
+		repo.Errors = append(repo.Errors, fmt.Sprintf(
+			"the configured default branch %s does not exist in the repository; set an existing one at Repository settings -> Repository details",
+			fallbackDisplay(configured)))
+		return
+	}
+	repo.Errors = append(repo.Errors, "no branch is marked as the default and the configured default branch could not be read")
+}
+
+// configuredDefaultBranch reads the default branch a repository is configured
+// with, whether or not it exists: /default-branch (Bitbucket 7.5+), then the
+// legacy /branches/default, which answers 204 for an empty repository and 404
+// when the configured branch does not exist.
+func (f *Fetcher) configuredDefaultBranch(ctx context.Context, base string) (apiRef, bool) {
 	for _, path := range []string{base + "/default-branch", base + "/branches/default"} {
 		var out apiRef
 		err := f.client.get(ctx, path, nil, &out)
 		if err == nil && out.ID != "" {
-			repo.Available["defaultBranch"] = true
-			return out.ID, fallbackDisplay(out), false
-		}
-		if err != nil && IsNotFound(err) {
-			// A 404 here is ambiguous: the endpoint may be absent on this
-			// version, or the repository may simply be empty. Keep trying.
-			continue
-		}
-		if err != nil && !f.unreadable(err) {
-			repo.Errors = append(repo.Errors, fmt.Sprintf("default branch: %v", err))
-			repo.Available["defaultBranch"] = false
-			return "", "", false
+			return out, true
 		}
 	}
-
-	// Fall back to the branch listing, which also settles whether the
-	// repository is empty.
-	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", nil)
-	if err != nil {
-		repo.Available["defaultBranch"] = false
-		repo.Errors = append(repo.Errors, fmt.Sprintf("default branch: %v", err))
-		return "", "", false
-	}
-	if len(branches) == 0 {
-		repo.Available["defaultBranch"] = true
-		return "", "", true
-	}
-	for _, b := range branches {
-		if b.IsDefault {
-			repo.Available["defaultBranch"] = true
-			return b.ID, b.DisplayID, false
-		}
-	}
-	repo.Available["defaultBranch"] = false
-	repo.Errors = append(repo.Errors, "default branch could not be determined")
-	return "", "", false
+	return apiRef{}, false
 }
 
 func fallbackDisplay(ref apiRef) string {
@@ -914,15 +946,27 @@ func (f *Fetcher) fetchHooks(ctx context.Context, base string, repo *scm.Reposit
 // stale-branch rule reports MANUAL instead.
 const maxBranchesForCommitLookup = 200
 
-func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repository) {
-	query := url.Values{"details": []string{"true"}}
-	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", query)
+// listBranches reads every branch with the age of its tip commit, and decides
+// whether the repository is empty: no branch at all.
+//
+// details=true is what carries the tip commit's time. Bitbucket 10.4 refuses
+// it — 404 NoDefaultBranchException — for a repository whose configured
+// default branch does not exist, because the ahead/behind metadata is computed
+// against it. The plain listing still answers, and the per-commit lookup below
+// supplies the times.
+func (f *Fetcher) listBranches(ctx context.Context, base string, repo *scm.Repository) []apiBranch {
+	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", url.Values{"details": []string{"true"}})
+	if err != nil && IsNotFound(err) {
+		branches, err = getPaged[apiBranch](ctx, f.client, base+"/branches", nil)
+	}
 	if err != nil {
 		repo.Available["branches"] = false
+		repo.Available["branchAges"] = false
 		repo.Errors = append(repo.Errors, fmt.Sprintf("branches: %v", err))
-		return
+		return nil
 	}
 	repo.Available["branches"] = true
+	repo.Empty = len(branches) == 0
 
 	agesComplete := true
 	for _, b := range branches {
@@ -935,8 +979,7 @@ func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repo
 			AgeDays:           -1,
 		}
 		if branch.LatestCommitEpoch == 0 && len(branches) <= maxBranchesForCommitLookup && b.LatestCommit != "" {
-			// details=true did not carry commit metadata on this version;
-			// ask for the commit directly.
+			// The listing carried no commit metadata; ask for the commit.
 			branch.LatestCommitEpoch = f.fetchCommitEpoch(ctx, base, b.LatestCommit)
 		}
 		if branch.LatestCommitEpoch > 0 {
@@ -946,13 +989,11 @@ func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repo
 		}
 		repo.Branches = append(repo.Branches, branch)
 	}
-	if len(branches) == 0 {
-		agesComplete = true
-	}
 	repo.Available["branchAges"] = agesComplete
 	if !agesComplete {
 		repo.Errors = append(repo.Errors, "commit timestamps unavailable for some branches; stale-branch rule reports MANUAL")
 	}
+	return branches
 }
 
 func (f *Fetcher) fetchCommitEpoch(ctx context.Context, base, commitID string) int64 {

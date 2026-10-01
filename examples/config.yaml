@@ -127,9 +127,10 @@ allowPublicRepositories: false
 # permissionRank:
 #   REPO_CREATE: 25
 
-# Archived repositories are read-only by definition, so their branch
-# protections say little. Set to false to scan them anyway.
-skipArchivedRepositories: true
+# Archived repositories take no pushes and no pull requests, so every control
+# about how changes arrive reports NA for them; who can read the code (CIS-1.3.8)
+# is still judged. Set to true to leave them out of the report entirely.
+skipArchivedRepositories: false
 
 # Narrow the run. exclude always wins over include, so you can pin a list and
 # still drop one entry from it.

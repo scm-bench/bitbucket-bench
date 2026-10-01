@@ -44,9 +44,10 @@ FULL = {
     # Two project administrators (alice, bob); instance admins do not count
     # toward a repository's own administrators.
     "HARD/payments-api": dict(zip(REPO_CONTROLS, [P, M, M, P, P, P, P, P, P, P, P, P, P, P])),
-    # Empty: nothing to protect on a branch that does not exist yet, and no
-    # file to find. Merge checks are repository-wide and still apply.
-    "HARD/empty-service": dict(zip(REPO_CONTROLS, [P, M, M, N, P, P, P, P, N, N, N, N, P, P])),
+    # Empty: nothing to protect on a branch that does not exist yet, no branch
+    # to go stale, no file to find, nothing to merge into. Merge checks that
+    # are repository-wide (approvals, tasks, strategies, hooks) still apply.
+    "HARD/empty-service": dict(zip(REPO_CONTROLS, [P, M, M, N, N, P, P, P, N, N, N, N, P, P])),
     # Default branch "trunk": the project's restrictions name refs/heads/main,
     # so pushes and deletes are unprotected; force pushes are still refused by
     # the inherited hook. SECURITY.md lives under docs/.
@@ -61,8 +62,9 @@ FULL = {
     # No restriction, but the Reject Force Push hook refuses force pushes.
     "WEAK/hook-protected": dict(zip(REPO_CONTROLS, [F, M, M, P, F, F, F, F, F, P, F, P, F, F])),
     # Archived: nothing can be pushed or merged, so every control about change
-    # is not applicable; who can read and administer it still matters.
-    "WEAK/archived-tool": dict(zip(REPO_CONTROLS, [N, N, N, N, N, N, N, N, N, N, N, N, F, F])),
+    # is not applicable, including who administers it; who can read it (1.3.8:
+    # every licensed user may write to WEAK) still matters.
+    "WEAK/archived-tool": dict(zip(REPO_CONTROLS, [N, N, N, N, N, N, N, N, N, N, N, N, N, F])),
     # Configured default branch "master" was never pushed. With no restriction
     # anywhere, no branch is protected whichever is default; the security
     # policy can only be looked for on a default branch that exists.

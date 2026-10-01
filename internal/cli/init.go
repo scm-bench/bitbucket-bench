@@ -78,8 +78,9 @@ scan:
 # For instances that intentionally publish code.
 #allowPublicRepositories: false
 
-# Drop archived repositories from the scan.
-#skipArchivedRepositories: true
+# Archived repositories are reported: the controls about changes are NA, and who
+# can read the code is still judged. Set to true to leave them out entirely.
+#skipArchivedRepositories: false
 
 # Leave controls out of the run, or restrict the run to a list.
 #exclude: [CIS-1.1.8]

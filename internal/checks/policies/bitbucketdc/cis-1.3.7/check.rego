@@ -21,7 +21,9 @@ decidable if {
 
 # A lower bound that already meets the minimum is conclusive, so PASS is
 # decided before the completeness gate.
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "PASS",
 	"details": sprintf("%d administrator(s) can manage this repository: %s.", [total, lib.joined(admins, 10)]),
 } if {
