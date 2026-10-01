@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"math"
 	"strings"
 
 	"github.com/scm-bench/bitbucket-bench/internal/checks"
@@ -76,7 +75,11 @@ func Compute(findings []Finding) Score {
 		score.Value = 0
 		return score
 	}
-	score.Value = int(math.Round(float64(score.EarnedWeight) / float64(score.TotalWeight) * 100))
+	// Floored, never rounded: 1510 of 1512 is not 100. Rounding printed a
+	// perfect score over a failing finding, and let scan.failUnder: 100 pass
+	// a scan that had one. Integer arithmetic, so no float can nudge 99.9...
+	// up either.
+	score.Value = score.EarnedWeight * 100 / score.TotalWeight
 	return score
 }
 
