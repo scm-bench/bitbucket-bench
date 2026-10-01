@@ -9,7 +9,7 @@ printed.
 ```sh
 export BITBUCKET_LICENSE_FILE=~/bitbucket-timebomb.lic   # see below
 ./up.sh          # boot a fresh instance on :17990 (2-3 minutes)
-./seed.sh        # users, groups, 4 projects, 10 repositories, 3 scan tokens
+./seed.sh        # users, groups, 4 projects, 13 repositories, 3 scan tokens
 ./verify.sh      # scan with each token and diff every verdict
 ```
 
@@ -50,6 +50,8 @@ it, so `/admin/permissions/*` is unreadable to every one of them.
 | `WEAK/hook-protected` | no restriction, but Reject Force Push enabled |
 | `WEAK/archived-tool` | archived |
 | `WEAK/wrong-default` | configured default branch `master`, only `main` pushed |
+| `WEAK/patterns` | a suffix pattern (`heads/**/main`), a production model branch, a category that does not cover `main`, and a required build whose exemption pattern does |
+| `WEAK/deploy-keys` | two deploy keys, each exempt from a different direct-push restriction — nobody is exempt from both — and one exempt from the history-rewrite restriction |
 | `PUB/docs-site` | a public project |
 | `PRIV/secret-sauce` | a project the least-privileged token cannot see |
 
@@ -68,3 +70,17 @@ docker rm -f bitbucket-bench-e2e && docker volume rm bitbucket-bench-e2e-home
 
 `out/` holds tokens and session cookies for the instance; it is gitignored and
 worthless once the container is gone.
+
+## Another Bitbucket version
+
+`IMAGE` picks the image, so the same fixture and expectations run against any
+release with a Docker image:
+
+```sh
+IMAGE=atlassian/bitbucket:9.4 ./up.sh && ./seed.sh && ./verify.sh
+```
+
+A difference on another version is either a fact about that version the fetcher
+has to learn, or a fixture step that version does not support — `seed.sh`
+fails loudly on any request it could not make, so the second shows up there
+rather than as a verdict.

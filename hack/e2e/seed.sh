@@ -32,10 +32,19 @@ BUILD_HOOKS=$NS.bitbucket-build
 login() { # login <user> <password> <cookie-jar>
   rm -f "$3"
   curl -fsS -c "$3" -b "$3" -o /dev/null "$B/login"
-  curl -fsS -c "$3" -b "$3" -o /dev/null \
+  # Bitbucket 8.x and later sign in through the two-step-verification
+  # endpoint; older releases only through the classic login form. Either way
+  # the session cookie is what the rest of this script uses.
+  if ! curl -fsS -c "$3" -b "$3" -o /dev/null \
     -H 'Content-Type: application/json' -H 'X-Atlassian-Token: no-check' \
     -X POST "$B/rest/tsv/1.0/authenticate" \
-    -d "{\"username\":\"$1\",\"password\":\"$2\",\"rememberMe\":false,\"targetUrl\":\"\"}"
+    -d "{\"username\":\"$1\",\"password\":\"$2\",\"rememberMe\":false,\"targetUrl\":\"\"}" 2>/dev/null; then
+    curl -fsS -c "$3" -b "$3" -o /dev/null -H 'X-Atlassian-Token: no-check' \
+      -X POST "$B/j_atl_security_check" \
+      --data-urlencode "j_username=$1" --data-urlencode "j_password=$2" --data-urlencode "submit=Log in"
+  fi
+  # Prove the session works before anything relies on it.
+  curl -fsS -b "$3" -o /dev/null "$B/rest/api/latest/users?limit=1"
 }
 
 ADMIN_JAR=$OUT/admin.cookies
