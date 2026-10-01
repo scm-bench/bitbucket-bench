@@ -302,10 +302,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			return err
 		}
 		if inst.URL != "" {
-			opts.baseURL = inst.URL
-			if strings.TrimSpace(opts.token) == "" && strings.TrimSpace(opts.username) == "" {
-				opts.token = inst.Token
+			// A credential arriving without a URL — an exported
+			// BITBUCKET_TOKEN for some other instance is the usual way — used
+			// to be sent to the saved instance's URL, a host it was never meant
+			// for. The saved instance pairs only with its own token.
+			if strings.TrimSpace(opts.token) != "" || strings.TrimSpace(opts.username) != "" {
+				return fmt.Errorf("a credential is set (--token/BITBUCKET_TOKEN or --username/BITBUCKET_USERNAME) but no --url (BITBUCKET_URL), "+
+					"so the saved instance %s was not used: the credential would go to a host it may not belong to\n"+
+					"pass --url for the credential, or unset it to use the saved instance's own", inst.URL)
 			}
+			opts.baseURL = inst.URL
+			opts.token = inst.Token
 			stderr := cmd.ErrOrStderr()
 			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
 				Line(console.Info, "using saved instance %s (%s)", inst.URL, path)

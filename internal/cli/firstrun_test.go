@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/scm-bench/bitbucket-bench/internal/console"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 )
 
 // The demo exists for the reader who has not configured anything yet, so it
@@ -374,5 +377,34 @@ func TestReadLineConsumesExactlyOneLine(t *testing.T) {
 	rest, _ := io.ReadAll(in)
 	if string(rest) != "second\n" {
 		t.Errorf("readLine read ahead; %q was left", rest)
+	}
+}
+
+// An exported token for some other instance used to be sent to the saved
+// instance's URL whenever BITBUCKET_URL was unset — a credential delivered to
+// a host it was never meant for. The saved instance now pairs only with its
+// own token, and a stray credential without a URL is refused before anything
+// is contacted.
+func TestStrayCredentialIsNotSentToTheSavedInstance(t *testing.T) {
+	var contacted atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		contacted.Store(true)
+	}))
+	defer server.Close()
+	writeSavedInstance(t, "url: "+server.URL+"\ntoken: saved\n")
+	t.Setenv("BITBUCKET_TOKEN", "a-token-for-another-instance")
+
+	var stdout, stderr bytes.Buffer
+	root := NewRootCommand()
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetIn(strings.NewReader(""))
+	root.SetArgs([]string{"scan", "-c", configWithScan(t, "maxDuration: 2s")})
+	err := root.Execute()
+	if ExitCode(err) != ExitError || err == nil || !strings.Contains(err.Error(), "was not used") {
+		t.Fatalf("err = %v, want the saved instance refused for a stray credential", err)
+	}
+	if contacted.Load() {
+		t.Error("the saved instance was contacted with a credential that was not its own")
 	}
 }
