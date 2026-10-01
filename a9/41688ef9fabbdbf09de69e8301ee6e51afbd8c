@@ -1,0 +1,21 @@
+hack/e2e/verify.sh
+  s_48d8fa1c49bfb6::t_184e69951debde 19-22,24
+hack/e2e/expected.py
+  s_48d8fa1c49bfb6::t_184e69951debde 85-89,95-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a941688ef9fabbdbf09de69e8301ee6e51afbd8c",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
