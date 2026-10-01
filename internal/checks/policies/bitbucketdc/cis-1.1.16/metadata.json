@@ -10,8 +10,8 @@
   "automated": true,
   "title": "Ensure force pushing code to branches is denied",
   "description": "A force push can erase the commits that reviewers approved and replace them with different code under the same branch. It destroys the audit trail that every other source control check depends on, and an exemption from the restriction hands that ability back to whoever holds it.",
-  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent rewriting history\". Then review the restriction's exempt users, groups and access keys — each can still force push, and a deploy key is as capable of it as a person. Name the service accounts that genuinely need an exemption in allowedBypassPrincipals, and set thresholds.maxBypassPrincipals to how many other principals may hold one (-1 turns the check off). Configure it at Project settings -> Branch permissions to cover every repository in the project.",
-  "fixSummary": "Block force pushes at Repository settings -> Branch permissions; check who is exempt.",
+  "remediation": "Either enable the bundled \"Reject Force Push\" hook at Repository settings -> Hooks (or at Project settings -> Hooks for every repository in the project), which refuses force pushes on every branch for everyone, or add a restriction at Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent rewriting history\". A restriction's exempt users, groups and access keys can still force push, and a deploy key is as capable of it as a person; name the service accounts that genuinely need an exemption in allowedBypassPrincipals, and set thresholds.maxBypassPrincipals to how many other principals may hold one (-1 turns the check off). Configure the restriction at Project settings -> Branch permissions to cover every repository in the project.",
+  "fixSummary": "Enable the \"Reject Force Push\" hook at Repository settings -> Hooks.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

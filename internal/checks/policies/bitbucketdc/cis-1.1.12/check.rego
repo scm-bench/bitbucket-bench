@@ -4,29 +4,22 @@ import rego.v1
 
 import data.scmbench.lib
 
-# Bitbucket Data Center ships no built-in signature verification, so this is
-# always an add-on hook. Which add-on counts is deployment-specific, hence the
-# configurable key list rather than a hard-coded vendor name.
-hook_matches(h) if {
-	some pattern in object.get(lib.cfg, "signatureHookKeys", [])
+# A hook counts only when its full key is configured and it can stop a change:
+# a pre-receive hook rejects the push, a merge check refuses the merge. A
+# post-receive hook runs after the commits are in.
+#
+# Exact keys, never substrings: Bitbucket bundles "Verify Committer"
+# (verify-committer-hook), which checks who pushed and verifies no signature,
+# and a substring list containing "verify-commit" accepted it as one.
+blocking_types := {"PRE_RECEIVE", "PRE_PULL_REQUEST_MERGE"}
 
-	# Every string contains "", so a blank pattern would report the first
-	# enabled hook — any hook — as a signature verifier. config.Validate
-	# rejects one, and this is the second lock on the same door: a caller
-	# building a Config in Go never passes through that check, and a PASS
-	# nobody verified is the worst output this tool can produce.
-	trim_space(pattern) != ""
-	haystack := lower(concat(" ", [
-		object.get(h, "key", ""),
-		object.get(h, "name", ""),
-	]))
-	contains(haystack, lower(pattern))
-}
+keys := {k | some k in lib.as_list(object.get(lib.cfg, "signatureHookKeys", []))}
 
 matching := {h.key |
 	some h in lib.list("hooks")
 	h.enabled == true
-	hook_matches(h)
+	h.key in keys
+	object.get(h, "type", "") in blocking_types
 }
 
 result := lib.archived_na if {
@@ -44,5 +37,5 @@ result := lib.archived_na if {
 } else := {
 	"status": "FAIL",
 	"details": "No enabled hook verifies commit signatures, so commit authorship cannot be trusted.",
-	"evidence": [sprintf("%d hook(s) enabled, none matching the configured signature-hook keys", [count([h | some h in lib.list("hooks"); h.enabled == true])])],
+	"evidence": [sprintf("%d hook(s) enabled, none of them a configured signature hook (signatureHookKeys)", [count([h | some h in lib.list("hooks"); h.enabled == true])])],
 }

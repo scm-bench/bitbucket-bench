@@ -122,7 +122,7 @@ func hardenedRepo() scm.Repository {
 			MatchesDefaultBranch: true,
 		}},
 		Hooks: []scm.Hook{
-			{Key: "com.example.gpg-signature-check", Name: "GPG signature check", Enabled: true, Configured: true},
+			{Key: "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook", Name: "Verify Commit Signature", Type: "PRE_RECEIVE", Enabled: true, Configured: true},
 		},
 		Branches: []scm.Branch{
 			{ID: "refs/heads/main", DisplayID: "main", IsDefault: true, AgeDays: 2},

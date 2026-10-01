@@ -16,6 +16,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// The hooks Bitbucket Data Center bundles, as their full module keys.
+const (
+	// BundledSignatureHook is "Verify Commit Signature" (Bitbucket 8.13+).
+	BundledSignatureHook = "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook"
+	// BundledForcePushHook is "Reject Force Push".
+	BundledForcePushHook = "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook"
+)
+
 // Config is the full evaluation configuration.
 type Config struct {
 	// Scan holds the settings that describe the deployment rather than any
@@ -27,10 +35,20 @@ type Config struct {
 	Scan Scan `yaml:"scan" json:"-"`
 	// Thresholds are the numeric knobs used by the policies.
 	Thresholds Thresholds `yaml:"thresholds" json:"thresholds"`
-	// SignatureHookKeys are lowercase substrings that identify a commit
-	// signature verification hook. Bitbucket has no built-in one, so which
-	// add-on counts is deployment-specific.
+	// SignatureHookKeys are the full keys (plugin-key:module-key) of hooks
+	// that verify commit signatures. Bitbucket 8.13+ bundles one; an older
+	// instance needs a Marketplace add-on, whose key goes here.
+	//
+	// Exact keys rather than substrings. The default used to be the
+	// substrings "signature", "verify-commit", "gpg" and so on, and Bitbucket
+	// bundles a hook named verify-committer-hook — "Verify Committer", which
+	// checks who pushed and verifies no signature at all. Enabling it passed
+	// CIS-1.1.12 on a real Bitbucket 10.4.
 	SignatureHookKeys []string `yaml:"signatureHookKeys" json:"signatureHookKeys"`
+	// ForcePushHookKeys are the full keys of hooks that reject every force
+	// push on every branch: Bitbucket's bundled "Reject Force Push", or an
+	// add-on doing the same. One enabled satisfies CIS-1.1.16 by itself.
+	ForcePushHookKeys []string `yaml:"forcePushHookKeys" json:"forcePushHookKeys"`
 	// NonLinearMergeStrategies are merge strategy IDs that can introduce a
 	// merge commit and therefore break linear history.
 	NonLinearMergeStrategies []string `yaml:"nonLinearMergeStrategies" json:"nonLinearMergeStrategies"`
@@ -171,11 +189,10 @@ func Default() Config {
 			MaxBypassPrincipals: 0,
 		},
 		SignatureHookKeys: []string{
-			"signature",
-			"signed-commit",
-			"gpg",
-			"verify-commit",
-			"commit-signing",
+			BundledSignatureHook,
+		},
+		ForcePushHookKeys: []string{
+			BundledForcePushHook,
 		},
 		// "ff" is deliberately absent: it falls back to a merge commit only
 		// when the target has moved, which is the normal cost of an otherwise
@@ -368,20 +385,14 @@ func (c Config) Validate() error {
 		}
 	}
 
-	// A blank entry in any of these lists is matched by everything.
-	//
-	// signatureHookKeys is the one that bites: the rule asks whether a hook's
-	// key or name contains any configured substring, and every string contains
-	// "". One stray `- ""` in a YAML file turns CIS-1.1.12 into a control that
-	// reports "signature verification is enforced by <whatever hook exists>" —
-	// a confident PASS for a setting nobody verified, which is the single
-	// failure mode this project is built to avoid. The others are less
-	// dramatic but wrong in the same way, so they are checked together.
+	// A blank entry in any of these lists is matched by everything, or by
+	// nothing anyone meant: either way a verdict follows from a typo.
 	for _, list := range []struct {
 		field string
 		items []string
 	}{
 		{"signatureHookKeys", c.SignatureHookKeys},
+		{"forcePushHookKeys", c.ForcePushHookKeys},
 		{"nonLinearMergeStrategies", c.NonLinearMergeStrategies},
 		{"securityPolicyPaths", c.SecurityPolicyPaths},
 		{"allowedBypassPrincipals", c.AllowedBypassPrincipals},
@@ -391,6 +402,24 @@ func (c Config) Validate() error {
 		for i, item := range list.items {
 			if strings.TrimSpace(item) == "" {
 				return fmt.Errorf("%s[%d] is empty; remove the entry rather than leaving it blank", list.field, i)
+			}
+		}
+	}
+	// Hook lists hold full module keys. A config written for the old
+	// substring matching ("gpg", "signature") would now match nothing and
+	// quietly fail every repository; saying so at startup is cheaper than a
+	// report full of FAILs nobody can explain.
+	for _, list := range []struct {
+		field string
+		items []string
+	}{
+		{"signatureHookKeys", c.SignatureHookKeys},
+		{"forcePushHookKeys", c.ForcePushHookKeys},
+	} {
+		for i, item := range list.items {
+			if !strings.Contains(item, ":") {
+				return fmt.Errorf("%s[%d] %q is not a hook key; give the full plugin-key:module-key, e.g. %s "+
+					"(the key of every hook is in a captured snapshot's repositories[].hooks[].key)", list.field, i, item, BundledSignatureHook)
 			}
 		}
 	}

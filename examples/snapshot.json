@@ -67,7 +67,7 @@
             { "id": 7, "buildParentKeys": ["PLAT-PAY-BUILD"], "matcherId": "refs/heads/main", "matcherType": "BRANCH", "matcherText": "main", "matchesDefaultBranch": true }
           ],
           "hooks": [
-            { "key": "com.example.gpg-signature-verify", "name": "GPG signature verification", "type": "PRE_RECEIVE", "enabled": true, "configured": true, "scope": "REPOSITORY" }
+            { "key": "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook", "name": "Verify Commit Signature", "type": "PRE_RECEIVE", "enabled": true, "configured": true, "scope": "PROJECT" }
           ],
           "branches": [
             { "id": "refs/heads/main", "displayId": "main", "isDefault": true, "latestCommit": "9f2c1ab", "latestCommitEpoch": 1768460400, "ageDays": 2 },

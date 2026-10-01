@@ -97,3 +97,104 @@ test_not_applicable_when_archived if {
 	r.status == "NA"
 	contains(r.details, "archived")
 }
+
+force_push_hook := {
+	"key": "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook",
+	"type": "PRE_RECEIVE",
+	"enabled": true,
+}
+
+# Measured on Bitbucket 10.4: the bundled Reject Force Push hook refuses every
+# force push on every branch, and a repository relying on it — no branch
+# restriction at all — failed this control.
+test_passes_with_the_reject_force_push_hook_and_no_restriction if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [],
+		"hooks": [force_push_hook],
+	})
+	r.status == "PASS"
+	contains(r.details, "Reject Force Push")
+}
+
+# The hook binds everyone, so it settles the question even where the branch
+# restrictions could not be read, or a restriction exempts the whole team.
+test_the_hook_settles_it_whatever_the_restrictions_say if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [testdata.restriction("fast-forward-only", testdata.exempt(["alice", "bob"]))],
+		"hooks": [force_push_hook],
+		"available": testdata.without("branchRestrictions"),
+	})
+	r.status == "PASS"
+}
+
+test_a_disabled_hook_protects_nothing if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [],
+		"hooks": [object.union(force_push_hook, {"enabled": false})],
+	})
+	r.status == "FAIL"
+}
+
+# No restriction blocks force pushes, and the hooks could not be read: the
+# Reject Force Push hook may or may not be what protects the branch.
+test_manual_when_unprotected_by_restrictions_and_hooks_are_unreadable if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [],
+		"available": testdata.without("hooks"),
+	})
+	r.status == "MANUAL"
+	contains(r.details, "hooks could not be read")
+}
+
+# A restriction binding everyone is a PASS whatever the hooks say.
+test_a_binding_restriction_passes_with_hooks_unreadable if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [testdata.restriction("fast-forward-only", {})],
+		"available": testdata.without("hooks"),
+	})
+	r.status == "PASS"
+}
+
+# The restriction exempts the team, and the hooks are unread: if Reject Force
+# Push were enabled the exemption would not matter, so this cannot fail yet.
+test_manual_when_bypassed_and_hooks_are_unreadable if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [testdata.restriction("fast-forward-only", testdata.exempt(["alice", "bob"]))],
+		"available": testdata.without("hooks"),
+	})
+	r.status == "MANUAL"
+}
+
+test_fails_without_any_restriction_or_hook_even_when_the_default_branch_is_unknown if {
+	r := cis_1_1_16.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"branchRestrictions": [],
+		"hooks": [],
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "FAIL"
+	contains(r.details, "any branch")
+}
+
+test_manual_when_a_restriction_exists_but_the_default_branch_is_unknown if {
+	r := cis_1_1_16.result with input as testdata.input_for({
+		"fullName": "PRJ/app",
+		"defaultBranch": "",
+		"branchRestrictions": [{"type": "fast-forward-only", "matchesDefaultBranch": false}],
+		"hooks": [],
+		"available": testdata.without("defaultBranch"),
+	})
+	r.status == "MANUAL"
+}
+
+# The restriction exists, on another branch: the default branch can still be
+# force pushed, and the message names it rather than "any branch".
+test_fails_when_the_restriction_covers_another_branch if {
+	r := cis_1_1_16.result with input as testdata.repo_input({
+		"branchRestrictions": [{"type": "fast-forward-only", "matchesDefaultBranch": false}],
+		"hooks": [],
+	})
+	r.status == "FAIL"
+	contains(r.details, "main can be force pushed")
+}

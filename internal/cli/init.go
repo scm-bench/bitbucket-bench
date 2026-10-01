@@ -63,8 +63,11 @@ scan:
 #  maxStaleBranches: 0    # how many abandoned branches a repository may carry
 #  inactiveUserDays: 90   # days without authenticating before review (CIS-1.3.1)
 
-# Which hook add-ons count as commit signature verification (CIS-1.1.12).
-#signatureHookKeys: [signature, signed-commit, gpg, verify-commit, commit-signing]
+# Full keys (plugin-key:module-key) of hooks that verify commit signatures
+# (CIS-1.1.12), and of hooks that reject every force push (CIS-1.1.16). The
+# defaults are the hooks Bitbucket bundles; lists replace rather than merge.
+#signatureHookKeys: [com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook]
+#forcePushHookKeys: [com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook]
 
 # Merge strategies that break linear history (CIS-1.1.13).
 #nonLinearMergeStrategies: [no-ff, rebase-no-ff]

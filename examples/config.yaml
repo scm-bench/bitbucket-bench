@@ -76,15 +76,19 @@ thresholds:
   # it.
   maxBypassPrincipals: 0
 
-# CIS-1.1.12: Bitbucket Data Center ships no signature verification of its own,
-# so name the add-on you use. A hook counts when its plugin key or display name
-# contains any of these (case-insensitive) substrings.
+# CIS-1.1.12: the full keys (plugin-key:module-key) of hooks that verify commit
+# signatures. A hook counts only if it is enabled and can refuse the change — a
+# pre-receive hook or a merge check. Bitbucket 8.13+ bundles one; on an older
+# instance, add your Marketplace add-on's key. A captured snapshot lists every
+# hook's key under repositories[].hooks[].key. Keep the bundled key in the list
+# if you add another: lists replace, they do not merge.
 signatureHookKeys:
-  - signature
-  - signed-commit
-  - gpg
-  - verify-commit
-  - commit-signing
+  - com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook
+
+# CIS-1.1.16: the full keys of pre-receive hooks that reject every force push on
+# every branch. One enabled satisfies the control on its own.
+forcePushHookKeys:
+  - com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook
 
 # CIS-1.1.13: merge strategy IDs that can introduce a merge commit. "ff" is
 # deliberately absent because it only falls back to a merge commit when the
