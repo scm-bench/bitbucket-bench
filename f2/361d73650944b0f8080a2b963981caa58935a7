@@ -1,0 +1,20 @@
+internal/cli/firstrun_test.go
+  s_48d8fa1c49bfb6::t_d77cde99ec4855 13-15,382-409
+  s_48d8fa1c49bfb6::t_7e27ed7ada8728 410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f2361d73650944b0f8080a2b963981caa58935a7",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
