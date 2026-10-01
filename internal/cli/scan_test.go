@@ -1072,3 +1072,58 @@ func TestScansThatCannotVouchForTheirCoverageExitTwo(t *testing.T) {
 		})
 	}
 }
+
+// A report or snapshot written over an existing world-readable file used to
+// keep the old mode: O_TRUNC and os.WriteFile apply 0600 only when they create
+// the file. On a shared CI agent that left a map of the instance's weak points
+// readable by everyone.
+func TestOutputsOverwriteExistingFilesAsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	dir := t.TempDir()
+	report := filepath.Join(dir, "report.json")
+	snapshot := filepath.Join(dir, "snapshot.json")
+	for _, path := range []string{report, snapshot} {
+		if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	src := writeSnapshotFixture(t)
+	run(t, "scan", "--snapshot-in", src, "-o", "json", "--output-file", report, "-c", configWithFailOn(t, "none"))
+	if err := writeSnapshot(snapshot, mustReadSnapshot(t, src)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{report, snapshot} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Errorf("%s mode = %o, want 600", filepath.Base(path), mode)
+		}
+		raw, _ := os.ReadFile(path)
+		if string(raw) == "old" {
+			t.Errorf("%s was not rewritten", filepath.Base(path))
+		}
+	}
+	// The temporary file is renamed over the target, never left beside it.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Errorf("directory holds %d entries, want only the two outputs", len(entries))
+	}
+}
+
+func mustReadSnapshot(t *testing.T, path string) *scm.Snapshot {
+	t.Helper()
+	s, err := readSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}

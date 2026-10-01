@@ -469,12 +469,13 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		return err
 	}
 
-	out, closeOut, err := openOutput(cmd, opts.outputPath)
-	if err != nil {
-		return err
-	}
 	// The report is rendered into memory first so a write failure cannot leave
 	// a half-written file that looks like a complete report.
+	var out io.Writer = cmd.OutOrStdout()
+	if opts.outputPath != "" {
+		// Rendered for a file, not a terminal: no colour, the default width.
+		out = io.Discard
+	}
 	var buf bytes.Buffer
 	reportOpts := report.Options{
 		Format:         opts.format,
@@ -491,14 +492,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		reportOpts.Notice = demoNotice
 	}
 	if err := report.Write(&buf, rep, reportOpts); err != nil {
-		closeOut()
 		return err
 	}
-	if _, err := io.Copy(out, &buf); err != nil {
-		closeOut()
-		return err
-	}
-	if err := closeOut(); err != nil {
+	if opts.outputPath != "" {
+		// 0600, for the same reason the snapshot is: a report names every
+		// repository that can be force-pushed, every account that should have
+		// been deactivated, and every project handing write access to all
+		// comers — the same map of an instance's weak points, rendered.
+		if err := writePrivateFile(opts.outputPath, buf.Bytes()); err != nil {
+			return fmt.Errorf("write report %s: %w", opts.outputPath, err)
+		}
+	} else if _, err := io.Copy(out, &buf); err != nil {
 		return err
 	}
 
@@ -718,44 +722,49 @@ func humanAge(d time.Duration) string {
 }
 
 func writeSnapshot(path string, snapshot *scm.Snapshot) error {
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
 	raw, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode snapshot: %w", err)
 	}
 	// A snapshot describes an instance's security posture, so it is written
 	// readable by its owner only.
-	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+	if err := writePrivateFile(path, append(raw, '\n')); err != nil {
 		return fmt.Errorf("write snapshot %s: %w", path, err)
 	}
 	return nil
 }
 
-// openOutput returns the report destination and a close function that is safe
-// to call for stdout.
-func openOutput(cmd *cobra.Command, path string) (io.Writer, func() error, error) {
-	if path == "" {
-		return cmd.OutOrStdout(), func() error { return nil }, nil
+// writePrivateFile writes data to path readable by its owner only, atomically.
+//
+// Both properties come from writing a fresh 0600 file beside the target and
+// renaming it over. os.WriteFile and O_TRUNC applied 0600 only when they
+// created the file: a report written over an existing 0644 one kept the
+// 0644, and a snapshot naming every force-pushable repository was readable by
+// everyone on a shared CI agent. And a write that failed halfway left half a
+// report that read like a whole one; the rename either lands complete or not
+// at all.
+func writePrivateFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, nil, fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
-	// 0600, for the same reason the snapshot is: a report names every
-	// repository that can be force-pushed, every account that should have been
-	// deactivated, and every project handing write access to all comers. That
-	// is the same map of an instance's weak points, just rendered — so it gets
-	// the same permissions rather than whatever the umask happens to allow.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create %s: %w", path, err)
+		return err
 	}
-	return file, file.Close, nil
+	defer os.Remove(tmp.Name()) // a no-op once the rename has happened
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // useColor enables ANSI only for an actual terminal, honouring NO_COLOR.
