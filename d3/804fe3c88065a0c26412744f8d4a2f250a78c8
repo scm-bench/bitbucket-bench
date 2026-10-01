@@ -1,0 +1,25 @@
+internal/scm/bitbucketdc/fetcher.go
+  s_48d8fa1c49bfb6::t_4dfbafb78258a8 5
+  s_48d8fa1c49bfb6::t_5a0b31f981fe32 183-184,192-203,206-240,242
+internal/scm/bitbucketdc/client.go
+  s_48d8fa1c49bfb6::t_4dfbafb78258a8 564-570
+internal/scm/bitbucketdc/fetcher_test.go
+  s_48d8fa1c49bfb6::t_8f6fbf5dddcb23 352-418
+  s_48d8fa1c49bfb6::t_4dfbafb78258a8 75-76,325,339,494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d3804fe3c88065a0c26412744f8d4a2f250a78c8",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
