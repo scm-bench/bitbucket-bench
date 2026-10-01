@@ -1,0 +1,61 @@
+internal/scm/snapshot.go
+  s_48d8fa1c49bfb6::t_8ae1c46378f07a 219-221
+  s_48d8fa1c49bfb6::t_81d4dc02c1c0d1 188-192
+hack/e2e/expected.py
+  s_48d8fa1c49bfb6::t_045a23f77aefa1 72-78
+internal/scm/bitbucketdc/fetcher_test.go
+  s_48d8fa1c49bfb6::t_78f1876ef8f2b5 1155-1158,1475-1504
+  s_48d8fa1c49bfb6::t_4902b0e9549247 1505
+hack/e2e/seed.sh
+  s_48d8fa1c49bfb6::t_045a23f77aefa1 121,190-191,239-274
+internal/checks/policies/bitbucketdc/cis-1.1.17/check.rego
+  s_48d8fa1c49bfb6::t_4ea5a0e142ce8d 61-65
+  s_48d8fa1c49bfb6::t_b0d580d42e32ce 34-36,49-52
+internal/scm/bitbucketdc/fetcher.go
+  s_48d8fa1c49bfb6::t_54f87adbc9be0a 804
+  s_48d8fa1c49bfb6::t_8ae1c46378f07a 787,790,795-796,815-822,866,873,877-885,887,889
+internal/checks/policies/lib/common.rego
+  s_48d8fa1c49bfb6::t_b0d580d42e32ce 91-105
+internal/scm/bitbucketdc/matcher.go
+  s_48d8fa1c49bfb6::t_8ae1c46378f07a 36,40-48,50-53,58,63,70,79-84,88-94,97,99,101,103-108,113-116,119-121,124-126,150-155,157-161,163-167,169-170,173-174,176-177,179-187
+internal/checks/policies/bitbucketdc/cis-1.1.9/check.rego
+  s_48d8fa1c49bfb6::t_b0d580d42e32ce 35-41
+internal/scm/snapshot_test.go
+  s_48d8fa1c49bfb6::t_7817bccac38448 50,53-55
+  s_48d8fa1c49bfb6::t_6700ac4a9962f0 56
+internal/scm/bitbucketdc/models.go
+  s_48d8fa1c49bfb6::t_8ae1c46378f07a 192
+  s_48d8fa1c49bfb6::t_54f87adbc9be0a 193-217
+internal/checks/policies/bitbucketdc/cis-1.1.15/check.rego
+  s_48d8fa1c49bfb6::t_4ea5a0e142ce8d 64-68
+  s_48d8fa1c49bfb6::t_b0d580d42e32ce 37-39,52-55
+internal/scm/bitbucketdc/matcher_test.go
+  s_48d8fa1c49bfb6::t_a18302e1b72222 26-28,34,36-66,71-73,80-81,85-87,89-90,92-107,109-123,127-136,139,142-144
+  s_48d8fa1c49bfb6::t_b5ce7e668835b6 137-138,140-141
+internal/checks/policies/bitbucketdc/cis-1.1.16/check.rego
+  s_48d8fa1c49bfb6::t_b0d580d42e32ce 65-67,82
+internal/checks/policies/bitbucketdc/cis-1.1.15/check_test.rego
+  s_48d8fa1c49bfb6::t_73d1af07a75acd 176-211
+internal/checks/policies/bitbucketdc/cis-1.1.16/check_test.rego
+  s_48d8fa1c49bfb6::t_3d6a65ad9b71a7 201-239
+internal/checks/policies/bitbucketdc/cis-1.1.17/check_test.rego
+  s_48d8fa1c49bfb6::t_eba5e1d868011a 132-167
+internal/checks/policies/bitbucketdc/cis-1.1.9/check_test.rego
+  s_48d8fa1c49bfb6::t_e8592029c0c3d5 129-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3928d300540fea33b67dae4f75cbd4a252d7ad23",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
