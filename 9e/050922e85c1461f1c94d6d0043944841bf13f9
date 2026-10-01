@@ -1,0 +1,24 @@
+internal/cli/scan.go
+  s_48d8fa1c49bfb6::t_be1c4429c0feed 305-312,314-315
+  s_48d8fa1c49bfb6::t_5cd6a4eca418b1 481-485,504-512,738,744-760,762-765,767-772,774
+internal/cli/diff.go
+  s_48d8fa1c49bfb6::t_36892f2a21bef0 142-144,154-158
+internal/cli/scan_test.go
+  s_48d8fa1c49bfb6::t_c07a48e6e187e6 1075-1129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e050922e85c1461f1c94d6d0043944841bf13f9",
+  "prompts": {},
+  "sessions": {
+    "s_48d8fa1c49bfb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b91ffb09-1c76-4e54-9777-4525648b2969",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Xianpeng Shen <xianpeng.shen@gmail.com>"
+    }
+  }
+}
