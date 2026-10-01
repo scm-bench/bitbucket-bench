@@ -622,6 +622,7 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Password:       opts.password,
 		Timeout:        opts.scan.Timeout.Get(),
 		Concurrency:    opts.scan.Concurrency,
+		CAFile:         opts.scan.CAFile,
 		Insecure:       opts.scan.Insecure,
 		AllowPlaintext: opts.scan.AllowPlaintext,
 		OnRequest: func(e bitbucketdc.RequestEvent) {

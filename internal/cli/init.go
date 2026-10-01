@@ -40,7 +40,10 @@ scan:
   timeout: 30s
   # Abandon the scan after this long; 0s means no limit.
   maxDuration: 0s
-  # Skip TLS certificate verification (for private CAs).
+  # A PEM bundle of CAs to trust besides the system's — for an instance whose
+  # certificate comes from an internal CA. Use this rather than insecure.
+  #caFile: /etc/ssl/certs/corp-root-ca.pem
+  # Skip TLS certificate verification entirely. Prefer caFile.
   insecure: false
   # Permit an http:// URL, sending credentials in the clear.
   allowPlaintext: false

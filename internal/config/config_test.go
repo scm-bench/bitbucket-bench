@@ -431,3 +431,13 @@ func TestHookListsRequireFullKeys(t *testing.T) {
 		})
 	}
 }
+
+// A CA bundle verifies the certificate; insecure skips verification. With
+// both set the bundle would be quietly ignored, and the person reading the
+// file would believe the certificate was checked.
+func TestCAFileAndInsecureAreMutuallyExclusive(t *testing.T) {
+	_, err := Load(writeConfig(t, "scan:\n  caFile: /etc/ssl/corp.pem\n  insecure: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v, want caFile and insecure refused together", err)
+	}
+}

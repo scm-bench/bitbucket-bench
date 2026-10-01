@@ -98,7 +98,11 @@ type Scan struct {
 	Timeout Duration `yaml:"timeout"`
 	// MaxDuration abandons the scan after this long; 0 means no limit.
 	MaxDuration Duration `yaml:"maxDuration"`
-	// Insecure skips TLS certificate verification, for private CAs.
+	// CAFile is a PEM bundle of certificate authorities to trust in addition
+	// to the system's, for an instance whose certificate comes from an
+	// internal CA. It is what such an instance needs instead of Insecure.
+	CAFile string `yaml:"caFile"`
+	// Insecure skips TLS certificate verification entirely. Prefer CAFile.
 	Insecure bool `yaml:"insecure"`
 	// AllowPlaintext permits an http:// URL, sending credentials in the
 	// clear.
@@ -350,6 +354,12 @@ func (c Config) Validate() error {
 	}
 	if s.Timeout.Get() < 0 || s.MaxDuration.Get() < 0 {
 		return fmt.Errorf("scan.timeout and scan.maxDuration must not be negative")
+	}
+	// A CA bundle is how an internal CA is trusted without giving up
+	// verification; with insecure on, the bundle would be quietly ignored and
+	// the reader of this file would believe the certificate was checked.
+	if s.CAFile != "" && s.Insecure {
+		return fmt.Errorf("scan.caFile and scan.insecure are mutually exclusive: the CA bundle verifies the instance's certificate, insecure skips verification; drop insecure")
 	}
 
 	// Every threshold is checked, not just the ones that looked risky.

@@ -5,6 +5,8 @@ package bitbucketdc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,6 +112,9 @@ type Options struct {
 	Password string
 	// Timeout bounds a single HTTP request. Zero uses 30s.
 	Timeout time.Duration
+	// CAFile is a PEM bundle of certificate authorities trusted in addition to
+	// the system pool — how an instance behind an internal CA is verified.
+	CAFile string
 	// Insecure disables TLS verification. Only for instances with a private CA
 	// that the caller cannot install; off by default and never implied.
 	Insecure bool
@@ -211,6 +216,13 @@ func NewClient(opts Options) (*Client, error) {
 		transport.MaxIdleConns = transport.MaxIdleConnsPerHost
 	}
 	var warnings []string
+	if opts.CAFile != "" {
+		tlsConfig, err := tlsWithCAFile(opts.CAFile)
+		if err != nil {
+			return nil, err
+		}
+		transport.TLSClientConfig = tlsConfig
+	}
 	if opts.Insecure {
 		transport.TLSClientConfig = tlsInsecureConfig()
 		warnings = append(warnings, fmt.Sprintf(
@@ -230,8 +242,12 @@ func NewClient(opts Options) (*Client, error) {
 	}
 
 	return &Client{
-		baseURL:           u,
-		httpClient:        &http.Client{Timeout: timeout, Transport: transport},
+		baseURL: u,
+		httpClient: &http.Client{
+			Timeout:       timeout,
+			Transport:     transport,
+			CheckRedirect: sameOriginRedirects,
+		},
 		token:             opts.Token,
 		username:          opts.Username,
 		password:          opts.Password,
@@ -241,6 +257,44 @@ func NewClient(opts Options) (*Client, error) {
 		Warnf:             opts.Warnf,
 		transportWarnings: warnings,
 	}, nil
+}
+
+// errOffInstanceRedirect marks a redirect sameOriginRedirects refused.
+var errOffInstanceRedirect = errors.New("redirect leaves the instance")
+
+// deterministic reports whether a transport error will recur on retry.
+func deterministic(err error) bool {
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var verification *tls.CertificateVerificationError
+	return errors.Is(err, errOffInstanceRedirect) ||
+		errors.As(err, &unknownAuthority) ||
+		errors.As(err, &hostname) ||
+		errors.As(err, &invalid) ||
+		errors.As(err, &verification)
+}
+
+// sameOriginRedirects follows a redirect only while it stays on the scheme,
+// host and port the scan started from.
+//
+// Go forwards the Authorization header across a redirect to the same host —
+// including one that drops from https to http, which a TLS-terminating proxy
+// in front of Bitbucket can issue — so the token went out in the clear after
+// checkTransport had refused exactly that. A redirect to another host drops
+// the header instead, and the scan then decodes somebody's sign-in page as
+// JSON. Neither is a redirect an audit should follow, and the error names
+// both ends so the cause is visible.
+func sameOriginRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return fmt.Errorf("stopped after %d redirects", len(via))
+	}
+	from := via[0].URL
+	if req.URL.Scheme != from.Scheme || req.URL.Host != from.Host {
+		return fmt.Errorf("refusing to follow a redirect from %s to %s: the credential would follow it off the instance it was given for: %w",
+			from.Redacted(), req.URL.Redacted(), errOffInstanceRedirect)
+	}
+	return nil
 }
 
 // checkTransport refuses to put a credential on the wire in the clear.
@@ -445,11 +499,17 @@ func (c *Client) raw(ctx context.Context, path string, query url.Values) ([]byte
 		started := time.Now()
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			// Transport errors are worth retrying; a cancelled context is not.
+			// Transport errors are worth retrying; a cancelled context is not,
+			// and neither is an answer that will be the same next time: a
+			// refused redirect or a certificate nobody vouches for. Retrying
+			// those only made a misconfiguration take seven seconds to report.
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			c.emit(ctx, req.Method, path, query, 0, time.Since(started), attempt, err)
+			if deterministic(err) {
+				return nil, fmt.Errorf("GET %s: %w", path, err)
+			}
 			lastErr = fmt.Errorf("GET %s: %w", path, err)
 			continue
 		}
