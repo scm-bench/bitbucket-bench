@@ -20,12 +20,14 @@ kinds := {"fast-forward-only", "read-only"}
 # restriction, used to fail this control.
 hook_keys := {k | some k in lib.as_list(object.get(lib.cfg, "forcePushHookKeys", []))}
 
-hook_rejects_force_pushes if {
+rejecting_hooks := {h.key |
 	some h in lib.list("hooks")
 	h.enabled == true
 	h.key in hook_keys
 	object.get(h, "type", "") == "PRE_RECEIVE"
 }
+
+hook_rejects_force_pushes if count(rejecting_hooks) > 0
 
 # Every FAIL below also needs the hooks to have been read: an unread hook list
 # could hold the one hook that makes the restrictions beside the point.
@@ -41,7 +43,7 @@ result := lib.archived_na if {
 } else := {
 	"status": "PASS",
 	"details": "Force pushes are rejected on every branch by the Reject Force Push hook.",
-	"evidence": [concat(", ", sort({h.key | some h in lib.list("hooks"); h.enabled == true; h.key in hook_keys}))],
+	"evidence": [concat(", ", sort(rejecting_hooks))],
 } if {
 	lib.available("hooks")
 	hook_rejects_force_pushes
