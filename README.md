@@ -1140,7 +1140,15 @@ that is not read-only.
 
 | Bitbucket Data Center | Result |
 |---|---|
-| 10.4.1 | every verdict as expected, for all three tokens |
+| 10.5.0 | every verdict as expected, for all three tokens |
+| 10.4.1, 10.4.3 | every verdict as expected, for all three tokens |
+| 9.4.24 (LTS) | every verdict as expected, for all three tokens |
+| 8.19.29 (LTS) | every verdict as expected, for all three tokens |
+
+One expectation differs by release, because the releases differ: 8.19 and 9.4
+report no account creation time, so an account that has never signed in
+cannot be told apart from a new one, and CIS-1.3.1 asks a person about it
+there. 10.4 and 10.5 report it, and the control decides.
 
 Every finding in [Upgrading from a v0.1.0-rc build](#upgrading-from-a-v010-rc-build) was found this way.
 Running the suite against another version — set
@@ -1152,9 +1160,8 @@ differed is the most useful contribution there is.
 
 ## Roadmap
 
-**Next** — run the end-to-end suite against the 8.x and 9.x long-term-support
-releases and record the results above; personal repositories (`~user`) as an
-opt-in, since `/projects` does not list them; CIS-1.2.2 from who holds Project
+**Next** — personal repositories (`~user`) as an opt-in, since `/projects`
+does not list them; CIS-1.2.2 from who holds Project
 Creator, now that permission resolution needs no admin token; default
 reviewers as a partial CIS-1.1.6 signal.
 
