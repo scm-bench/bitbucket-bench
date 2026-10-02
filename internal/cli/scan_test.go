@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1182,5 +1185,43 @@ func TestExceptionsClearTheGateButNotTheReport(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "lapsed on 2001-01-01") {
 		t.Errorf("stderr does not report the lapse:\n%s", stderr)
+	}
+}
+
+// A typo in the control selection refuses to start before the instance is
+// contacted. It used to be reported only once the whole instance had been
+// fetched: on a large one, every request of a scan that was never going to
+// produce a report.
+func TestScanChecksTheSelectionBeforeContactingTheInstance(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	for name, config := range map[string]string{
+		"include":   "include: [CIS-9.9.9]\n",
+		"exception": "exceptions:\n  - control: CIS-1.1.31\n    resources: [\"*/*\"]\n    reason: typo\n    expires: 2099-01-01\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			root := NewRootCommand()
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetIn(strings.NewReader(""))
+			root.SetArgs([]string{"scan", "-c", path, "--url", server.URL, "--token", "t"})
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), "list-checks") {
+				t.Fatalf("err = %v, want the selection refused", err)
+			}
+			if n := requests.Load(); n != 0 {
+				t.Errorf("%d request(s) reached the instance before the selection was checked", n)
+			}
+		})
 	}
 }

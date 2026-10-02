@@ -372,6 +372,16 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		defer cancel()
 	}
 
+	// The bundle is compiled, and the control selection checked, before the
+	// instance is contacted: a typo in include, exclude or an exception used
+	// to be reported only after the whole instance had been fetched — on a
+	// large one, ten minutes and every request of a scan that was never going
+	// to produce a report.
+	eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+	if err != nil {
+		return err
+	}
+
 	// The tracer exists even when nothing is shown: its closing line is an
 	// account of what the token was used for, and that is worth having in a
 	// CI log too.
@@ -467,9 +477,12 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	eng, err := engine.New(ctx, cfg, snapshot.Metadata.Platform)
-	if err != nil {
-		return err
+	// A replayed snapshot names its own platform, and the controls that apply
+	// are the ones for that platform.
+	if snapshot.Metadata.Platform != scm.PlatformBitbucketDC {
+		if eng, err = engine.New(ctx, cfg, snapshot.Metadata.Platform); err != nil {
+			return err
+		}
 	}
 	rep, err := eng.Evaluate(ctx, snapshot)
 	if err != nil {
