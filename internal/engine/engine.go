@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
@@ -68,6 +70,17 @@ type Finding struct {
 	// Automated is false for controls that are documented as unanswerable by
 	// the API and always report MANUAL.
 	Automated bool `json:"automated"`
+	// Waiver is set when a configured exception accepts this finding. The
+	// status is unchanged — an accepted FAIL is still a FAIL, and still counts
+	// in the score — but it no longer fails the run.
+	Waiver *Waiver `json:"waiver,omitempty"`
+}
+
+// Waiver is the exception that accepted a finding, as the report shows it.
+type Waiver struct {
+	Reason  string `json:"reason"`
+	Owner   string `json:"owner,omitempty"`
+	Expires string `json:"expires"`
 }
 
 // Report is the full result of an evaluation.
@@ -75,9 +88,20 @@ type Report struct {
 	Metadata scm.Metadata `json:"metadata"`
 	Findings []Finding    `json:"findings"`
 	Score    Score        `json:"score"`
+	// Repositories is how many repositories the repository-scope controls
+	// were evaluated against. Zero means they audited nothing — a --project
+	// nobody can read, a token that sees nothing — and the machine-read
+	// formats say so themselves: a report holding only instance-level findings
+	// otherwise renders as a clean run to a CI view that never sees the exit
+	// code.
+	Repositories int `json:"repositories"`
 	// Errors records policies that failed to evaluate. They surface as MANUAL
 	// findings too, so a broken rule is loud but not fatal.
 	Errors []string `json:"errors,omitempty"`
+	// ExceptionWarnings names configured exceptions that did nothing this
+	// run: lapsed ones, and ones no finding matched any more. Both are how an
+	// exceptions list rots, so both are said out loud.
+	ExceptionWarnings []string `json:"exceptionWarnings,omitempty"`
 }
 
 // Engine holds the compiled policy bundle.
@@ -86,6 +110,8 @@ type Engine struct {
 	bundle   *checks.Bundle
 	prepared map[string]rego.PreparedEvalQuery
 	selected []checks.Check
+	// now decides which exceptions have lapsed; a field so tests can fix it.
+	now func() time.Time
 }
 
 // New compiles the embedded policies for the given platform and configuration.
@@ -98,7 +124,10 @@ func New(ctx context.Context, cfg config.Config, platform string) (*Engine, erro
 	// A check ID that names nothing is almost always a typo, and the silent
 	// reading of it is the dangerous one: an `exclude` that matches no control
 	// leaves that control running, and an `include` that matches none would
-	// narrow the scan to nothing. Both look like a successful scan.
+	// narrow the scan to nothing. Both look like a successful scan. An
+	// exception naming no control fails safe — it accepts nothing — but only
+	// after a red pipeline sends someone hunting for why the exception they
+	// can see in the file did not apply.
 	if err := validateSelection(cfg, bundle); err != nil {
 		return nil, err
 	}
@@ -152,7 +181,7 @@ func validateSelection(cfg config.Config, bundle *checks.Bundle) error {
 		known[strings.ToUpper(c.ID)] = true
 	}
 
-	var unknown []string
+	var problems, unknown []string
 	for _, list := range [][]string{cfg.Include, cfg.Exclude} {
 		for _, id := range list {
 			id = strings.TrimSpace(id)
@@ -162,46 +191,70 @@ func validateSelection(cfg config.Config, bundle *checks.Bundle) error {
 			unknown = append(unknown, id)
 		}
 	}
-	if len(unknown) == 0 {
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		problems = append(problems, "unknown check ID(s) in include/exclude: "+strings.Join(unknown, ", "))
+	}
+	// An exception is named by its position, as every other exception error
+	// is, so the entry to fix is unambiguous in a long list.
+	for i, ex := range cfg.Exceptions {
+		if id := strings.TrimSpace(ex.Control); id != "" && !known[strings.ToUpper(id)] {
+			problems = append(problems, fmt.Sprintf("exceptions[%d]: control %s is not one this bench has", i, id))
+		}
+	}
+	if len(problems) == 0 {
 		return nil
 	}
-	sort.Strings(unknown)
-	return fmt.Errorf("unknown check ID(s) in include/exclude: %s; run `bitbucket-bench list-checks` for the %d valid IDs",
-		strings.Join(unknown, ", "), len(bundle.Checks))
+	return fmt.Errorf("%s; run `bitbucket-bench list-checks` for the %d valid IDs",
+		strings.Join(problems, "; "), len(bundle.Checks))
 }
 
 // Evaluate runs every selected control against every resource in the snapshot.
+//
+// Each resource is converted to OPA's value representation once and evaluated
+// by every control that applies to it. Handing Eval a Go map instead made OPA
+// convert the whole repository again for every control: on a 10,000-repository
+// instance, four fifths of the evaluation time went to converting the same
+// inputs fourteen times over. Repositories are also visited one at a time, so
+// only one repository's input is alive at once rather than all of them.
 func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report, error) {
-	cfgValue, err := toJSONValue(e.cfg)
+	cfgValue, err := toValue(e.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
-	metaValue, err := toJSONValue(snapshot.Metadata)
+	metaValue, err := toValue(snapshot.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("encode snapshot metadata: %w", err)
 	}
-
-	report := &Report{Metadata: snapshot.Metadata}
-
-	orgValue, err := toJSONValue(snapshot.Organization)
+	orgValue, err := toValue(snapshot.Organization)
 	if err != nil {
 		return nil, fmt.Errorf("encode organization: %w", err)
 	}
 
-	// Repository inputs are built once and reused across every repository-scope
-	// control, rather than re-encoding the same repository per check.
-	type repoInput struct {
-		name  string
-		value any
-		proj  any
+	report := &Report{Metadata: snapshot.Metadata}
+
+	var orgChecks, repoChecks []checks.Check
+	for _, check := range e.selected {
+		switch check.Scope {
+		case checks.ScopeOrganization:
+			orgChecks = append(orgChecks, check)
+		case checks.ScopeRepository:
+			repoChecks = append(repoChecks, check)
+		}
 	}
-	var repoInputs []repoInput
+
+	orgInput := inputValue(map[string]ast.Value{"resource": orgValue, "config": cfgValue, "metadata": metaValue})
+	for _, check := range orgChecks {
+		finding := e.evaluateOne(ctx, e.prepared[check.ID], check, InstanceResourceName, ResourceOrganization, orgInput, report)
+		report.Findings = append(report.Findings, finding)
+	}
+
 	for _, project := range snapshot.Projects {
 		// The project is passed without its repositories: a control asking
 		// about the project should not be able to walk into sibling repos.
 		bare := project
 		bare.Repositories = nil
-		projValue, encErr := toJSONValue(bare)
+		projValue, encErr := toValue(bare)
 		if encErr != nil {
 			return nil, fmt.Errorf("encode project %s: %w", project.Key, encErr)
 		}
@@ -214,35 +267,20 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 			if e.cfg.SkipArchivedRepositories && repo.Archived {
 				continue
 			}
-			repoValue, repoErr := toJSONValue(repo)
+			// Counted whether or not a repository control is selected: the
+			// repository was in scope, and an include list naming only
+			// instance controls is a choice, not a scan that saw nothing.
+			report.Repositories++
+			if len(repoChecks) == 0 {
+				continue
+			}
+			repoValue, repoErr := toValue(repo)
 			if repoErr != nil {
 				return nil, fmt.Errorf("encode repository %s: %w", repo.FullName, repoErr)
 			}
-			repoInputs = append(repoInputs, repoInput{name: repo.FullName, value: repoValue, proj: projValue})
-		}
-	}
-
-	for _, check := range e.selected {
-		pq := e.prepared[check.ID]
-		switch check.Scope {
-		case checks.ScopeOrganization:
-			input := map[string]any{
-				"resource": orgValue,
-				"config":   cfgValue,
-				"metadata": metaValue,
-			}
-			finding := e.evaluateOne(ctx, pq, check, InstanceResourceName, ResourceOrganization, input, report)
-			report.Findings = append(report.Findings, finding)
-
-		case checks.ScopeRepository:
-			for _, ri := range repoInputs {
-				input := map[string]any{
-					"resource": ri.value,
-					"project":  ri.proj,
-					"config":   cfgValue,
-					"metadata": metaValue,
-				}
-				finding := e.evaluateOne(ctx, pq, check, ri.name, ResourceRepository, input, report)
+			input := inputValue(map[string]ast.Value{"resource": repoValue, "project": projValue, "config": cfgValue, "metadata": metaValue})
+			for _, check := range repoChecks {
+				finding := e.evaluateOne(ctx, e.prepared[check.ID], check, repo.FullName, ResourceRepository, input, report)
 				report.Findings = append(report.Findings, finding)
 			}
 		}
@@ -250,13 +288,67 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 
 	sortFindings(report.Findings)
 	report.Score = Compute(report.Findings)
+	now := time.Now
+	if e.now != nil {
+		now = e.now
+	}
+	report.ExceptionWarnings = applyExceptions(report.Findings, e.cfg.Exceptions, now())
 	return report, nil
+}
+
+// applyExceptions marks the findings configured exceptions accept and returns
+// what is worth telling the operator about the exceptions themselves.
+//
+// Only FAIL and MANUAL findings can be accepted: there is nothing to accept
+// about a PASS or an NA. The score is computed before this runs and does not
+// change — it describes the instance, and accepting a finding does not change
+// the instance.
+func applyExceptions(findings []Finding, exceptions []config.Exception, now time.Time) []string {
+	var warnings []string
+	for _, ex := range exceptions {
+		if !now.Before(ex.ExpiresAt()) {
+			warnings = append(warnings, fmt.Sprintf("the exception for %s on %s lapsed on %s; its findings fail the run again (%s)",
+				ex.Control, strings.Join(ex.Resources, ", "), ex.Expires, ex.Reason))
+			continue
+		}
+		matched := 0
+		for i := range findings {
+			f := &findings[i]
+			if !strings.EqualFold(f.CheckID, ex.Control) || !resourceMatches(ex.Resources, f.Resource) {
+				continue
+			}
+			if f.Status != StatusFail && f.Status != StatusManual {
+				continue
+			}
+			if f.Waiver == nil {
+				f.Waiver = &Waiver{Reason: ex.Reason, Owner: ex.Owner, Expires: ex.Expires}
+			}
+			matched++
+		}
+		if matched == 0 {
+			warnings = append(warnings, fmt.Sprintf("the exception for %s on %s accepts nothing this run — the finding is fixed, renamed or out of scope; remove it",
+				ex.Control, strings.Join(ex.Resources, ", ")))
+		}
+	}
+	return warnings
+}
+
+// resourceMatches compares case-insensitively: Bitbucket's project keys and
+// slugs are, and an exception written PLAT/legacy-* must not miss
+// plat/legacy-billing.
+func resourceMatches(patterns []string, resource string) bool {
+	for _, pattern := range patterns {
+		if ok, _ := path.Match(strings.ToLower(pattern), strings.ToLower(resource)); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // evaluateOne runs a single control against a single resource. A policy that
 // errors or returns nothing yields a MANUAL finding carrying the reason, so a
 // broken rule is visible in the report instead of silently missing.
-func (e *Engine) evaluateOne(ctx context.Context, pq rego.PreparedEvalQuery, check checks.Check, resource, resourceType string, input map[string]any, report *Report) Finding {
+func (e *Engine) evaluateOne(ctx context.Context, pq rego.PreparedEvalQuery, check checks.Check, resource, resourceType string, input ast.Value, report *Report) Finding {
 	finding := Finding{
 		CheckID:      check.ID,
 		CISID:        check.CISID,
@@ -271,7 +363,7 @@ func (e *Engine) evaluateOne(ctx context.Context, pq rego.PreparedEvalQuery, che
 		Automated:    check.Automated,
 	}
 
-	rs, err := pq.Eval(ctx, rego.EvalInput(input))
+	rs, err := pq.Eval(ctx, rego.EvalParsedInput(input))
 	if err != nil {
 		msg := fmt.Sprintf("%s on %s: policy evaluation failed: %v", check.ID, resource, err)
 		report.Errors = append(report.Errors, msg)
@@ -353,6 +445,27 @@ func toJSONValue(v any) (any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// toValue converts v to the value OPA evaluates, through its JSON form so a
+// rule sees exactly the field names and shapes the snapshot file has.
+func toValue(v any) (ast.Value, error) {
+	generic, err := toJSONValue(v)
+	if err != nil {
+		return nil, err
+	}
+	return ast.InterfaceToValue(generic)
+}
+
+// inputValue assembles an evaluation input from already-converted parts, so
+// the configuration, the metadata and a project are converted once and shared
+// by every resource that sees them. Policies only read their input.
+func inputValue(parts map[string]ast.Value) ast.Value {
+	obj := ast.NewObject()
+	for key, value := range parts {
+		obj.Insert(ast.StringTerm(key), ast.NewTerm(value))
+	}
+	return obj
 }
 
 // sortFindings orders the report the way it is read: worst first, then by

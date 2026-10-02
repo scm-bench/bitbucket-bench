@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"encoding/xml"
 	"github.com/scm-bench/bitbucket-bench/internal/engine"
 	"github.com/scm-bench/bitbucket-bench/internal/scm"
 )
@@ -64,8 +65,9 @@ func sampleReport() *engine.Report {
 			BaseURL: "https://bitbucket.example.com", GeneratedAt: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
 			Warnings: []string{"the user directory is not readable"},
 		},
-		Findings: findings,
-		Score:    engine.Compute(findings),
+		Findings:     findings,
+		Score:        engine.Compute(findings),
+		Repositories: 2,
 	}
 }
 
@@ -532,12 +534,23 @@ func TestSARIFStructure(t *testing.T) {
 					Text string `json:"text"`
 				} `json:"message"`
 				Locations []struct {
+					PhysicalLocation struct {
+						ArtifactLocation struct {
+							URI string `json:"uri"`
+						} `json:"artifactLocation"`
+						Region struct {
+							StartLine int `json:"startLine"`
+						} `json:"region"`
+					} `json:"physicalLocation"`
 					LogicalLocations []struct {
 						Name string `json:"name"`
 					} `json:"logicalLocations"`
 				} `json:"locations"`
 				PartialFingerprints map[string]string `json:"partialFingerprints"`
 			} `json:"results"`
+			AutomationDetails struct {
+				ID string `json:"id"`
+			} `json:"automationDetails"`
 			Invocations []struct {
 				ExecutionSuccessful        bool `json:"executionSuccessful"`
 				ToolExecutionNotifications []struct {
@@ -571,10 +584,15 @@ func TestSARIFStructure(t *testing.T) {
 	for _, r := range run.Results {
 		byRule[r.RuleID] = r.Level
 		if len(r.Locations) == 0 || len(r.Locations[0].LogicalLocations) == 0 {
-			t.Errorf("result %s has no logical location", r.RuleID)
+			t.Fatalf("result %s has no logical location", r.RuleID)
 		}
-		if r.PartialFingerprints["scmBenchFindingV1"] == "" {
-			t.Errorf("result %s has no fingerprint", r.RuleID)
+		// GitHub code scanning drops a result without a physical location,
+		// after reporting the upload a success.
+		if loc := r.Locations[0].PhysicalLocation; loc.ArtifactLocation.URI == "" || loc.Region.StartLine != 1 {
+			t.Errorf("result %s has no usable physical location: %+v", r.RuleID, loc)
+		}
+		if r.PartialFingerprints["scmBenchFindingV1"] == "" || !strings.HasSuffix(r.PartialFingerprints["primaryLocationLineHash"], ":1") {
+			t.Errorf("result %s fingerprints = %v", r.RuleID, r.PartialFingerprints)
 		}
 		if !strings.Contains(r.Message.Text, "Remediation:") {
 			t.Errorf("result %s message carries no remediation", r.RuleID)
@@ -605,14 +623,22 @@ func TestSARIFStructure(t *testing.T) {
 		}
 	}
 	// A control nobody could evaluate is not an assertion that something broke.
-	if byRule["CIS-1.3.5"] != "note" {
-		t.Errorf("a MANUAL finding should be level note, got %q", byRule["CIS-1.3.5"])
+	if byRule["CIS-1.3.5/manual"] != "note" {
+		t.Errorf("a MANUAL finding should be level note on its own rule, got %v", byRule)
 	}
 
+	// Failures carry a security-severity for code scanning to bucket them by;
+	// a rule a MANUAL result points at must not, or it displays as an alert.
 	for _, rule := range run.Tool.Driver.Rules {
-		if rule.Properties.SecuritySeverity == "" {
-			t.Errorf("rule %s has no security-severity", rule.ID)
+		manual := strings.HasSuffix(rule.ID, "/manual")
+		if manual != (rule.Properties.SecuritySeverity == "") {
+			t.Errorf("rule %s security-severity = %q", rule.ID, rule.Properties.SecuritySeverity)
 		}
+	}
+	// One category per instance, so two instances uploading to one repository
+	// do not close each other's alerts.
+	if !strings.HasPrefix(run.AutomationDetails.ID, "bitbucket-bench/") || !strings.HasSuffix(run.AutomationDetails.ID, "/") {
+		t.Errorf("automationDetails.id = %q", run.AutomationDetails.ID)
 	}
 
 	if len(run.Invocations) != 1 || len(run.Invocations[0].ToolExecutionNotifications) != 1 {
@@ -789,7 +815,10 @@ func TestSummaryStatesHowMuchWasActuallyScored(t *testing.T) {
 // cannot be asked about it — therefore arrived in the Security panel as an 8.0
 // High alert asserting a setting was broken, while `--fail-on high` locally did
 // not fail on it at all. Two severities for one finding, and the louder one was
-// the wrong one.
+// the wrong one. The fix that followed — one rule, raised to the control's
+// severity once anything failed — still showed every MANUAL result of a
+// control that also failed somewhere as High. A MANUAL result now points at a
+// rule of its own, which carries no security-severity at all.
 func TestSARIFRuleSeverityFollowsWhetherAnythingActuallyFailed(t *testing.T) {
 	manualOnly := engine.Finding{
 		CheckID: "CIS-1.3.5", CISID: "1.3.5", Title: "MFA", Severity: "HIGH",
@@ -815,9 +844,10 @@ func TestSARIFRuleSeverityFollowsWhetherAnythingActuallyFailed(t *testing.T) {
 		wantLevel        string
 		wantSecuritySeve string
 	}{
-		{"manual only stays a note", []engine.Finding{manualOnly}, "CIS-1.3.5", "note", "3.0"},
+		{"manual only stays a note", []engine.Finding{manualOnly}, "CIS-1.3.5/manual", "note", ""},
 		{"a real failure keeps its severity", []engine.Finding{failing}, "CIS-1.1.15", "error", "8.0"},
-		{"mixed escalates regardless of order", []engine.Finding{mixedManualFirst, failing}, "CIS-1.1.15", "error", "8.0"},
+		{"mixed: the failure keeps its severity", []engine.Finding{mixedManualFirst, failing}, "CIS-1.1.15", "error", "8.0"},
+		{"mixed: the manual result stays a note", []engine.Finding{mixedManualFirst, failing}, "CIS-1.1.15/manual", "note", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rep := &engine.Report{
@@ -1319,14 +1349,14 @@ func TestUnreadableWarningsCarryAFix(t *testing.T) {
 		"global user permissions are not readable (GET /x: 401 nope); rules will report MANUAL",
 	}
 	out := renderReport(t, rep, Options{Format: FormatTable})
-	if !containsText(out, "fix: rerun with a token that has administrator read access") {
+	if !containsText(out, "fix: rerun with a token that can read what this one could not") {
 		t.Errorf("unreadable warnings got no fix line\n---\n%s", out)
 	}
 
 	// A warning that is not about access gets no access advice.
 	rep.Metadata.Warnings = []string{"the scan covered 0 repositories"}
 	out = renderReport(t, rep, Options{Format: FormatTable})
-	if containsText(out, "administrator read access") {
+	if containsText(out, "rerun with a token that can read") {
 		t.Errorf("a non-access warning was answered with token advice\n---\n%s", out)
 	}
 }
@@ -1392,3 +1422,271 @@ func TestFullSweepPointsAtTheProjectLevelSetting(t *testing.T) {
 // flattened collapses all whitespace to single spaces, so a phrase can be
 // found no matter where the renderer wrapped it.
 func flattened(s string) string { return strings.Join(strings.Fields(stripANSI(s)), " ") }
+
+type sarifShape struct {
+	Runs []struct {
+		Results []struct {
+			RuleID    string `json:"ruleId"`
+			Level     string `json:"level"`
+			Locations []struct {
+				PhysicalLocation struct {
+					ArtifactLocation struct {
+						URI string `json:"uri"`
+					} `json:"artifactLocation"`
+				} `json:"physicalLocation"`
+			} `json:"locations"`
+			Properties map[string]any `json:"properties"`
+		} `json:"results"`
+		Invocations []struct {
+			ExecutionSuccessful        bool `json:"executionSuccessful"`
+			ToolExecutionNotifications []struct {
+				Level   string `json:"level"`
+				Message struct {
+					Text string `json:"text"`
+				} `json:"message"`
+			} `json:"toolExecutionNotifications"`
+		} `json:"invocations"`
+	} `json:"runs"`
+}
+
+func renderSARIF(t *testing.T, rep *engine.Report) sarifShape {
+	t.Helper()
+	var log sarifShape
+	if err := json.Unmarshal([]byte(renderReport(t, rep, Options{Format: FormatSARIF})), &log); err != nil {
+		t.Fatalf("unmarshal SARIF: %v", err)
+	}
+	return log
+}
+
+// A control no API can answer is one question for a person however many
+// repositories it spans. Per repository, a thousand-repository instance sent
+// a thousand identical "manual review" results toward code scanning's cap.
+func TestSARIFReportsAManualByDesignControlOnce(t *testing.T) {
+	var findings []engine.Finding
+	for _, repo := range []string{"PRJ/a", "PRJ/b", "PRJ/c"} {
+		findings = append(findings, engine.Finding{
+			CheckID: "CIS-1.1.6", Title: "Code owners", Severity: "MEDIUM", Status: engine.StatusManual,
+			Automated: false, Resource: repo, ResourceType: engine.ResourceRepository, Details: "no code owners",
+		})
+	}
+	log := renderSARIF(t, &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"}, Findings: findings})
+	results := log.Runs[0].Results
+	if len(results) != 1 || results[0].RuleID != "CIS-1.1.6/manual" {
+		t.Fatalf("results = %+v, want one CIS-1.1.6/manual result", results)
+	}
+	if n, _ := results[0].Properties["resources"].(float64); n != 3 {
+		t.Errorf("resources = %v, want 3", results[0].Properties["resources"])
+	}
+}
+
+// Code scanning keeps the 5,000 most severe results of a run and rejects one
+// past 25,000. Capping here, most severe first, keeps every failure that
+// matters and says how many were withheld.
+func TestSARIFCapsResultsMostSevereFirst(t *testing.T) {
+	var findings []engine.Finding
+	for i := 0; i < maxSARIFResults+10; i++ {
+		findings = append(findings, engine.Finding{
+			CheckID: "CIS-1.1.8", Severity: "LOW", Status: engine.StatusFail, Automated: true,
+			Resource: fmt.Sprintf("PRJ/r%05d", i), ResourceType: engine.ResourceRepository, Details: "stale",
+		})
+	}
+	findings = append(findings, engine.Finding{
+		CheckID: "CIS-1.1.15", Severity: "HIGH", Status: engine.StatusFail, Automated: true,
+		Resource: "PRJ/zzz", ResourceType: engine.ResourceRepository, Details: "pushable",
+	})
+	log := renderSARIF(t, &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"}, Findings: findings})
+	run := log.Runs[0]
+	if len(run.Results) != maxSARIFResults {
+		t.Fatalf("results = %d, want %d", len(run.Results), maxSARIFResults)
+	}
+	if run.Results[0].RuleID != "CIS-1.1.15" {
+		t.Errorf("first result = %s, want the HIGH failure kept first", run.Results[0].RuleID)
+	}
+	var said bool
+	for _, n := range run.Invocations[0].ToolExecutionNotifications {
+		said = said || strings.Contains(n.Message.Text, "11 less severe results were withheld")
+	}
+	if !said {
+		t.Error("the run does not say how many results it withheld")
+	}
+}
+
+// A run that could not list every project did not do what it set out to.
+func TestSARIFMarksAnIncompleteScanUnsuccessful(t *testing.T) {
+	rep := &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com", Unlisted: []string{"LOCKED"}}, Repositories: 3}
+	if log := renderSARIF(t, rep); log.Runs[0].Invocations[0].ExecutionSuccessful {
+		t.Error("executionSuccessful = true for a scan missing a project")
+	}
+}
+
+// Nor did one that evaluated no repository: its instance-level findings may
+// all pass, and code scanning would show a clean run for a scan that audited
+// none of what the repository controls cover.
+func TestSARIFMarksAScanOfNoRepositoryUnsuccessful(t *testing.T) {
+	rep := &engine.Report{Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"}, Findings: []engine.Finding{
+		{CheckID: "CIS-1.3.3", Severity: "HIGH", Status: engine.StatusPass, Resource: "instance", ResourceType: engine.ResourceOrganization, Details: "3 administrators"},
+	}}
+	log := renderSARIF(t, rep)
+	inv := log.Runs[0].Invocations[0]
+	if inv.ExecutionSuccessful {
+		t.Error("executionSuccessful = true for a scan that evaluated no repository")
+	}
+	said := false
+	for _, n := range inv.ToolExecutionNotifications {
+		said = said || (n.Level == "error" && strings.Contains(n.Message.Text, "evaluated no repository"))
+	}
+	if !said {
+		t.Errorf("no error notification says why: %+v", inv.ToolExecutionNotifications)
+	}
+
+	rep.Repositories = 1
+	if log := renderSARIF(t, rep); !log.Runs[0].Invocations[0].ExecutionSuccessful {
+		t.Error("executionSuccessful = false for a complete scan")
+	}
+}
+
+// The artifact URI is a relative path, one escaped segment per part, so a
+// repository name with a space or non-ASCII characters stays a valid URI.
+func TestSARIFArtifactURIsAreEscaped(t *testing.T) {
+	log := renderSARIF(t, &engine.Report{
+		Metadata: scm.Metadata{BaseURL: "https://bb.example.com:8443/bitbucket", Platform: scm.PlatformBitbucketDC},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.1.15", Severity: "HIGH", Status: engine.StatusFail, Automated: true,
+			Resource: "PRJ/my repo ü", ResourceType: engine.ResourceRepository, Details: "pushable",
+		}},
+	})
+	want := "bitbucket-dc/bb.example.com:8443/PRJ/my%20repo%20%C3%BC"
+	if got := log.Runs[0].Results[0].Locations[0].PhysicalLocation.ArtifactLocation.URI; got != want {
+		t.Errorf("uri = %q, want %q", got, want)
+	}
+}
+
+// An accepted finding carries SARIF's own suppression, which code scanning
+// shows as dismissed with the justification, rather than as an open alert.
+func TestSARIFCarriesAcceptedFindingsAsSuppressed(t *testing.T) {
+	out := renderReport(t, &engine.Report{
+		Metadata: scm.Metadata{BaseURL: "https://bitbucket.example.com"},
+		Findings: []engine.Finding{{
+			CheckID: "CIS-1.1.13", Severity: "LOW", Status: engine.StatusFail, Automated: true,
+			Resource: "PLAT/legacy", ResourceType: engine.ResourceRepository, Details: "merge commits",
+			Waiver: &engine.Waiver{Reason: "release tooling", Owner: "platform", Expires: "2027-03-31"},
+		}},
+	}, Options{Format: FormatSARIF})
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				Suppressions []struct {
+					Kind          string `json:"kind"`
+					Status        string `json:"status"`
+					Justification string `json:"justification"`
+				} `json:"suppressions"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &log); err != nil {
+		t.Fatal(err)
+	}
+	s := log.Runs[0].Results[0].Suppressions
+	if len(s) != 1 || s[0].Kind != "external" || s[0].Status != "accepted" || !strings.Contains(s[0].Justification, "release tooling") {
+		t.Errorf("suppressions = %+v", s)
+	}
+}
+
+// JUnit is for the CI systems that draw test results natively. Every finding
+// is a test case, so the totals add up and nothing is silently dropped; only
+// an unaccepted FAIL is a failure.
+func TestJUnitCountsEveryFindingAndFailsOnlyRealFailures(t *testing.T) {
+	rep := &engine.Report{
+		Metadata:     scm.Metadata{BaseURL: "https://bitbucket.example.com", Platform: scm.PlatformBitbucketDC},
+		Repositories: 4,
+		Findings: []engine.Finding{
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusFail, Resource: "PRJ/a", Details: "pushable", Remediation: "Add a restriction."},
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusPass, Resource: "PRJ/b", Details: "fine"},
+			{CheckID: "CIS-1.1.15", Title: "Restrict pushes", Severity: "HIGH", Status: engine.StatusFail, Resource: "PRJ/c", Details: "pushable",
+				Waiver: &engine.Waiver{Reason: "migration", Expires: "2027-01-01"}},
+			{CheckID: "CIS-1.3.5", Title: "MFA", Severity: "HIGH", Status: engine.StatusManual, Resource: "instance", Details: "ask the IdP"},
+			{CheckID: "CIS-1.2.1", Title: "Security policy", Severity: "LOW", Status: engine.StatusNA, Resource: "PRJ/empty", Details: "empty"},
+		},
+	}
+	out := renderReport(t, rep, Options{Format: FormatJUnit, ToolVersion: "1.2.3"})
+
+	var suites struct {
+		Tests    int `xml:"tests,attr"`
+		Failures int `xml:"failures,attr"`
+		Skipped  int `xml:"skipped,attr"`
+		Suites   []struct {
+			Name  string `xml:"name,attr"`
+			Cases []struct {
+				Name    string `xml:"name,attr"`
+				Failure *struct {
+					Type string `xml:"type,attr"`
+					Text string `xml:",chardata"`
+				} `xml:"failure"`
+				Skipped *struct {
+					Message string `xml:"message,attr"`
+				} `xml:"skipped"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+	if err := xml.Unmarshal([]byte(out), &suites); err != nil {
+		t.Fatalf("JUnit output does not parse: %v\n%s", err, out)
+	}
+	if suites.Tests != 5 || suites.Failures != 1 || suites.Skipped != 3 {
+		t.Errorf("totals tests=%d failures=%d skipped=%d, want 5/1/3", suites.Tests, suites.Failures, suites.Skipped)
+	}
+	cases := map[string]string{}
+	for _, s := range suites.Suites {
+		for _, c := range s.Cases {
+			switch {
+			case c.Failure != nil:
+				cases[c.Name] = "failure:" + c.Failure.Type
+				if !strings.Contains(c.Failure.Text, "Fix: Add a restriction.") {
+					t.Errorf("failure text %q carries no fix", c.Failure.Text)
+				}
+			case c.Skipped != nil:
+				cases[c.Name] = "skipped:" + c.Skipped.Message
+			default:
+				cases[c.Name] = "pass"
+			}
+		}
+	}
+	for name, want := range map[string]string{
+		"PRJ/a": "failure:HIGH", "PRJ/b": "pass", "instance": "skipped:MANUAL: ask the IdP",
+		"PRJ/empty": "skipped:not applicable: empty",
+	} {
+		if cases[name] != want {
+			t.Errorf("%s = %q, want %q", name, cases[name], want)
+		}
+	}
+	if !strings.HasPrefix(cases["PRJ/c"], "skipped:FAIL, accepted until 2027-01-01: migration") {
+		t.Errorf("accepted failure = %q", cases["PRJ/c"])
+	}
+}
+
+// Repositories a scan could not list have no test case to fail, so an
+// incomplete scan carries a failing case of its own rather than rendering as
+// a clean run.
+func TestJUnitFailsAnIncompleteScan(t *testing.T) {
+	out := renderReport(t, &engine.Report{Metadata: scm.Metadata{Unlisted: []string{"LOCKED"}}, Repositories: 3}, Options{Format: FormatJUnit})
+	if !strings.Contains(out, `<testcase name="LOCKED" classname="scan.coverage">`) || !strings.Contains(out, `failures="1"`) {
+		t.Errorf("an incomplete scan does not fail in JUnit:\n%s", out)
+	}
+}
+
+// A scan that evaluated no repository has nothing to show for the repository
+// controls but instance-level cases, which may all pass. The CLI exits 2; a
+// test view that only reads the XML must not show green either.
+func TestJUnitFailsAScanOfNoRepository(t *testing.T) {
+	rep := &engine.Report{Findings: []engine.Finding{
+		{CheckID: "CIS-1.3.3", Severity: "HIGH", Status: engine.StatusPass, Resource: "instance", ResourceType: engine.ResourceOrganization, Details: "3 administrators"},
+	}}
+	out := renderReport(t, rep, Options{Format: FormatJUnit})
+	if !strings.Contains(out, `<testcase name="repositories" classname="scan.coverage">`) || !strings.Contains(out, `<testsuites name="bitbucket-bench" tests="2" failures="1"`) {
+		t.Errorf("a scan of no repository does not fail in JUnit:\n%s", out)
+	}
+
+	rep.Repositories = 1
+	if out := renderReport(t, rep, Options{Format: FormatJUnit}); strings.Contains(out, "scan.coverage") {
+		t.Errorf("a complete scan carries a coverage failure:\n%s", out)
+	}
+}

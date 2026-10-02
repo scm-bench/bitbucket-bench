@@ -31,16 +31,42 @@ gated if {
 fully_known if {
 	lib.available("requiredBuilds")
 	lib.available("pullRequestSettings")
-	lib.has_default_branch
+	lib.default_branch_known
+
+	# A condition whose coverage of the default branch could not be decided —
+	# including one whose exemption could not be — may be the one gating it.
+	count([c |
+		some c in lib.list("requiredBuilds")
+		object.get(c, "matchUnknown", false) == true
+	]) == 0
 }
 
-result := lib.branch_protection_na if {
+# Nothing gates a merge anywhere: no required-build condition on any branch and
+# no minimum build count. That is a FAIL whichever branch is the default, so it
+# needs no default branch to decide — which matters for a repository pointing
+# its default at a branch nobody pushed.
+ungated_everywhere if {
+	lib.available("requiredBuilds")
+	lib.available("pullRequestSettings")
+	count(lib.list("requiredBuilds")) == 0
+	minimum_builds == 0
+}
+
+result := lib.archived_na if {
+	lib.archived_repository
+} else := lib.branch_protection_na if {
 	lib.empty_repository
 } else := {
 	"status": "PASS",
 	"details": sprintf("Merging into %s is gated on CI: %d required-build condition(s) and a minimum of %d successful build(s).", [lib.default_branch_name, count(conditions), minimum_builds]),
 } if {
 	gated
+} else := {
+	"status": "FAIL",
+	"details": sprintf("Nothing prevents a merge into %s while checks are failing or absent.", [lib.default_branch_name]),
+	"evidence": ["requiredSuccessfulBuilds = 0", "no required-build condition exists on any branch"],
+} if {
+	ungated_everywhere
 } else := {
 	"status": "MANUAL",
 	"details": "Required builds, merge checks or the default branch could not be read, so CI gating cannot be confirmed.",

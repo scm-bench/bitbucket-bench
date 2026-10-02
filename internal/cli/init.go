@@ -40,7 +40,10 @@ scan:
   timeout: 30s
   # Abandon the scan after this long; 0s means no limit.
   maxDuration: 0s
-  # Skip TLS certificate verification (for private CAs).
+  # A PEM bundle of CAs to trust besides the system's — for an instance whose
+  # certificate comes from an internal CA. Use this rather than insecure.
+  #caFile: /etc/ssl/certs/corp-root-ca.pem
+  # Skip TLS certificate verification entirely. Prefer caFile.
   insecure: false
   # Permit an http:// URL, sending credentials in the clear.
   allowPlaintext: false
@@ -52,6 +55,10 @@ scan:
   # scan. The snapshot maps the instance's weak points; false keeps it off
   # disk.
   cache: true
+  # Accept a scan that could not list the repositories of every project.
+  # Those repositories are missing from the report entirely, so by default
+  # such a scan exits 2 rather than passing on what it never looked at.
+  allowIncomplete: false
 
 # Numeric knobs the policies read. Uncomment to change.
 #thresholds:
@@ -63,11 +70,14 @@ scan:
 #  maxStaleBranches: 0    # how many abandoned branches a repository may carry
 #  inactiveUserDays: 90   # days without authenticating before review (CIS-1.3.1)
 
-# Which hook add-ons count as commit signature verification (CIS-1.1.12).
-#signatureHookKeys: [signature, signed-commit, gpg, verify-commit, commit-signing]
+# Full keys (plugin-key:module-key) of hooks that verify commit signatures
+# (CIS-1.1.12), and of hooks that reject every force push (CIS-1.1.16). The
+# defaults are the hooks Bitbucket bundles; lists replace rather than merge.
+#signatureHookKeys: [com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook]
+#forcePushHookKeys: [com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook]
 
 # Merge strategies that break linear history (CIS-1.1.13).
-#nonLinearMergeStrategies: [no-ff, rebase-no-ff]
+#nonLinearMergeStrategies: [no-ff, ff, rebase-no-ff]
 
 # Paths probed on the default branch for a security policy (CIS-1.2.1).
 #securityPolicyPaths: [SECURITY.md, .github/SECURITY.md, docs/SECURITY.md, SECURITY.rst, SECURITY.txt, SECURITY]
@@ -78,8 +88,21 @@ scan:
 # For instances that intentionally publish code.
 #allowPublicRepositories: false
 
-# Drop archived repositories from the scan.
-#skipArchivedRepositories: true
+# Archived repositories are reported: the controls about changes are NA, and who
+# can read the code is still judged. Set to true to leave them out entirely.
+#skipArchivedRepositories: false
+
+# Accept findings your organisation has decided to live with, for a stated
+# reason and until a stated date. An accepted finding is still reported and
+# still counts in the score; it just does not fail the run on scan.failOn.
+# It lapses on its expiry date. resources are globs over PROJECT/slug, or
+# "instance" for an instance-level control.
+#exceptions:
+#  - control: CIS-1.1.13
+#    resources: [PLAT/legacy-*]
+#    reason: Release tooling needs merge commits until the migration lands
+#    owner: platform-team@example.com
+#    expires: 2027-03-31
 
 # Leave controls out of the run, or restrict the run to a list.
 #exclude: [CIS-1.1.8]

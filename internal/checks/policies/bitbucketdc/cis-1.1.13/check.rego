@@ -13,7 +13,9 @@ offending := [s |
 	s in non_linear
 ]
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "MANUAL",
 	"details": "Merge strategy configuration could not be read, so linear history cannot be confirmed.",
 } if {

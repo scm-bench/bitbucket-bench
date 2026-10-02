@@ -39,7 +39,14 @@ decidable if {
 	lib.available("branchAges")
 }
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
+	"status": "NA",
+	"details": "Repository has no branches yet, so none can be abandoned.",
+} if {
+	lib.empty_repository
+} else := {
 	"status": "MANUAL",
 	"details": "Branch listing or commit timestamps could not be read, so branch staleness is unknown.",
 } if {

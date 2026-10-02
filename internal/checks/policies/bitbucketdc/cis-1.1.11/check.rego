@@ -6,7 +6,9 @@ import data.scmbench.lib
 
 enabled := lib.pr_setting("requiredAllTasksComplete", false)
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "MANUAL",
 	"details": "Pull request merge checks could not be read, so task completion enforcement is unknown.",
 } if {

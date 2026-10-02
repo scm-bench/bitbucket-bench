@@ -122,7 +122,7 @@ func hardenedRepo() scm.Repository {
 			MatchesDefaultBranch: true,
 		}},
 		Hooks: []scm.Hook{
-			{Key: "com.example.gpg-signature-check", Name: "GPG signature check", Enabled: true, Configured: true},
+			{Key: "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook", Name: "Verify Commit Signature", Type: "PRE_RECEIVE", Enabled: true, Configured: true},
 		},
 		Branches: []scm.Branch{
 			{ID: "refs/heads/main", DisplayID: "main", IsDefault: true, AgeDays: 2},
@@ -213,10 +213,10 @@ func healthyOrg() scm.Organization {
 		},
 		EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"alice", "bob"}, Count: 2, Complete: true},
 		Users: []scm.User{
-			{Name: "alice", Active: true, HasRepositoryAccess: true, InactiveDays: 1},
-			{Name: "bob", Active: true, HasRepositoryAccess: true, InactiveDays: 20},
+			{Name: "alice", Active: true, Licensed: true, InactiveDays: 1},
+			{Name: "bob", Active: true, Licensed: true, InactiveDays: 20},
 		},
-		Available: map[string]bool{"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true},
+		Available: map[string]bool{"admins": true, "users": true, "userActivity": true, "licensedUsers": true},
 	}
 }
 
@@ -356,7 +356,7 @@ func TestDormantUserDetection(t *testing.T) {
 	t.Run("dormant user with access fails", func(t *testing.T) {
 		org := healthyOrg()
 		org.Users = append(org.Users, scm.User{
-			Name: "ghost", Active: true, HasRepositoryAccess: true, InactiveDays: 400,
+			Name: "ghost", Active: true, Licensed: true, InactiveDays: 400,
 		})
 		got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
 		assertStatuses(t, got, engine.InstanceResourceName, map[string]engine.Status{"CIS-1.3.1": engine.StatusFail})
@@ -365,7 +365,7 @@ func TestDormantUserDetection(t *testing.T) {
 	t.Run("dormant user without repository access is ignored", func(t *testing.T) {
 		org := healthyOrg()
 		org.Users = append(org.Users, scm.User{
-			Name: "service-account", Active: true, HasRepositoryAccess: false, InactiveDays: 400,
+			Name: "service-account", Active: true, Licensed: false, InactiveDays: 400,
 		})
 		got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
 		assertStatuses(t, got, engine.InstanceResourceName, map[string]engine.Status{"CIS-1.3.1": engine.StatusPass})
@@ -408,6 +408,37 @@ func TestRequiredBuildExemptingDefaultBranchFails(t *testing.T) {
 	}}
 	got := evaluate(t, snapshotWith([]scm.Repository{repo}, healthyOrg()))
 	assertStatuses(t, got, "PRJ/hardened", map[string]engine.Status{"CIS-1.1.9": engine.StatusFail})
+}
+
+// The report says how many repositories its repository controls covered,
+// counting what was evaluated rather than what the snapshot holds: the CLI's
+// "audited nothing" exit and the machine formats' coverage failure both read
+// it, and an archived repository skipped by configuration was audited by
+// nothing.
+func TestReportCountsTheRepositoriesItEvaluated(t *testing.T) {
+	ctx := context.Background()
+	archived := hardenedRepo()
+	archived.Slug, archived.FullName, archived.Archived = "old", "PRJ/old", true
+	snapshot := snapshotWith([]scm.Repository{hardenedRepo(), openRepo(), archived}, healthyOrg())
+
+	for _, tc := range []struct {
+		skip bool
+		want int
+	}{{false, 3}, {true, 2}} {
+		cfg := config.Default()
+		cfg.SkipArchivedRepositories = tc.skip
+		eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+		if err != nil {
+			t.Fatalf("build engine: %v", err)
+		}
+		rep, err := eng.Evaluate(ctx, snapshot)
+		if err != nil {
+			t.Fatalf("evaluate: %v", err)
+		}
+		if rep.Repositories != tc.want {
+			t.Errorf("skipArchivedRepositories=%v: Repositories = %d, want %d", tc.skip, rep.Repositories, tc.want)
+		}
+	}
 }
 
 func TestConfigThresholdsAreHonoured(t *testing.T) {
@@ -461,12 +492,19 @@ func TestUnknownCheckIDIsRejected(t *testing.T) {
 	for name, mutate := range map[string]func(*config.Config){
 		"exclude": func(c *config.Config) { c.Exclude = []string{"CIS-9.9.9"} },
 		"include": func(c *config.Config) { c.Include = []string{"CIS-1.1.3", "CIS-0.0.0"} },
+		"exception": func(c *config.Config) {
+			c.Exceptions = []config.Exception{{Control: "CIS-1.1.31", Resources: []string{"*/*"}, Reason: "typo", Expires: "2099-01-01"}}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := config.Default()
 			mutate(&cfg)
-			if _, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC); err == nil {
-				t.Error("engine.New accepted a check ID that is not in the bundle")
+			_, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+			if err == nil {
+				t.Fatal("engine.New accepted a check ID that is not in the bundle")
+			}
+			if name == "exception" && !strings.Contains(err.Error(), "exceptions[0]: control CIS-1.1.31") {
+				t.Errorf("the error does not name the exception entry: %v", err)
 			}
 		})
 	}
@@ -475,6 +513,7 @@ func TestUnknownCheckIDIsRejected(t *testing.T) {
 	// must tolerate them too or the two would disagree about what is known.
 	cfg := config.Default()
 	cfg.Exclude = []string{"  cis-1.1.3  "}
+	cfg.Exceptions = []config.Exception{{Control: "cis-1.1.13", Resources: []string{"*/*"}, Reason: "migration", Expires: "2099-01-01"}}
 	if _, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC); err != nil {
 		t.Errorf("a valid ID with different case and padding was rejected: %v", err)
 	}
@@ -553,7 +592,7 @@ func TestZeroMaxOrgAdminsMeansNoUpperLimit(t *testing.T) {
 		Metadata:      scm.Metadata{Platform: scm.PlatformBitbucketDC},
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"a", "b", "c"}, Count: 3, Complete: true},
-			Available:       map[string]bool{"adminUsers": true, "adminGroups": true},
+			Available:       map[string]bool{"admins": true},
 		},
 	}
 
@@ -661,10 +700,10 @@ func TestUnknownDataDoesNotBecomeAPass(t *testing.T) {
 }
 
 // An SSH key allowed to push past a branch restriction is a bypass exactly as
-// an exempt user is. exemptAccessKeys was carried in the snapshot and read by
-// nothing, so a restriction that several deploy keys could walk straight
-// through was described as though nobody could.
-func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
+// an exempt user is, and now decides the verdict rather than only decorating
+// it: a restriction several deploy keys can walk straight through is not
+// protecting the branch from them.
+func TestExemptAccessKeysDecideTheVerdict(t *testing.T) {
 	ctx := context.Background()
 	eng, err := engine.New(ctx, config.Default(), scm.PlatformBitbucketDC)
 	if err != nil {
@@ -682,6 +721,8 @@ func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
 				Type:                 "pull-request-only",
 				MatchesDefaultBranch: true,
 				ExemptAccessKeys:     2,
+				ExemptAccessKeyIDs:   []int{1, 2},
+				ExemptPrincipals:     scm.EffectivePrincipals{Complete: true},
 			}},
 			Available: map[string]bool{"branchRestrictions": true, "defaultBranch": true},
 		}}}},
@@ -698,8 +739,8 @@ func TestExemptAccessKeysAppearInTheVerdict(t *testing.T) {
 			continue
 		}
 		seen = true
-		if f.Status != engine.StatusPass {
-			t.Fatalf("CIS-1.1.15 = %s, want PASS: the restriction is configured", f.Status)
+		if f.Status != engine.StatusFail {
+			t.Fatalf("CIS-1.1.15 = %s, want FAIL: two keys can push straight past the restriction", f.Status)
 		}
 		if !strings.Contains(f.Details, "access key") {
 			t.Errorf("details do not mention the bypass: %s", f.Details)

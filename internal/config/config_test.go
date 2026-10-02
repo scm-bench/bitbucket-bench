@@ -53,13 +53,13 @@ func TestPartialConfigOverlaysDefaults(t *testing.T) {
 }
 
 func TestListsAreReplacedNotMerged(t *testing.T) {
-	path := writeConfig(t, "signatureHookKeys:\n  - my-vendor-hook\n")
+	path := writeConfig(t, "signatureHookKeys:\n  - com.example.vendor:signatures\n")
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(cfg.SignatureHookKeys) != 1 || cfg.SignatureHookKeys[0] != "my-vendor-hook" {
+	if len(cfg.SignatureHookKeys) != 1 || cfg.SignatureHookKeys[0] != "com.example.vendor:signatures" {
 		t.Errorf("signatureHookKeys = %v, want the user's list verbatim", cfg.SignatureHookKeys)
 	}
 }
@@ -160,8 +160,9 @@ func TestSelectsHonoursIncludeAndExclude(t *testing.T) {
 // CIS-1.1.12 into a PASS that verified nothing.
 func TestBlankListEntriesAreRejected(t *testing.T) {
 	for _, tc := range []struct{ name, yaml, want string }{
-		{"signature hook key", "signatureHookKeys:\n  - \"\"\n  - gpg\n", "signatureHookKeys[0]"},
-		{"whitespace only", "signatureHookKeys:\n  - gpg\n  - \"   \"\n", "signatureHookKeys[1]"},
+		{"signature hook key", "signatureHookKeys:\n  - \"\"\n  - com.example:hook\n", "signatureHookKeys[0]"},
+		{"whitespace only", "signatureHookKeys:\n  - com.example:hook\n  - \"   \"\n", "signatureHookKeys[1]"},
+		{"force push hook key", "forcePushHookKeys:\n  - \"\"\n", "forcePushHookKeys[0]"},
 		{"merge strategy", "nonLinearMergeStrategies:\n  - \"\"\n", "nonLinearMergeStrategies[0]"},
 		{"security policy path", "securityPolicyPaths:\n  - SECURITY.md\n  - \"\"\n", "securityPolicyPaths[1]"},
 		{"exclude", "exclude:\n  - \"\"\n", "exclude[0]"},
@@ -206,6 +207,13 @@ func TestNegativeThresholdsAreRejected(t *testing.T) {
 	}
 }
 
+// disablingThresholds are the thresholds where -1 is a documented value rather
+// than a typo, so the sweep below has to probe them one step further down. The
+// map is deliberately explicit: a threshold that quietly accepts a negative is
+// the failure this test exists to catch, and an exception has to be written
+// down to be granted.
+var disablingThresholds = map[string]bool{"maxBypassPrincipals": true}
+
 // Every threshold in the struct must appear in the check above; a new one that
 // nobody adds is exactly how the first four came to be missing.
 func TestEveryThresholdIsValidated(t *testing.T) {
@@ -219,9 +227,25 @@ func TestEveryThresholdIsValidated(t *testing.T) {
 			t.Errorf("Thresholds.%s has no yaml tag", f.Name)
 			continue
 		}
-		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": -1\n")); err == nil {
-			t.Errorf("thresholds.%s accepts -1; add it to Config.Validate", name)
+		probe := "-1"
+		if disablingThresholds[name] {
+			probe = "-2"
 		}
+		if _, err := Load(writeConfig(t, "thresholds:\n  "+name+": "+probe+"\n")); err == nil {
+			t.Errorf("thresholds.%s accepts %s; add it to Config.Validate", name, probe)
+		}
+	}
+}
+
+// -1 is how the bypass check is turned off, and a config that says so has to
+// load. The sweep above can only prove the field rejects nonsense.
+func TestMaxBypassPrincipalsAcceptsMinusOne(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "thresholds:\n  maxBypassPrincipals: -1\n"))
+	if err != nil {
+		t.Fatalf("Load rejected the documented disable value: %v", err)
+	}
+	if cfg.Thresholds.MaxBypassPrincipals != -1 {
+		t.Errorf("maxBypassPrincipals = %d, want -1", cfg.Thresholds.MaxBypassPrincipals)
 	}
 }
 
@@ -381,5 +405,64 @@ func TestSetReachesKeysWithUnderscores(t *testing.T) {
 	// Maps merge rather than replace, so overriding one rank keeps the rest.
 	if cfg.PermissionRank["REPO_WRITE"] == 0 {
 		t.Error("overriding one permissionRank entry should not drop the others")
+	}
+}
+
+// The hook lists used to hold substrings ("gpg", "verify-commit"), and one of
+// them matched Bitbucket's "Verify Committer" — a hook that verifies no
+// signature. They hold full keys now, and a config still written the old way
+// would match nothing and fail every repository without a word, so it is
+// refused at load with the key format in the message.
+func TestHookListsRequireFullKeys(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"signature substring", "signatureHookKeys:\n  - gpg\n", "signatureHookKeys[0]"},
+		{"force push substring", "forcePushHookKeys:\n  - force-push\n", "forcePushHookKeys[0]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.yaml))
+			if err == nil {
+				t.Fatal("Load accepted a hook entry that is not a full key")
+			}
+			for _, want := range []string{tc.want, "plugin-key:module-key"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// A CA bundle verifies the certificate; insecure skips verification. With
+// both set the bundle would be quietly ignored, and the person reading the
+// file would believe the certificate was checked.
+func TestCAFileAndInsecureAreMutuallyExclusive(t *testing.T) {
+	_, err := Load(writeConfig(t, "scan:\n  caFile: /etc/ssl/corp.pem\n  insecure: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v, want caFile and insecure refused together", err)
+	}
+}
+
+// An exception without a reason or an end date is how accepted risk becomes
+// forgotten risk, so neither is optional, and a malformed one is refused at
+// load rather than silently matching nothing.
+func TestExceptionsAreValidated(t *testing.T) {
+	valid := "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: release tooling\n    expires: 2027-03-31\n"
+	if _, err := Load(writeConfig(t, valid)); err != nil {
+		t.Fatalf("a complete exception was refused: %v", err)
+	}
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"no control", "exceptions:\n  - resources: [PLAT/*]\n    reason: r\n    expires: 2027-03-31\n", "control is required"},
+		{"no resources", "exceptions:\n  - control: CIS-1.1.13\n    reason: r\n    expires: 2027-03-31\n", "resources is required"},
+		{"bad glob", "exceptions:\n  - control: CIS-1.1.13\n    resources: ['PLAT/[']\n    reason: r\n    expires: 2027-03-31\n", "PLAT/["},
+		{"no reason", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    expires: 2027-03-31\n", "reason is required"},
+		{"no expiry", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: r\n", "expires is required"},
+		{"bad expiry", "exceptions:\n  - control: CIS-1.1.13\n    resources: [PLAT/*]\n    reason: r\n    expires: next spring\n", "not a date"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.yaml))
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "exceptions[0]") {
+				t.Errorf("err = %v, want it to mention exceptions[0] and %q", err, tc.want)
+			}
+		})
 	}
 }

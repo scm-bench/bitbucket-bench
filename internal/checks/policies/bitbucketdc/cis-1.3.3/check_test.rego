@@ -7,7 +7,7 @@ import data.scmbench.testdata
 
 org(admins, complete) := testdata.input_for({
 	"effectiveAdmins": {"users": admins, "count": count(admins), "complete": complete},
-	"available": {"adminUsers": true, "adminGroups": true},
+	"available": {"admins": true},
 })
 
 test_passes_inside_the_range if {
@@ -40,10 +40,10 @@ test_an_under_count_from_an_incomplete_set_is_manual if {
 	r.status == "MANUAL"
 }
 
-test_manual_when_global_permissions_are_unreadable if {
+test_manual_when_the_administrators_cannot_be_resolved if {
 	r := cis_1_3_3.result with input as testdata.input_for({
 		"effectiveAdmins": {"users": [], "count": 0, "complete": false},
-		"available": {"adminUsers": false, "adminGroups": false},
+		"available": {"admins": false},
 	})
 	r.status == "MANUAL"
 }
@@ -59,7 +59,7 @@ test_zero_maximum_means_no_upper_limit if {
 	r := cis_1_3_3.result with input as {
 		"resource": {
 			"effectiveAdmins": {"users": ["a", "b", "c", "d", "e", "f", "g"], "count": 7, "complete": true},
-			"available": {"adminUsers": true, "adminGroups": true},
+			"available": {"admins": true},
 		},
 		"config": cfg,
 	}

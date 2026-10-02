@@ -160,7 +160,7 @@ func (t *tracer) formatRequest(e bitbucketdc.RequestEvent, scope string) string 
 	// coloured string to %-52s pads against the escape bytes as well, and every
 	// column after it stops lining up the moment colour is on.
 	path := shortenPath(e.Path, scope)
-	query := queryContext(e.Query)
+	query := queryContext(e.Query, e.Scope != "")
 	pad := ""
 	if n := 52 - utf8.RuneCountInString(path+query); n > 0 {
 		pad = strings.Repeat(" ", n)
@@ -220,7 +220,11 @@ func (t *tracer) summary() (string, console.Tag) {
 // nothing, and "start" is only worth showing once paging has actually begun.
 // What is left is the answer to "why did this same line just print twenty-two
 // times" — a page offset, or the group being expanded.
-func queryContext(q url.Values) string {
+//
+// Inside a repository's group, the project key and slug of a permission query
+// are the group's own heading; repeating them pushed every such line far past
+// the column the others align to.
+func queryContext(q url.Values, inRepositoryGroup bool) string {
 	if len(q) == 0 {
 		return ""
 	}
@@ -230,6 +234,9 @@ func queryContext(q url.Values) string {
 			continue
 		}
 		if k == "start" && q.Get(k) == "0" {
+			continue
+		}
+		if inRepositoryGroup && (strings.HasSuffix(k, ".projectKey") || strings.HasSuffix(k, ".repositorySlug")) {
 			continue
 		}
 		keys = append(keys, k)

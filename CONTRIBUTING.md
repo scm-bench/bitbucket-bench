@@ -146,9 +146,28 @@ like a passing test run.
 The fetcher is tested against a stand-in Bitbucket covering pagination, renamed
 endpoints, permission denials, and the cross-version shapes where a merge check
 is a number in one release and an object in another. That proves the code is
-self-consistent; it does **not** prove Bitbucket behaves like the stand-in. If
-you have a real instance, running against it and reporting what differed is the
-single most valuable thing you can do here.
+self-consistent; it does **not** prove Bitbucket behaves like the stand-in —
+and against Bitbucket 10.4 the stand-in turned out to be wrong in a dozen
+places. Where a test's JSON describes Bitbucket, take it from a real response
+(the end-to-end instance below is the quickest way to get one) and say which
+version it came from.
+
+`hack/e2e` is the real-instance suite: a disposable Bitbucket Data Center in
+Docker, a fixture with one deliberate deviation per repository, and the
+verdicts a correct scan reports for three tokens of different reach. Run it
+before a release and after any change to the fetcher or a rule:
+
+```bash
+export BITBUCKET_LICENSE_FILE=~/bitbucket-timebomb.lic   # see hack/e2e/README.md
+hack/e2e/up.sh && hack/e2e/seed.sh && hack/e2e/verify.sh
+```
+
+A new control, or a new way an existing one can be satisfied, gets a
+repository in `seed.sh` that puts it in a known state and a row in
+`expected.py` saying what that state is — written down from the fixture, not
+copied from the tool's output. If you have an instance of another version,
+running the suite against it (`IMAGE=atlassian/bitbucket:<tag>`) and reporting
+what differed is the single most valuable thing you can do here.
 
 ## Releasing
 

@@ -139,9 +139,9 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 
 	result := diff.Compare(beforeReport, afterReport)
 
-	out, closeOut, err := openOutput(cmd, opts.outputPath)
-	if err != nil {
-		return err
+	var out io.Writer = cmd.OutOrStdout()
+	if opts.outputPath != "" {
+		out = io.Discard // rendered for a file: no colour, the default width
 	}
 	var buf bytes.Buffer
 	if err := diff.Write(&buf, result, diff.Options{
@@ -149,14 +149,13 @@ func runDiff(cmd *cobra.Command, opts *diffOptions, beforePath, afterPath string
 		Color:  useDiffColor(opts, out),
 		Width:  console.WidthFor(out),
 	}); err != nil {
-		closeOut()
 		return err
 	}
-	if _, err := io.Copy(out, &buf); err != nil {
-		closeOut()
-		return err
-	}
-	if err := closeOut(); err != nil {
+	if opts.outputPath != "" {
+		if err := writePrivateFile(opts.outputPath, buf.Bytes()); err != nil {
+			return fmt.Errorf("write diff %s: %w", opts.outputPath, err)
+		}
+	} else if _, err := io.Copy(out, &buf); err != nil {
 		return err
 	}
 

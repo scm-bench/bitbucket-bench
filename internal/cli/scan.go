@@ -114,10 +114,12 @@ terminal, scan offers the same choice interactively — and can save the URL and
 token you enter (0600, under your user config directory, or BITBUCKET_BENCH_CONFIG_DIR)
 so later scans need nothing. Delete the file to forget it.
 
-The table report is an overview aggregated by control: one row per failed
-control, however many resources it failed on. --details expands it to one
-section per resource; --details=<resource|control>[,...] narrows those
-sections to what is named.
+The table report is line-oriented: one record per failure, naming the resource,
+the control and what is wrong, with the one-line fix and the evidence beneath
+it. Controls needing a person aggregate to one line each, since a question that
+needs judgement is one question however many resources it spans. --details
+expands the report to a table per resource; --details=<resource|control>[,...]
+narrows those sections to what is named.
 
 Each network scan also leaves its snapshot behind (0600, under the user
 config directory), so the next question does not cost another scan:
@@ -300,10 +302,17 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 			return err
 		}
 		if inst.URL != "" {
-			opts.baseURL = inst.URL
-			if strings.TrimSpace(opts.token) == "" && strings.TrimSpace(opts.username) == "" {
-				opts.token = inst.Token
+			// A credential arriving without a URL — an exported
+			// BITBUCKET_TOKEN for some other instance is the usual way — used
+			// to be sent to the saved instance's URL, a host it was never meant
+			// for. The saved instance pairs only with its own token.
+			if strings.TrimSpace(opts.token) != "" || strings.TrimSpace(opts.username) != "" {
+				return fmt.Errorf("a credential is set (--token/BITBUCKET_TOKEN or --username/BITBUCKET_USERNAME) but no --url (BITBUCKET_URL), "+
+					"so the saved instance %s was not used: the credential would go to a host it may not belong to\n"+
+					"pass --url for the credential, or unset it to use the saved instance's own", inst.URL)
 			}
+			opts.baseURL = inst.URL
+			opts.token = inst.Token
 			stderr := cmd.ErrOrStderr()
 			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
 				Line(console.Info, "using saved instance %s (%s)", inst.URL, path)
@@ -361,6 +370,16 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.scan.MaxDuration.Get())
 		defer cancel()
+	}
+
+	// The bundle is compiled, and the control selection checked, before the
+	// instance is contacted: a typo in include, exclude or an exception used
+	// to be reported only after the whole instance had been fetched — on a
+	// large one, ten minutes and every request of a scan that was never going
+	// to produce a report.
+	eng, err := engine.New(ctx, cfg, scm.PlatformBitbucketDC)
+	if err != nil {
+		return err
 	}
 
 	// The tracer exists even when nothing is shown: its closing line is an
@@ -458,21 +477,34 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		}
 	}
 
-	eng, err := engine.New(ctx, cfg, snapshot.Metadata.Platform)
-	if err != nil {
-		return err
+	// A replayed snapshot names its own platform, and the controls that apply
+	// are the ones for that platform.
+	if snapshot.Metadata.Platform != scm.PlatformBitbucketDC {
+		if eng, err = engine.New(ctx, cfg, snapshot.Metadata.Platform); err != nil {
+			return err
+		}
 	}
 	rep, err := eng.Evaluate(ctx, snapshot)
 	if err != nil {
 		return err
 	}
-
-	out, closeOut, err := openOutput(cmd, opts.outputPath)
-	if err != nil {
-		return err
+	// Printed whatever the verbosity: a lapsed exception is a finding that
+	// starts failing the run today, and the exit code alone would not say why.
+	if len(rep.ExceptionWarnings) > 0 {
+		stderr := cmd.ErrOrStderr()
+		w := console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}
+		for _, warning := range rep.ExceptionWarnings {
+			w.Line(console.Warn, "%s", warning)
+		}
 	}
+
 	// The report is rendered into memory first so a write failure cannot leave
 	// a half-written file that looks like a complete report.
+	var out io.Writer = cmd.OutOrStdout()
+	if opts.outputPath != "" {
+		// Rendered for a file, not a terminal: no colour, the default width.
+		out = io.Discard
+	}
 	var buf bytes.Buffer
 	reportOpts := report.Options{
 		Format:         opts.format,
@@ -489,18 +521,55 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 		reportOpts.Notice = demoNotice
 	}
 	if err := report.Write(&buf, rep, reportOpts); err != nil {
-		closeOut()
 		return err
 	}
-	if _, err := io.Copy(out, &buf); err != nil {
-		closeOut()
-		return err
-	}
-	if err := closeOut(); err != nil {
+	if opts.outputPath != "" {
+		// 0600, for the same reason the snapshot is: a report names every
+		// repository that can be force-pushed, every account that should have
+		// been deactivated, and every project handing write access to all
+		// comers — the same map of an instance's weak points, rendered.
+		if err := writePrivateFile(opts.outputPath, buf.Bytes()); err != nil {
+			return fmt.Errorf("write report %s: %w", opts.outputPath, err)
+		}
+	} else if _, err := io.Copy(out, &buf); err != nil {
 		return err
 	}
 
+	if err := coverageStatus(snapshot, rep, opts); err != nil {
+		return err
+	}
 	return exitStatus(rep, opts)
+}
+
+// coverageStatus refuses a scan that cannot vouch for what it covered.
+//
+// Both cases used to exit 0. A scan that evaluated no repository — a
+// --project nobody can read, a token that sees nothing — reported only the
+// instance-level controls, which a gate on severity or score happily passed.
+// A project whose repository list could not be read dropped out of the
+// snapshot entirely, and with it every finding nobody could now report as
+// MANUAL. The report is still written in both cases; the exit code is what a
+// pipeline reads.
+func coverageStatus(snapshot *scm.Snapshot, rep *engine.Report, opts *scanOptions) error {
+	// Counted from what was evaluated, not from the snapshot: with
+	// skipArchivedRepositories, a snapshot holding only archived repositories
+	// evaluates none of them.
+	if rep.Repositories == 0 {
+		return &exitCodeError{
+			code: ExitError,
+			msg: "the scan evaluated no repository, so it audited nothing the repository controls cover\n" +
+				"check --project/--repository, and that the token can see the repositories you expect",
+		}
+	}
+	if n := len(snapshot.Metadata.Unlisted); n > 0 && !opts.scan.AllowIncomplete {
+		return &exitCodeError{
+			code: ExitError,
+			msg: fmt.Sprintf("the repositories of %s could not be listed (%s), so the scan is incomplete and they are missing from the report\n"+
+				"grant the token read access to them, or set scan.allowIncomplete: true to accept a partial scan",
+				console.Pluralize(n, "project"), strings.Join(snapshot.Metadata.Unlisted, ", ")),
+		}
+	}
+	return nil
 }
 
 // resolveCredentials settles which credential wins when more than one is
@@ -585,6 +654,7 @@ func obtainSnapshot(ctx context.Context, cmd *cobra.Command, opts *scanOptions, 
 		Password:       opts.password,
 		Timeout:        opts.scan.Timeout.Get(),
 		Concurrency:    opts.scan.Concurrency,
+		CAFile:         opts.scan.CAFile,
 		Insecure:       opts.scan.Insecure,
 		AllowPlaintext: opts.scan.AllowPlaintext,
 		OnRequest: func(e bitbucketdc.RequestEvent) {
@@ -645,7 +715,13 @@ func parseSnapshot(raw []byte, source string) (*scm.Snapshot, error) {
 		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
 	if snapshot.SchemaVersion != scm.SchemaVersion {
-		return nil, fmt.Errorf("%s has schema version %q, but this build reads version %q",
+		// The refusal carries the whole recovery, because it is the only thing
+		// the reader sees: --last lands here on the first run after an upgrade
+		// without having chosen the file, and a bare version mismatch tells
+		// that person nothing about what to do next.
+		return nil, fmt.Errorf("%s has schema version %q, but this build reads version %q.\n"+
+			"Capture it again with this build: the older shape is missing settings the current "+
+			"controls decide on, and evaluating it anyway would report verdicts its data cannot support",
 			source, snapshot.SchemaVersion, scm.SchemaVersion)
 	}
 	if snapshot.Metadata.Platform == "" {
@@ -674,44 +750,49 @@ func humanAge(d time.Duration) string {
 }
 
 func writeSnapshot(path string, snapshot *scm.Snapshot) error {
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
 	raw, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode snapshot: %w", err)
 	}
 	// A snapshot describes an instance's security posture, so it is written
 	// readable by its owner only.
-	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+	if err := writePrivateFile(path, append(raw, '\n')); err != nil {
 		return fmt.Errorf("write snapshot %s: %w", path, err)
 	}
 	return nil
 }
 
-// openOutput returns the report destination and a close function that is safe
-// to call for stdout.
-func openOutput(cmd *cobra.Command, path string) (io.Writer, func() error, error) {
-	if path == "" {
-		return cmd.OutOrStdout(), func() error { return nil }, nil
+// writePrivateFile writes data to path readable by its owner only, atomically.
+//
+// Both properties come from writing a fresh 0600 file beside the target and
+// renaming it over. os.WriteFile and O_TRUNC applied 0600 only when they
+// created the file: a report written over an existing 0644 one kept the
+// 0644, and a snapshot naming every force-pushable repository was readable by
+// everyone on a shared CI agent. And a write that failed halfway left half a
+// report that read like a whole one; the rename either lands complete or not
+// at all.
+func writePrivateFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, nil, fmt.Errorf("create %s: %w", dir, err)
-		}
-	}
-	// 0600, for the same reason the snapshot is: a report names every
-	// repository that can be force-pushed, every account that should have been
-	// deactivated, and every project handing write access to all comers. That
-	// is the same map of an instance's weak points, just rendered — so it gets
-	// the same permissions rather than whatever the umask happens to allow.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create %s: %w", path, err)
+		return err
 	}
-	return file, file.Close, nil
+	defer os.Remove(tmp.Name()) // a no-op once the rename has happened
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // useColor enables ANSI only for an actual terminal, honouring NO_COLOR.
@@ -768,7 +849,9 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 		// What the gate measures is what the token failed to read.
 		unread := 0
 		for _, f := range rep.Findings {
-			if f.Status == engine.StatusManual && f.Automated {
+			// An accepted MANUAL finding is one somebody has reviewed by hand
+			// and recorded as such; it is no longer a gap in what was seen.
+			if f.Status == engine.StatusManual && f.Automated && f.Waiver == nil {
 				unread++
 			}
 		}
@@ -815,15 +898,19 @@ func exitStatus(rep *engine.Report, opts *scanOptions) error {
 // how far each has spread.
 func failureSummary(rep *engine.Report, failOn string) string {
 	controls := map[string]bool{}
+	failed := 0
 	for _, f := range rep.Findings {
-		if f.Status == engine.StatusFail {
+		// Accepted failures do not fail the run, so they are not what this
+		// line explains.
+		if f.Status == engine.StatusFail && f.Waiver == nil {
 			controls[f.CheckID] = true
+			failed++
 		}
 	}
 
 	msg := fmt.Sprintf("%s failed", console.Pluralize(len(controls), "control"))
-	if rep.Score.Failed > len(controls) {
-		msg += fmt.Sprintf(" across %s", console.Pluralize(rep.Score.Failed, "finding"))
+	if failed > len(controls) {
+		msg += fmt.Sprintf(" across %s", console.Pluralize(failed, "finding"))
 	}
 	return msg + fmt.Sprintf(", including at least one at or above %s severity", strings.ToUpper(failOn))
 }

@@ -4,12 +4,14 @@
   "package": "scmbench.rules.cis_1_1_12",
   "scope": "repository",
   "severity": "MEDIUM",
-  "platforms": ["bitbucket-dc"],
+  "platforms": [
+    "bitbucket-dc"
+  ],
   "automated": true,
   "title": "Ensure verification of signed commits for new changes before merging",
   "description": "Git commit authorship is self-asserted: anyone who can push can claim to be anyone. Verifying signatures at the server is what makes the audit trail mean something.",
-  "remediation": "Bitbucket Data Center has no built-in signature check, so install a hook add-on that verifies GPG or SSH signatures (Atlassian Marketplace, e.g. a \"commit signature verification\" pre-receive hook), then enable it at Repository settings -> Hooks. Once installed, add its plugin key to bitbucket-bench's signatureHookKeys config so this check recognises it.",
-  "fixSummary": "Install a signature-verifying hook add-on and enable it at Repository settings -> Hooks.",
+  "remediation": "Bitbucket Data Center 8.13 and later bundle a \"Verify Commit Signature\" pre-receive hook: enable it at Repository settings -> Hooks, or at Project settings -> Hooks to cover every repository in the project, and make sure the signing keys of your committers are registered (GPG and SSH keys under Profile -> Manage account). \"Verify Committer\" is a different hook — it checks who pushed, not whether a commit is signed — and does not satisfy this control. On an older instance, install a signature-verification add-on from the Atlassian Marketplace and add its full hook key (plugin-key:module-key) to signatureHookKeys; a captured snapshot lists every hook's key under repositories[].hooks[].key.",
+  "fixSummary": "Enable the \"Verify Commit Signature\" hook at Repository settings -> Hooks.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-repository-hooks-776639836.html"

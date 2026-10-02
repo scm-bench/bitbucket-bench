@@ -29,3 +29,7 @@ bitbucket-bench.local.yaml
 .vscode/
 *.swp
 .DS_Store
+
+# The e2e harness writes tokens, session cookies and captured reports here.
+/hack/e2e/out/
+/hack/e2e/expected/

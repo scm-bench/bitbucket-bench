@@ -14,6 +14,7 @@ import (
 
 	"github.com/scm-bench/bitbucket-bench/internal/config"
 	"github.com/scm-bench/bitbucket-bench/internal/scm"
+	"sync/atomic"
 )
 
 // fakeInstance is a stand-in Bitbucket Data Center. Handlers are keyed by the
@@ -39,6 +40,49 @@ func (f *fakeInstance) json(path string, body string) {
 	f.handle(path, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, body)
+	})
+}
+
+// users answers /users the way Bitbucket does: filtered by whichever
+// permission the query names, and paged by start/limit. Keys are the global
+// permission ("ADMIN", "LICENSED_USER"), "PERM:PROJECT/slug" for a repository
+// permission, "LICENSED_USER+PERM:PROJECT/slug" for the two ANDed, or "*" for
+// an unfiltered list (the credential preflight). Values are a JSON array body.
+func (f *fakeInstance) users(byPermission map[string]string) {
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		key := q.Get("permission")
+		if p := q.Get("permission.1"); p != "" {
+			key = p + ":" + q.Get("permission.1.projectKey") + "/" + q.Get("permission.1.repositorySlug")
+			if p2 := q.Get("permission.2"); p2 != "" {
+				key = p + "+" + p2 + ":" + q.Get("permission.2.projectKey") + "/" + q.Get("permission.2.repositorySlug")
+			}
+		}
+		if key == "" {
+			key = "*"
+		}
+		var values []json.RawMessage
+		if body := byPermission[key]; body != "" {
+			if err := json.Unmarshal([]byte("["+body+"]"), &values); err != nil {
+				f.t.Errorf("bad users fixture for %s: %v", key, err)
+			}
+		}
+		start, limit := 0, len(values)
+		fmt.Sscan(q.Get("start"), &start)
+		fmt.Sscan(q.Get("limit"), &limit)
+		if start > len(values) {
+			start = len(values)
+		}
+		end := start + limit
+		if end > len(values) {
+			end = len(values)
+		}
+		page, _ := json.Marshal(map[string]any{
+			"size": end - start, "limit": limit, "start": start,
+			"isLastPage": end == len(values), "values": values[start:end],
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(page)
 	})
 }
 
@@ -72,6 +116,15 @@ func (f *fakeInstance) start() *httptest.Server {
 func standardInstance(t *testing.T) *fakeInstance {
 	f := newFakeInstance(t)
 
+	// /users answers the preflight and every permission question. alice holds
+	// SYS_ADMIN and bob ADMIN through bitbucket-admins; Bitbucket resolves the
+	// group itself. carol administers PRJ/app of her own.
+	f.users(map[string]string{
+		"*":                  `{"name":"scanner","displayName":"Scanner","active":true}`,
+		"ADMIN":              `{"name":"alice","active":true},{"name":"bob","active":true}`,
+		"LICENSED_USER":      `{"name":"alice","active":true},{"name":"bob","active":true},{"name":"carol","active":true}`,
+		"REPO_ADMIN:PRJ/app": `{"name":"alice","active":true},{"name":"bob","active":true},{"name":"carol","active":true}`,
+	})
 	f.json("/api/1.0/admin/permissions/users", pageOf(`{"user":{"name":"alice","displayName":"Alice","active":true},"permission":"SYS_ADMIN"}`))
 	f.json("/api/1.0/admin/permissions/groups", pageOf(`{"group":{"name":"bitbucket-admins"},"permission":"ADMIN"}`))
 	f.json("/api/1.0/admin/groups/more-members", pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
@@ -145,13 +198,18 @@ func standardInstance(t *testing.T) *fakeInstance {
 
 func fetchSnapshot(t *testing.T, f *fakeInstance) (*fakeInstance, *scm.Snapshot) {
 	t.Helper()
+	return fetchSnapshotWithConfig(t, f, config.Default())
+}
+
+func fetchSnapshotWithConfig(t *testing.T, f *fakeInstance, cfg config.Config) (*fakeInstance, *scm.Snapshot) {
+	t.Helper()
 	server := f.start()
 
 	client, err := NewClient(Options{BaseURL: server.URL, Token: "test-token", Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	fetcher := NewFetcher(client, config.Default())
+	fetcher := NewFetcher(client, cfg)
 	snapshot, err := fetcher.Fetch(context.Background(), FetchOptions{
 		ToolVersion: "test",
 		Now:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -235,17 +293,11 @@ func TestFetchBuildsCompleteSnapshot(t *testing.T) {
 		t.Errorf("security policy paths = %v", repo.Files.SecurityPolicyPaths)
 	}
 
-	// Repository REPO_ADMIN (carol), project PROJECT_ADMIN (alice) and the
-	// instance grants (alice as SYS_ADMIN, bob through bitbucket-admins), all
-	// resolved and deduplicated. The instance half is the part that used to be
-	// dropped, which is why this was 2.
-	if repo.Admins.Count != 3 || !repo.Admins.Complete {
-		t.Errorf("repository admins = %+v, want 3 complete", repo.Admins)
-	}
-	for _, want := range []string{"alice", "bob", "carol"} {
-		if !slices.Contains(repo.Admins.Users, want) {
-			t.Errorf("repository admins = %v, missing %s", repo.Admins.Users, want)
-		}
+	// Bitbucket names alice, bob and carol as able to administer PRJ/app;
+	// alice and bob are instance administrators, so the repository has one
+	// administrator of its own.
+	if repo.Admins.Count != 1 || !repo.Admins.Complete || !slices.Equal(repo.Admins.Users, []string{"carol"}) {
+		t.Errorf("repository admins = %+v, want carol alone, complete", repo.Admins)
 	}
 
 	for key, want := range map[string]bool{
@@ -256,16 +308,21 @@ func TestFetchBuildsCompleteSnapshot(t *testing.T) {
 		"branches":            true,
 		"branchAges":          true,
 		"files":               true,
-		"permissions":         true,
+		"admins":              true,
 	} {
 		if repo.Available[key] != want {
 			t.Errorf("Available[%q] = %v, want %v", key, repo.Available[key], want)
 		}
 	}
 
-	// The global admin group must be expanded into its members.
-	if snapshot.Organization.EffectiveAdmins.Count != 2 || !snapshot.Organization.EffectiveAdmins.Complete {
-		t.Errorf("organization admins = %+v, want alice + bob complete", snapshot.Organization.EffectiveAdmins)
+	org := snapshot.Organization
+	if org.EffectiveAdmins.Count != 2 || !org.EffectiveAdmins.Complete {
+		t.Errorf("organization admins = %+v, want alice + bob complete", org.EffectiveAdmins)
+	}
+	for key, want := range map[string]bool{"admins": true, "users": true, "userActivity": true, "licensedUsers": true} {
+		if org.Available[key] != want {
+			t.Errorf("Organization.Available[%q] = %v, want %v", key, org.Available[key], want)
+		}
 	}
 
 	// Scanning must never mutate the instance it audits.
@@ -320,7 +377,7 @@ func TestRequiredBuildsFallsBackToLegacyEndpoint(t *testing.T) {
 // reader notices that nothing at all could be read.
 func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	f := newFakeInstance(t)
-	f.handle("/api/1.0/application-properties", func(w http.ResponseWriter, _ *http.Request) {
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"errors":[{"message":"Authentication failed"}]}`)
 	})
@@ -334,7 +391,7 @@ func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	if err == nil {
 		t.Fatal("Fetch succeeded with credentials the instance rejected")
 	}
-	if !strings.Contains(err.Error(), "rejected the credentials") {
+	if !strings.Contains(err.Error(), "did not accept the credentials") {
 		t.Errorf("error = %v, want it to name the credentials as the cause", err)
 	}
 
@@ -344,6 +401,73 @@ func TestRejectedCredentialsFailTheScan(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.requests) != 1 {
 		t.Errorf("made %d requests after a 401 (%v); want only the credential check", len(f.requests), f.requests)
+	}
+}
+
+// Measured on Bitbucket 10.4.1: a bearer token the instance does not recognise
+// is not refused, it is served as anonymous. /application-properties — what
+// the preflight used to ask — answers anonymous callers with a 200, so a
+// revoked token sailed through it and every later 401 was filed as a missing
+// permission. The preflight now asks an endpoint anonymous callers cannot read.
+func TestUnrecognisedTokenServedAsAnonymousFailsTheScan(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/application-properties", `{"version":"10.4.1","displayName":"Bitbucket"}`)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource","exceptionName":"com.atlassian.plugins.rest.api.security.exception.AuthenticationRequiredException"}]}`)
+	})
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "revoked", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil || !strings.Contains(err.Error(), "did not accept the credentials") {
+		t.Fatalf("err = %v, want the scan refused for a credential served as anonymous", err)
+	}
+}
+
+// Bitbucket 10 ships with password authentication disabled on the REST API and
+// answers a basic-auth request with a 403 and one sentence. The scan has to
+// say what to do instead, not just repeat the sentence.
+func TestDisabledBasicAuthenticationNamesTheFix(t *testing.T) {
+	f := standardInstance(t)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"Basic Authentication has been disabled on this instance."}`)
+	})
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Username: "admin", Password: "pw", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil {
+		t.Fatal("Fetch succeeded although the instance refused basic authentication")
+	}
+	for _, want := range []string{"does not accept passwords", "HTTP access token", "--token", "Basic Authentication has been disabled"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// A base URL missing its context path reaches a web server that is not
+// Bitbucket's REST API. That is a typo in --url, and saying so beats the
+// generic 404 every later request would produce.
+func TestWrongBaseURLIsReportedAsSuch(t *testing.T) {
+	f := newFakeInstance(t) // nothing handled: every path is a 404
+	server := f.start()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{})
+	if err == nil || !strings.Contains(err.Error(), "check --url") {
+		t.Fatalf("err = %v, want it to point at --url", err)
 	}
 }
 
@@ -370,7 +494,7 @@ func TestMissingAdminAccessDegradesGracefully(t *testing.T) {
 
 	_, snapshot := fetchSnapshot(t, f)
 
-	if snapshot.Organization.Available["adminUsers"] || snapshot.Organization.Available["users"] {
+	if snapshot.Organization.Available["adminGrants"] || snapshot.Organization.Available["users"] {
 		t.Error("forbidden admin endpoints must be marked unavailable")
 	}
 	if len(snapshot.Metadata.Warnings) == 0 {
@@ -404,7 +528,7 @@ func TestUnauthorizedAdminEndpointsDegradeOnceCredentialsAreProven(t *testing.T)
 
 	_, snapshot := fetchSnapshot(t, f)
 
-	if snapshot.Organization.Available["adminUsers"] || snapshot.Organization.Available["users"] {
+	if snapshot.Organization.Available["adminGrants"] || snapshot.Organization.Available["users"] {
 		t.Error("unauthorized admin endpoints must be marked unavailable, so the controls report MANUAL")
 	}
 	if len(snapshot.Metadata.Warnings) == 0 {
@@ -422,7 +546,7 @@ func TestUnauthorizedAdminEndpointsDegradeOnceCredentialsAreProven(t *testing.T)
 // about the instance.
 func TestUnauthorizedPreflightIsStillFatal(t *testing.T) {
 	f := standardInstance(t)
-	f.handle("/api/1.0/application-properties", func(w http.ResponseWriter, _ *http.Request) {
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"errors":[{"message":"Authentication failed"}]}`)
 	})
@@ -519,13 +643,40 @@ func TestExhaustivePaginationFollowsNextPageStart(t *testing.T) {
 	}
 }
 
-func TestArchivedRepositoriesAreSkippedByDefault(t *testing.T) {
+// An archived repository is reported rather than dropped, so the report
+// accounts for every repository the token can see — but none of its settings
+// are fetched: every control about changes is NA for it, and the read-access
+// control needs only the public flag and the project's default permission.
+func TestArchivedRepositoriesAreReportedWithoutFetchingTheirSettings(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos", pageOf(`{"slug":"app","id":10,"name":"app","archived":true,"public":true,"project":{"key":"PRJ"}}`))
+
+	_, snapshot := fetchSnapshot(t, f)
+	repos := snapshot.Projects[0].Repositories
+	if len(repos) != 1 || !repos[0].Archived {
+		t.Fatalf("repositories = %+v, want the archived one reported", repos)
+	}
+	if !repos[0].Permissions.PublicAccess {
+		t.Error("an archived public repository must still say it is public")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, path := range f.requests {
+		if strings.Contains(path, "/repos/app/") || strings.Contains(path, "/repos/app?") {
+			t.Errorf("fetched %s for an archived repository", path)
+		}
+	}
+}
+
+func TestArchivedRepositoriesCanBeLeftOut(t *testing.T) {
 	f := standardInstance(t)
 	f.json("/api/1.0/projects/PRJ/repos", pageOf(`{"slug":"app","id":10,"name":"app","archived":true,"project":{"key":"PRJ"}}`))
 
-	_, snapshot := fetchSnapshot(t, f)
+	cfg := config.Default()
+	cfg.SkipArchivedRepositories = true
+	_, snapshot := fetchSnapshotWithConfig(t, f, cfg)
 	if len(snapshot.Projects[0].Repositories) != 0 {
-		t.Error("archived repositories should be skipped when skipArchivedRepositories is on")
+		t.Error("archived repositories should be left out when skipArchivedRepositories is on")
 	}
 }
 
@@ -536,17 +687,6 @@ func TestPublicProjectMakesRepositoryPublic(t *testing.T) {
 	_, snapshot := fetchSnapshot(t, f)
 	if !snapshot.Projects[0].Repositories[0].Public {
 		t.Error("a repository in a public project is anonymously readable and must be marked public")
-	}
-}
-
-func TestDefaultPermissionProbeReportsKnownState(t *testing.T) {
-	f := standardInstance(t)
-	f.json("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", `{"permitted":true}`)
-
-	_, snapshot := fetchSnapshot(t, f)
-	perms := snapshot.Projects[0].Repositories[0].Permissions
-	if perms.DefaultPermission != "PROJECT_WRITE" || !perms.DefaultPermissionKnown {
-		t.Errorf("default permission = %q known=%v, want PROJECT_WRITE known", perms.DefaultPermission, perms.DefaultPermissionKnown)
 	}
 }
 
@@ -746,36 +886,73 @@ func TestEmptyRepositoryMarksFilesAvailable(t *testing.T) {
 	}
 }
 
-// Access granted through a read-only group still counts as access. Expanding
-// only the admin groups would let a dormant account escape review because its
-// single grant happened to be non-admin.
-func TestNonAdminGroupGrantsRepositoryAccess(t *testing.T) {
+// The shapes below are Bitbucket 10.4.1's, recorded against a real instance.
+// /default-branch reports the configured branch whether or not anything was
+// ever pushed, so an empty repository answers 200 refs/heads/master — and was
+// taken for one with commits, failing its branch rules instead of reporting NA.
+func TestEmptyRepositoryIsDecidedFromTheBranchList(t *testing.T) {
 	f := standardInstance(t)
-	f.json("/api/1.0/projects/PRJ/permissions/groups", pageOf(`{"group":{"name":"developers"},"permission":"PROJECT_READ"}`))
-	f.json("/api/1.0/admin/users", pageOf(`{"name":"eve","displayName":"Eve","active":true,"lastAuthenticationTimestamp":1767225600000}`))
-	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("context") {
-		case "developers":
-			fmt.Fprint(w, pageOf(`{"name":"eve","displayName":"Eve","active":true}`))
-		default:
-			fmt.Fprint(w, pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
-		}
+	f.json("/api/1.0/projects/PRJ/repos/app/default-branch", `{"id":"refs/heads/master","displayId":"master","type":"BRANCH"}`)
+	f.handle("/api/1.0/projects/PRJ/repos/app/branches/default", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	})
+	f.json("/api/1.0/projects/PRJ/repos/app/branches", `{"size":0,"limit":100,"isLastPage":true,"values":[],"start":0}`)
 
 	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
 
-	var eve *scm.User
-	for i := range snapshot.Organization.Users {
-		if snapshot.Organization.Users[i].Name == "eve" {
-			eve = &snapshot.Organization.Users[i]
+	if !repo.Empty {
+		t.Fatal("a repository with no branches must be reported as empty, whatever /default-branch says")
+	}
+	if !repo.Available["defaultBranch"] || repo.DefaultBranchDisplay != "master" {
+		t.Errorf("default branch = %q (available %v), want the configured master, known",
+			repo.DefaultBranchDisplay, repo.Available["defaultBranch"])
+	}
+	if !repo.Available["files"] {
+		t.Error("an empty repository is a known state, so files should be available")
+	}
+}
+
+// A repository configured with a default branch nobody pushed: the instance
+// default stayed "master" while git's moved to "main". Bitbucket 10.4 answers
+// /default-branch with the missing master and refuses branches?details=true
+// outright, because ahead/behind is computed against the default branch.
+//
+// Before: the scan judged protection on master, probed master for SECURITY.md
+// and failed CIS-1.2.1 for a repository that has one, and lost every branch age
+// with the details listing.
+func TestConfiguredDefaultBranchThatDoesNotExist(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos/app/default-branch", `{"id":"refs/heads/master","displayId":"master","type":"BRANCH"}`)
+	f.handle("/api/1.0/projects/PRJ/repos/app/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("details") == "true" {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errors":[{"message":"No default branch is defined","exceptionName":"com.atlassian.bitbucket.repository.NoDefaultBranchException"}]}`)
+			return
 		}
+		fmt.Fprint(w, pageOf(`{"id":"refs/heads/main","displayId":"main","type":"BRANCH","latestCommit":"abc123","isDefault":false}`))
+	})
+	f.json("/api/1.0/projects/PRJ/repos/app/commits/abc123", `{"id":"abc123","committerTimestamp":1767139200000,"authorTimestamp":1767139200000}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+
+	if repo.Empty {
+		t.Fatal("a repository with a branch is not empty")
 	}
-	if eve == nil {
-		t.Fatal("eve is missing from the user directory")
+	if repo.Available["defaultBranch"] || repo.DefaultBranch != "" {
+		t.Errorf("default branch = %q (available %v); a branch that does not exist must not be judged",
+			repo.DefaultBranch, repo.Available["defaultBranch"])
 	}
-	if !eve.HasRepositoryAccess {
-		t.Error("a user whose only grant is a read-only group still has access to code")
+	if !slices.ContainsFunc(repo.Errors, func(e string) bool { return strings.Contains(e, "master does not exist") }) {
+		t.Errorf("errors %q do not say the configured branch is missing", repo.Errors)
+	}
+	if repo.Available["files"] {
+		t.Error("no default branch exists to look for a security policy on, so files must be unavailable")
+	}
+	if !repo.Available["branchAges"] || len(repo.Branches) != 1 || repo.Branches[0].AgeDays != 1 {
+		t.Errorf("branches = %+v (ages available %v), want main dated through the commit lookup",
+			repo.Branches, repo.Available["branchAges"])
 	}
 }
 
@@ -847,206 +1024,6 @@ func TestNarrowedScanFailsWhenTheProjectCannotBeRead(t *testing.T) {
 	}
 }
 
-// A repository administered only by the instance's administrators has
-// administrators. Before instance grants were unioned in, its count was zero
-// and CIS-1.3.7 reported "Only 0 administrator(s) can manage this repository" —
-// a confident wrong answer, which is the one output this project treats as
-// worse than a crash.
-func TestRepositoryAdminsIncludeInstanceAdministrators(t *testing.T) {
-	f := standardInstance(t)
-	// Nobody holds admin on the repository or the project. The only
-	// administrators are alice (SYS_ADMIN) and bob (via the bitbucket-admins
-	// group), both from the global permission table.
-	f.json("/api/1.0/projects/PRJ/permissions/users", pageOf(`{"user":{"name":"carol","active":true},"permission":"PROJECT_READ"}`))
-	f.json("/api/1.0/projects/PRJ/repos/app/permissions/users", pageOf(``))
-	f.json("/api/1.0/projects/PRJ/repos/app/permissions/groups", pageOf(``))
-
-	_, snapshot := fetchSnapshot(t, f)
-	repo := snapshot.Projects[0].Repositories[0]
-
-	if !repo.Admins.Complete {
-		t.Fatalf("admins.Complete = false, want true: every grant was readable")
-	}
-	if repo.Admins.Count != 2 {
-		t.Errorf("admins.Count = %d (%v), want 2 (alice, bob)", repo.Admins.Count, repo.Admins.Users)
-	}
-	for _, want := range []string{"alice", "bob"} {
-		if !slices.Contains(repo.Admins.Users, want) {
-			t.Errorf("admins.Users = %v, missing %s", repo.Admins.Users, want)
-		}
-	}
-	if !slices.Contains(repo.Admins.Groups, "bitbucket-admins") {
-		t.Errorf("admins.Groups = %v, missing bitbucket-admins", repo.Admins.Groups)
-	}
-}
-
-// The other half of the same change: when the instance grants cannot be read,
-// the repository's administrator set is a lower bound, and saying so is what
-// turns a wrong FAIL into an honest MANUAL.
-func TestRepositoryAdminsAreIncompleteWhenInstanceGrantsAreUnreadable(t *testing.T) {
-	f := standardInstance(t)
-	f.handle("/api/1.0/admin/permissions/users", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
-	})
-
-	_, snapshot := fetchSnapshot(t, f)
-	repo := snapshot.Projects[0].Repositories[0]
-
-	if repo.Admins.Complete {
-		t.Error("admins.Complete = true, but the instance grants could not be read")
-	}
-	if repo.Available["admins"] {
-		t.Error(`Available["admins"] = true, want false so the rule reports MANUAL`)
-	}
-}
-
-// A project administrator administers every repository in the project, so a
-// project grant table that could not be read leaves each of those repositories
-// with an administrator set that is a lower bound. It used to come back empty
-// and indistinguishable from a project that grants nothing, and the
-// repositories below reported a confident FAIL built on a count nobody had
-// been able to take.
-func TestUnreadableProjectPermissionsMakeRepositoryAdminsIncomplete(t *testing.T) {
-	for _, tc := range []struct{ name, path string }{
-		{"users", "/api/1.0/projects/PRJ/permissions/users"},
-		{"groups", "/api/1.0/projects/PRJ/permissions/groups"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := standardInstance(t)
-			f.handle(tc.path, func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
-			})
-
-			_, snapshot := fetchSnapshot(t, f)
-			repo := snapshot.Projects[0].Repositories[0]
-
-			if repo.Admins.Complete {
-				t.Error("admins.Complete = true, but a project grant table was unreadable")
-			}
-			if repo.Available["permissions"] {
-				t.Error(`Available["permissions"] = true, want false so the rule reports MANUAL`)
-			}
-			if repo.Available["admins"] {
-				t.Error(`Available["admins"] = true, want false`)
-			}
-		})
-	}
-}
-
-// The default-permission probe walks from most permissive down, so a hit is
-// only the whole answer if every probe above it answered. When the
-// PROJECT_ADMIN probe fails and PROJECT_WRITE says yes, the real default could
-// still be PROJECT_ADMIN; reporting PROJECT_WRITE as certain understates the
-// grant, and DefaultPermissionKnown exists precisely to say "this is a lower
-// bound" instead.
-func TestPartialDefaultPermissionProbeIsNotReportedAsKnown(t *testing.T) {
-	f := standardInstance(t)
-	// 401 rather than 5xx: after the preflight it means "you may not read
-	// this", which is the realistic way this probe fails, and it is not
-	// retried — a 500 here costs the whole suite six seconds of backoff to
-	// prove the same point.
-	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_ADMIN/all", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
-	})
-	f.json("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", `{"permitted":true}`)
-
-	_, snapshot := fetchSnapshot(t, f)
-	perms := snapshot.Projects[0].Permissions
-
-	if perms.DefaultPermission != "PROJECT_WRITE" {
-		t.Errorf("DefaultPermission = %q, want PROJECT_WRITE", perms.DefaultPermission)
-	}
-	if perms.DefaultPermissionKnown {
-		t.Error("DefaultPermissionKnown = true, but the PROJECT_ADMIN probe never answered")
-	}
-	if snapshot.Projects[0].Repositories[0].Permissions.DefaultPermissionKnown {
-		t.Error("the repository inherited DefaultPermissionKnown = true")
-	}
-
-	found := false
-	for _, w := range snapshot.Metadata.Warnings {
-		if strings.Contains(w, "PRJ") && strings.Contains(w, "default permission") && strings.Contains(w, "not readable") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected a warning about the unreadable default permission probe, got %v", snapshot.Metadata.Warnings)
-	}
-}
-
-// The three probes ask the same underlying question — a token without
-// project admin rights fails all of them the same way — so a token missing
-// that grant should be told once, not three times.
-func TestUnreadableDefaultPermissionProbeWarnsOnce(t *testing.T) {
-	f := standardInstance(t)
-	unauthorized := func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
-	}
-	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_ADMIN/all", unauthorized)
-	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", unauthorized)
-	f.handle("/api/1.0/projects/PRJ/permissions/PROJECT_READ/all", unauthorized)
-
-	_, snapshot := fetchSnapshot(t, f)
-
-	count := 0
-	for _, w := range snapshot.Metadata.Warnings {
-		if strings.Contains(w, "default permission") {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("got %d default-permission warnings, want exactly 1: %v", count, snapshot.Metadata.Warnings)
-	}
-}
-
-// The ordinary case must keep working: every probe answers, so the first hit
-// is the answer and it is known.
-func TestCompleteDefaultPermissionProbeIsKnown(t *testing.T) {
-	f := standardInstance(t)
-	f.json("/api/1.0/projects/PRJ/permissions/PROJECT_WRITE/all", `{"permitted":true}`)
-
-	_, snapshot := fetchSnapshot(t, f)
-	perms := snapshot.Projects[0].Permissions
-
-	if perms.DefaultPermission != "PROJECT_WRITE" || !perms.DefaultPermissionKnown {
-		t.Errorf("got (%q, %v), want (PROJECT_WRITE, true)", perms.DefaultPermission, perms.DefaultPermissionKnown)
-	}
-}
-
-// Instance administrator rights are usually granted to a group, not to named
-// users. Reading them off the raw grant table and keeping only Type == "user"
-// dropped everyone in that group from HasRepositoryAccess — and since
-// CIS-1.3.1 only reviews accounts that can reach code, a dormant instance
-// administrator went unreported. That is the account on the instance with the
-// most access and the one most worth finding.
-func TestInstanceAdminsGrantedThroughAGroupCountAsHavingAccess(t *testing.T) {
-	f := standardInstance(t)
-	// dormant is only ever seen as a member of bitbucket-admins, which holds
-	// global ADMIN. No user grant anywhere names them.
-	f.json("/api/1.0/admin/groups/more-members", pageOf(`{"name":"dormant","displayName":"Dormant","active":true}`))
-	f.json("/api/1.0/admin/users", pageOf(`{"name":"dormant","displayName":"Dormant","active":true,"lastAuthenticationTimestamp":1500000000000}`))
-
-	_, snapshot := fetchSnapshot(t, f)
-
-	var found bool
-	for _, u := range snapshot.Organization.Users {
-		if u.Name != "dormant" {
-			continue
-		}
-		found = true
-		if !u.HasRepositoryAccess {
-			t.Error("HasRepositoryAccess = false for an instance administrator granted through a group")
-		}
-	}
-	if !found {
-		t.Fatalf("user directory did not contain dormant: %+v", snapshot.Organization.Users)
-	}
-}
-
 // --project and --repository are both additive includes, and they used to
 // share one filter. `--project PLATFORM --repository OTHER/app` therefore
 // scanned nothing in PLATFORM: naming any repository switched the filter on
@@ -1058,7 +1035,7 @@ func TestProjectAndRepositoryFiltersAreAdditive(t *testing.T) {
 	whole := targets{
 		projects:      map[string]string{"platform": "PLATFORM", "other": "OTHER"},
 		wholeProjects: map[string]bool{"platform": true},
-		repositories:  map[string]bool{"other/app": true},
+		repositories:  map[string]string{"other/app": "OTHER/app"},
 	}
 	for _, tc := range []struct {
 		project, slug string
@@ -1151,16 +1128,91 @@ func TestScanningRepositoriesIsNotWarnedAbout(t *testing.T) {
 	}
 }
 
-// hasRepositoryAccess is a bare boolean, so its completeness has to travel
-// beside it: a group the scan could not expand may hold the one dormant
-// account worth finding, and the dormant-account rule must see the gap rather
-// than read the quiet map as a clean population.
-func TestUnexpandableGroupMarksRepositoryAccessIncomplete(t *testing.T) {
+// firstRepository is the repository every standardInstance test operates on.
+func firstRepository(t *testing.T, snapshot *scm.Snapshot) scm.Repository {
+	t.Helper()
+	for _, p := range snapshot.Projects {
+		for _, r := range p.Repositories {
+			return r
+		}
+	}
+	t.Fatal("snapshot carries no repositories")
+	return scm.Repository{}
+}
+
+// A restriction exempting a group hides how many people it lets through: the
+// group name is what the API returns, and the count that decides whether the
+// protection still binds anyone is the membership behind it. Expanding happens
+// here because a policy may not make an API call.
+func TestExemptGroupsAreExpandedToPeople(t *testing.T) {
 	f := standardInstance(t)
-	f.json("/api/1.0/projects/PRJ/permissions/groups", pageOf(`{"group":{"name":"developers"},"permission":"PROJECT_READ"}`))
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", pageOf(`{
+		"id": 1,
+		"type": {"id": "no-deletes", "name": "Prevent deletion"},
+		"matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH"}},
+		"scope": {"type": "REPOSITORY", "resourceId": 10},
+		"users": [{"name": "build-bot"}],
+		"groups": ["developers"],
+		"accessKeys": [
+			{"key": {"id": 7, "label": "deploy-one", "text": "ssh-ed25519 AAAA deploy-one"}},
+			{"key": {"id": 9, "label": "deploy-two", "text": "ssh-ed25519 AAAA deploy-two"}}
+		]
+	}`))
 	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("context") == "developers" {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("context") {
+		case "developers":
+			fmt.Fprint(w, pageOf(`{"name":"eve","displayName":"Eve","active":true}`))
+		default:
+			fmt.Fprint(w, pageOf(`{"name":"bob","displayName":"Bob","active":true}`))
+		}
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := firstRepository(t, snapshot)
+	if len(repo.BranchRestrictions) != 1 {
+		t.Fatalf("got %d restrictions, want 1", len(repo.BranchRestrictions))
+	}
+	br := repo.BranchRestrictions[0]
+
+	if !br.ExemptPrincipals.Complete {
+		t.Error("every exempt group expanded, but the set is marked incomplete")
+	}
+	for _, want := range []string{"build-bot", "eve"} {
+		if !slices.Contains(br.ExemptPrincipals.Users, want) {
+			t.Errorf("exempt principals %v do not include %q", br.ExemptPrincipals.Users, want)
+		}
+	}
+	if !slices.Contains(br.ExemptPrincipals.Groups, "developers") {
+		t.Errorf("exempt groups %v do not name developers", br.ExemptPrincipals.Groups)
+	}
+	// The identities, not only the total: a rule asks whether the same key
+	// bypasses every restriction covering the branch.
+	if !slices.Equal(br.ExemptAccessKeyIDs, []int{7, 9}) {
+		t.Errorf("exempt access key ids = %v, want [7 9]", br.ExemptAccessKeyIDs)
+	}
+	if br.ExemptAccessKeys != 2 {
+		t.Errorf("exempt access keys = %d, want 2", br.ExemptAccessKeys)
+	}
+}
+
+// A group the token cannot expand makes the bypass set a lower bound. The
+// fetcher records that rather than reporting the members it happened to see as
+// though they were all of them — the rule turns it into MANUAL from here.
+func TestUnexpandableExemptGroupLeavesTheBypassSetIncomplete(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", pageOf(`{
+		"id": 1,
+		"type": {"id": "no-deletes", "name": "Prevent deletion"},
+		"matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH"}},
+		"scope": {"type": "REPOSITORY", "resourceId": 10},
+		"users": [],
+		"groups": ["contractors"]
+	}`))
+	f.handle("/api/1.0/admin/groups/more-members", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("context") == "contractors" {
 			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -1168,15 +1220,404 @@ func TestUnexpandableGroupMarksRepositoryAccessIncomplete(t *testing.T) {
 	})
 
 	_, snapshot := fetchSnapshot(t, f)
+	br := firstRepository(t, snapshot).BranchRestrictions[0]
 
-	if snapshot.Organization.Available["repositoryAccess"] {
-		t.Error("a group that could not be expanded must mark the access map incomplete")
+	if br.ExemptPrincipals.Complete {
+		t.Error("a group that could not be expanded left the bypass set marked complete")
+	}
+	if len(br.ExemptPrincipals.Users) != 0 {
+		t.Errorf("exempt principals = %v, want none resolved", br.ExemptPrincipals.Users)
+	}
+	if !slices.Contains(br.ExemptPrincipals.Groups, "contractors") {
+		t.Error("the unexpandable group is not named in the snapshot")
 	}
 }
 
-func TestFullyReadableGrantsMarkRepositoryAccessComplete(t *testing.T) {
-	_, snapshot := fetchSnapshot(t, standardInstance(t))
-	if !snapshot.Organization.Available["repositoryAccess"] {
-		t.Error("every table and group was readable; the access map should be marked complete")
+// Bitbucket 10.4.1's /settings/pull-requests, verbatim apart from the merge
+// strategies: no unapproveOnUpdate key at all, because the setting belongs to
+// the separately installed Auto Unapprove app. Absence is recorded so the
+// report can name the app instead of an unticked box.
+func TestUnreportedApprovalResetIsRecorded(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos/app/settings/pull-requests", `{
+		"mergeConfig": {"defaultStrategy": {"id": "no-ff"}, "strategies": [{"id": "no-ff", "enabled": true}], "type": "DEFAULT"},
+		"com.atlassian.bitbucket.server.bitbucket-bundled-hooks:requiredApprovers": {"enable": true, "count": 2},
+		"requiredAllApprovers": false,
+		"needsWork": false,
+		"requiredApprovers": 2,
+		"requiredAllTasksComplete": false,
+		"com.atlassian.bitbucket.server.bitbucket-build:requiredBuilds": {"enable": false, "count": 0},
+		"requiredSuccessfulBuilds": 0
+	}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+	if !repo.Available["pullRequestSettings"] || repo.Available["unapproveOnUpdate"] {
+		t.Errorf("available = %v, want pull request settings read and the approval reset recorded as unreported", repo.Available)
+	}
+	if repo.PullRequestSettings.RequiredApprovers != 2 {
+		t.Errorf("requiredApprovers = %d, want 2", repo.PullRequestSettings.RequiredApprovers)
+	}
+}
+
+// No HTTP access token can carry a global permission, and Bitbucket 10 refuses
+// passwords on its REST API by default, so the global grant table is out of
+// reach of every credential the README recommends. Bitbucket answers "who
+// holds ADMIN" itself, for any authenticated caller, groups resolved and
+// SYS_ADMIN included. An inactive account administers nothing.
+func TestInstanceAdministratorsAreResolvedByBitbucket(t *testing.T) {
+	f := standardInstance(t)
+	f.users(map[string]string{
+		"*":                  `{"name":"scanner","active":true}`,
+		"ADMIN":              `{"name":"alice","active":true},{"name":"gone","active":false},{"name":"bob","active":true}`,
+		"LICENSED_USER":      `{"name":"alice","active":true}`,
+		"REPO_ADMIN:PRJ/app": `{"name":"alice","active":true}`,
+	})
+	unauthorized := func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+	}
+	f.handle("/api/1.0/admin/permissions/users", unauthorized)
+	f.handle("/api/1.0/admin/permissions/groups", unauthorized)
+
+	_, snapshot := fetchSnapshot(t, f)
+	org := snapshot.Organization
+	if !org.Available["admins"] || !org.EffectiveAdmins.Complete || !slices.Equal(org.EffectiveAdmins.Users, []string{"alice", "bob"}) {
+		t.Errorf("effective admins = %+v (available %v), want alice and bob, complete", org.EffectiveAdmins, org.Available["admins"])
+	}
+	if org.Available["adminGrants"] {
+		t.Error("the grant table answered 401 and must not be marked readable")
+	}
+	for _, w := range snapshot.Metadata.Warnings {
+		if strings.Contains(w, "permissions/users") {
+			t.Errorf("an unreadable grant table is not worth a warning when no token can read it: %q", w)
+		}
+	}
+}
+
+// A repository's administrators can only be told from the instance's once the
+// instance's are known; without them the set may be inflated, and the
+// repository's count is marked unknown rather than trusted.
+func TestRepositoryAdminsAreUnknownWithoutTheInstanceAdministrators(t *testing.T) {
+	f := standardInstance(t)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Query().Get("permission") == "ADMIN":
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, `{"errors":[{"message":"try later"}]}`)
+		case r.URL.Query().Get("permission.1") == "REPO_ADMIN":
+			fmt.Fprint(w, pageOf(`{"name":"alice","active":true},{"name":"carol","active":true}`))
+		default:
+			fmt.Fprint(w, pageOf(`{"name":"scanner","active":true}`))
+		}
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	if snapshot.Organization.Available["admins"] {
+		t.Fatal("instance administrators answered 503 and must be unavailable")
+	}
+	repo := snapshot.Projects[0].Repositories[0]
+	if repo.Available["admins"] || repo.Admins.Complete {
+		t.Errorf("repository admins = %+v (available %v); with the instance administrators unknown they must be too",
+			repo.Admins, repo.Available["admins"])
+	}
+}
+
+// Bitbucket 10.4 leaves lastAuthenticationTimestamp out for an account that has
+// never authenticated — by password, token or session — and fills it in for
+// everyone who has. Once one account shows the instance records them, a
+// missing time means "never"; the creation time says whether that is a new
+// account or a dormant one.
+func TestSignInHistoryAndLicensing(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/admin/users", pageOf(`
+		{"name":"alice","active":true,"createdTimestamp":1735689600000,"lastAuthenticationTimestamp":1767139200000},
+		{"name":"eve","active":true,"createdTimestamp":1750000000000},
+		{"name":"carol","active":true,"createdTimestamp":1735689600000,"lastAuthenticationTimestamp":1767139200000}`))
+	f.users(map[string]string{
+		"*":             `{"name":"scanner","active":true}`,
+		"ADMIN":         `{"name":"alice","active":true}`,
+		"LICENSED_USER": `{"name":"alice","active":true},{"name":"eve","active":true}`,
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	users := map[string]scm.User{}
+	for _, u := range snapshot.Organization.Users {
+		users[u.Name] = u
+	}
+	if !snapshot.Organization.Available["userActivity"] || !snapshot.Organization.Available["licensedUsers"] {
+		t.Fatalf("available = %v, want activity and licensing known", snapshot.Organization.Available)
+	}
+	if eve := users["eve"]; !eve.NeverSignedIn || !eve.Licensed || eve.AgeDays != 199 || eve.InactiveDays != -1 {
+		t.Errorf("eve = %+v, want licensed, never signed in, 199 days old", eve)
+	}
+	if alice := users["alice"]; alice.NeverSignedIn || alice.InactiveDays != 1 || alice.AgeDays != 365 {
+		t.Errorf("alice = %+v, want last authenticated a day ago, a year old", alice)
+	}
+	if carol := users["carol"]; carol.Licensed {
+		t.Errorf("carol = %+v, want unlicensed", carol)
+	}
+}
+
+// An instance that reports no times at all is one that does not record them:
+// nobody is "never signed in" then, everybody is unknown.
+func TestNoActivityDataIsUnknownNotNever(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/admin/users", pageOf(`{"name":"alice","active":true,"createdTimestamp":1735689600000},{"name":"eve","active":true}`))
+
+	_, snapshot := fetchSnapshot(t, f)
+	if snapshot.Organization.Available["userActivity"] {
+		t.Error("no account carries a time, so the instance must not be taken to record them")
+	}
+	for _, u := range snapshot.Organization.Users {
+		if u.NeverSignedIn {
+			t.Errorf("%s marked never signed in on an instance that reports no times", u.Name)
+		}
+	}
+}
+
+// licensedThree is three active licensed users and one deactivated one: the
+// base-access probe counts against the active three.
+const licensedThree = `{"name":"alice","active":true},{"name":"bob","active":true},{"name":"carol","active":true},{"name":"gone","active":false}`
+
+// The base permission is the highest one every licensed user holds, found by
+// asking Bitbucket for the licensed users holding each level and checking
+// whether the list reaches the last of them — one request per level, walked
+// upward until a level is not everyone's.
+func TestBaseAccessIsWhatEveryLicensedUserHolds(t *testing.T) {
+	f := standardInstance(t)
+	f.users(map[string]string{
+		"*":                                `{"name":"scanner","active":true}`,
+		"ADMIN":                            `{"name":"alice","active":true}`,
+		"LICENSED_USER":                    licensedThree,
+		"LICENSED_USER+REPO_READ:PRJ/app":  `{"name":"alice"},{"name":"bob"},{"name":"carol"}`,
+		"LICENSED_USER+REPO_WRITE:PRJ/app": `{"name":"alice"},{"name":"bob"},{"name":"carol"}`,
+		"LICENSED_USER+REPO_ADMIN:PRJ/app": `{"name":"alice"}`,
+		"REPO_ADMIN:PRJ/app":               `{"name":"alice","active":true}`,
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	perms := snapshot.Projects[0].Repositories[0].Permissions
+	if perms.DefaultPermission != "REPO_WRITE" || !perms.DefaultPermissionKnown {
+		t.Errorf("base access = %q (known %v), want REPO_WRITE, known", perms.DefaultPermission, perms.DefaultPermissionKnown)
+	}
+}
+
+// A repository nobody has blanket access to costs one request, and records
+// that nothing is held by all.
+func TestBaseAccessStopsAtTheFirstLevelNotEveryoneHolds(t *testing.T) {
+	f := standardInstance(t)
+	f.users(map[string]string{
+		"*":                               `{"name":"scanner","active":true}`,
+		"ADMIN":                           `{"name":"alice","active":true}`,
+		"LICENSED_USER":                   licensedThree,
+		"LICENSED_USER+REPO_READ:PRJ/app": `{"name":"alice"},{"name":"bob"}`,
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	perms := snapshot.Projects[0].Repositories[0].Permissions
+	if perms.DefaultPermission != "" || !perms.DefaultPermissionKnown {
+		t.Errorf("base access = %q (known %v), want none, known", perms.DefaultPermission, perms.DefaultPermissionKnown)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	asked := 0
+	for _, path := range f.requests {
+		if path == "/rest/api/1.0/users" {
+			asked++
+		}
+	}
+	// preflight, ADMIN, LICENSED_USER, REPO_ADMIN for the repository's
+	// administrators, and one base-access probe.
+	if asked != 5 {
+		t.Errorf("made %d /users requests, want 5", asked)
+	}
+}
+
+// Without the licensed users there is nothing to compare against.
+func TestBaseAccessIsUnknownWithoutTheLicensedUsers(t *testing.T) {
+	f := standardInstance(t)
+	f.handle("/api/1.0/users", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("permission") == "LICENSED_USER" {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"errors":[{"message":"You are not permitted to access this resource"}]}`)
+			return
+		}
+		fmt.Fprint(w, pageOf(`{"name":"scanner","active":true}`))
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	if perms := snapshot.Projects[0].Repositories[0].Permissions; perms.DefaultPermissionKnown {
+		t.Errorf("base access = %q, known; with the licensed users unread it must be unknown", perms.DefaultPermission)
+	}
+}
+
+// An archived repository still has its base access judged: who can read the
+// code matters after it stops changing.
+func TestArchivedRepositoriesStillHaveTheirBaseAccessResolved(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ/repos", pageOf(`{"slug":"app","id":10,"name":"app","archived":true,"project":{"key":"PRJ"}}`))
+	f.users(map[string]string{
+		"*":                                `{"name":"scanner","active":true}`,
+		"ADMIN":                            `{"name":"alice","active":true}`,
+		"LICENSED_USER":                    licensedThree,
+		"LICENSED_USER+REPO_READ:PRJ/app":  `{"name":"alice"},{"name":"bob"},{"name":"carol"}`,
+		"LICENSED_USER+REPO_WRITE:PRJ/app": `{"name":"alice"}`,
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	perms := snapshot.Projects[0].Repositories[0].Permissions
+	if perms.DefaultPermission != "REPO_READ" || !perms.DefaultPermissionKnown {
+		t.Errorf("archived base access = %q (known %v), want REPO_READ, known", perms.DefaultPermission, perms.DefaultPermissionKnown)
+	}
+}
+
+// Bitbucket 10.4 nests an exempt key's identity: accessKeys[].key.id. Reading a
+// top-level id made every key 0, and two restrictions exempting two different
+// keys then intersected to "one key can bypass both" — a FAIL for a branch
+// nobody could get past. The top-level shape is still read when it is the only
+// one present.
+func TestExemptAccessKeysKeepTheirIdentity(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/branch-permissions/2.0/projects/PRJ/repos/app/restrictions", `{"size":2,"limit":100,"isLastPage":true,"start":0,"values":[
+		{"id": 1, "type": "pull-request-only",
+		 "matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH", "name": "Branch"}, "active": true},
+		 "scope": {"type": "REPOSITORY", "resourceId": 10}, "users": [], "groups": [],
+		 "accessKeys": [{"key": {"id": 1, "label": "deploy-one", "text": "ssh-ed25519 AAAA deploy-one"}}]},
+		{"id": 2, "type": "fast-forward-only",
+		 "matcher": {"id": "refs/heads/main", "displayId": "main", "type": {"id": "BRANCH", "name": "Branch"}, "active": true},
+		 "scope": {"type": "REPOSITORY", "resourceId": 10}, "users": [], "groups": [],
+		 "accessKeys": [{"id": 2}]}
+	]}`)
+
+	_, snapshot := fetchSnapshot(t, f)
+	restrictions := firstRepository(t, snapshot).BranchRestrictions
+	if len(restrictions) != 2 {
+		t.Fatalf("got %d restrictions, want 2", len(restrictions))
+	}
+	if got := restrictions[0].ExemptAccessKeyIDs; !slices.Equal(got, []int{1}) {
+		t.Errorf("nested key ids = %v, want [1]", got)
+	}
+	if got := restrictions[1].ExemptAccessKeyIDs; !slices.Equal(got, []int{2}) {
+		t.Errorf("top-level key ids = %v, want [2]", got)
+	}
+}
+
+// A project that will not list its repositories used to abort the whole scan,
+// with nothing written. It is now recorded by name — its repositories are not
+// in the snapshot, so nothing else could say they were missed — and the rest
+// of the scan goes on.
+func TestUnlistableProjectIsRecordedAndTheScanGoesOn(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects", `{"size":2,"limit":100,"isLastPage":true,"start":0,"values":[
+		{"key":"PRJ","id":1,"name":"Project","public":false,"type":"NORMAL"},
+		{"key":"LOCKED","id":2,"name":"Locked","public":false,"type":"NORMAL"}
+	]}`)
+	f.handle("/api/1.0/projects/LOCKED/repos", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"errors":[{"message":"boom"}]}`)
+	})
+
+	_, snapshot := fetchSnapshot(t, f)
+	if !slices.Equal(snapshot.Metadata.Unlisted, []string{"LOCKED"}) {
+		t.Errorf("unlisted = %v, want [LOCKED]", snapshot.Metadata.Unlisted)
+	}
+	if got := countRepositories(snapshot.Projects); got != 1 {
+		t.Errorf("scanned %d repositories, want PRJ/app still scanned", got)
+	}
+}
+
+// A --repository naming nothing used to scan zero repositories and exit 0: a
+// CI gate on one repository went green the day it was renamed.
+func TestMissingRepositoryTargetIsAnError(t *testing.T) {
+	f := standardInstance(t)
+	f.json("/api/1.0/projects/PRJ", `{"key":"PRJ","id":1,"name":"Project","public":false,"type":"NORMAL"}`)
+	server := f.start()
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	_, err = NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{Repositories: []string{"PRJ/app", "PRJ/renamed"}})
+	if err == nil || !strings.Contains(err.Error(), "PRJ/renamed") || !strings.Contains(err.Error(), "no such repository") {
+		t.Fatalf("err = %v, want the missing repository named", err)
+	}
+}
+
+// An instance of many one-repository projects used to be scanned one request
+// wide whatever scan.concurrency said: projects ran one after another and the
+// bound applied only inside each. Repositories of different projects now run
+// side by side under one shared bound.
+func TestRepositoriesOfDifferentProjectsAreFetchedConcurrently(t *testing.T) {
+	f := standardInstance(t)
+	var projects, users []string
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("P%d", i)
+		projects = append(projects, fmt.Sprintf(`{"key":"%s","id":%d,"name":"%s","type":"NORMAL"}`, key, i+1, key))
+		f.json("/api/1.0/projects/"+key+"/repos", pageOf(fmt.Sprintf(`{"slug":"app","id":%d,"name":"app","project":{"key":"%s"}}`, 100+i, key)))
+		users = append(users, key)
+	}
+	f.json("/api/1.0/projects", fmt.Sprintf(`{"size":8,"limit":100,"isLastPage":true,"start":0,"values":[%s]}`, strings.Join(projects, ",")))
+
+	var inFlight, peak atomic.Int64
+	slow := func(w http.ResponseWriter, _ *http.Request) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		inFlight.Add(-1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"requiredApprovers":2,"mergeConfig":{"strategies":[]}}`)
+	}
+	for _, key := range users {
+		f.handle("/api/1.0/projects/"+key+"/repos/app/settings/pull-requests", slow)
+	}
+
+	server := f.start()
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second, Concurrency: 8})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	snapshot, err := NewFetcher(client, config.Default()).Fetch(context.Background(), FetchOptions{Concurrency: 8})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if got := countRepositories(snapshot.Projects); got != 8 {
+		t.Fatalf("fetched %d repositories, want 8", got)
+	}
+	if peak.Load() < 2 {
+		t.Errorf("at most %d repository fetch ran at once across 8 projects; projects are still serialised", peak.Load())
+	}
+	for i, p := range snapshot.Projects {
+		if p.Key != fmt.Sprintf("P%d", i) {
+			t.Errorf("project %d = %s; order must follow the listing", i, p.Key)
+		}
+	}
+}
+
+// The paths are probed in priority order and one policy is the answer: a
+// repository with SECURITY.md at its root costs one browse, not six.
+func TestSecurityPolicyProbeStopsAtTheFirstPolicy(t *testing.T) {
+	f := standardInstance(t)
+	_, snapshot := fetchSnapshot(t, f)
+	repo := snapshot.Projects[0].Repositories[0]
+	if !slices.Equal(repo.Files.Probed, []string{"SECURITY.md"}) {
+		t.Errorf("probed %v, want only SECURITY.md once it was found", repo.Files.Probed)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	browses := 0
+	for _, path := range f.requests {
+		if strings.Contains(path, "/browse/") {
+			browses++
+		}
+	}
+	if browses != 1 {
+		t.Errorf("made %d browse requests, want 1", browses)
 	}
 }

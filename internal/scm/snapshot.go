@@ -7,9 +7,17 @@ package scm
 
 import "time"
 
-// SchemaVersion is bumped whenever the snapshot shape changes in a way that
-// existing policies would misread.
-const SchemaVersion = "1"
+// SchemaVersion is bumped whenever the snapshot shape changes, and a reader
+// refuses any version it was not built for.
+//
+// The weaker rule — bump only when a policy would *misread* the older shape —
+// was tempting for additive fields, since a rule that finds a new key absent
+// can report MANUAL and carry on. That is a graceful degradation, and it is
+// the wrong default for an audit tool: the report would look like a scan of
+// the instance while quietly being a scan of what an old file happened to
+// record, and the reader has no way to tell those apart. Refusing is louder,
+// costs one re-capture, and cannot be mistaken for a result.
+const SchemaVersion = "2"
 
 // Platform identifiers used in Metadata.Platform and check metadata.
 const (
@@ -35,19 +43,32 @@ type Metadata struct {
 	// admin endpoint, an API missing on an older Bitbucket version, ...).
 	// Rules turn the corresponding gaps into MANUAL rather than FAIL.
 	Warnings []string `json:"warnings,omitempty"`
+	// Unlisted names the projects whose repositories could not be listed.
+	// Their repositories are not in the snapshot at all, so no rule can
+	// report them MANUAL: the gap is only visible here, and a scan with one
+	// is incomplete — it exits 2 unless scan.allowIncomplete accepts it.
+	Unlisted []string `json:"unlisted,omitempty"`
 }
 
 // Organization is the instance-level view: who administers it and who can log in.
 type Organization struct {
 	// Admins holds principals with SYS_ADMIN or ADMIN global permission, as
-	// granted — groups appear as groups.
+	// granted — groups appear as groups. Only a password session of an
+	// instance administrator can read the grant table; it is evidence, and
+	// nothing decides a verdict from it.
 	Admins []PrincipalPermission `json:"admins,omitempty"`
-	// EffectiveAdmins is the same set with groups expanded to their members,
-	// which is what an administrator count has to be based on.
+	// EffectiveAdmins is the set of people who hold instance administrator
+	// rights, groups resolved — what an administrator count has to be based
+	// on. Bitbucket answers it itself (users?permission=ADMIN), for any token.
 	EffectiveAdmins EffectivePrincipals `json:"effectiveAdmins"`
 	// Users is the full user directory, when readable.
 	Users []User `json:"users,omitempty"`
-	// Available marks which instance-level fetches succeeded.
+	// Available marks which instance-level fetches succeeded:
+	//   admins         the effective administrator set (EffectiveAdmins)
+	//   adminGrants    the global grant table (Admins)
+	//   users          the user directory
+	//   userActivity   the platform reports last-authentication times
+	//   licensedUsers  which users are licensed (Users[].Licensed)
 	Available map[string]bool `json:"available"`
 }
 
@@ -65,9 +86,23 @@ type User struct {
 	// InactiveDays is derived from LastActivityEpoch at capture time.
 	// -1 means unknown.
 	InactiveDays int `json:"inactiveDays"`
-	// HasRepositoryAccess is true when the user holds any global, project or
-	// repository grant that gives them access to code.
-	HasRepositoryAccess bool `json:"hasRepositoryAccess"`
+	// NeverSignedIn is true only when the platform establishes that the
+	// account has never authenticated: on Bitbucket, the instance reports
+	// last-authentication times (some account carries one) and this account
+	// has none. LastActivityEpoch == 0 without it still means unknown.
+	NeverSignedIn bool `json:"neverSignedIn"`
+	// CreatedEpoch is when the account was created, in Unix seconds; 0 when
+	// unknown. It is what tells a dormant account that never signed in from
+	// one created this morning.
+	CreatedEpoch int64 `json:"createdEpoch"`
+	// AgeDays is days since CreatedEpoch at capture time; -1 when unknown.
+	AgeDays int `json:"ageDays"`
+	// Licensed is true when the account may sign in and use the instance
+	// (Bitbucket's LICENSED_USER). The dormant-account control reviews every
+	// active, licensed account: each can sign in, read everything open to all
+	// users and create personal repositories, and each is a credential an
+	// attacker can use.
+	Licensed bool `json:"licensed"`
 }
 
 // Project is a Bitbucket project (a GitHub organization is the closest analogue).
@@ -155,11 +190,26 @@ type BranchRestriction struct {
 	// model and glob semantics. Policies read this boolean instead of trying
 	// to re-implement matcher matching in Rego.
 	MatchesDefaultBranch bool `json:"matchesDefaultBranch"`
-	// Exempt principals can bypass the restriction. A restriction that exempts
-	// somebody still counts as configured, but the report surfaces the holes.
+	// MatchUnknown is true when whether the matcher covers the default branch
+	// could not be decided — a model matcher with the branch model unread.
+	// MatchesDefaultBranch is false then, and a rule must not read that as
+	// "covers another branch".
+	MatchUnknown bool `json:"matchUnknown,omitempty"`
+	// Exempt principals can bypass the restriction, as granted — groups appear
+	// as groups.
 	ExemptUsers      []string `json:"exemptUsers,omitempty"`
 	ExemptGroups     []string `json:"exemptGroups,omitempty"`
 	ExemptAccessKeys int      `json:"exemptAccessKeys,omitempty"`
+	// ExemptPrincipals is the same set with groups expanded to their members,
+	// which is what deciding whether a restriction still binds has to be based
+	// on. Complete is false when a group could not be expanded, making the set
+	// a lower bound: there may be more people behind it than are named.
+	ExemptPrincipals EffectivePrincipals `json:"exemptPrincipals"`
+	// ExemptAccessKeyIDs identifies the keys ExemptAccessKeys counts. The
+	// identities are needed, not only the total, because a rule asks whether
+	// the same key bypasses every restriction covering the branch, and two
+	// restrictions exempting one key each is not one key exempt from both.
+	ExemptAccessKeyIDs []int `json:"exemptAccessKeyIds,omitempty"`
 }
 
 // RequiredBuild is one required-builds merge condition.
@@ -171,6 +221,9 @@ type RequiredBuild struct {
 	MatcherText          string   `json:"matcherText,omitempty"`
 	ExemptMatcherID      string   `json:"exemptMatcherId,omitempty"`
 	MatchesDefaultBranch bool     `json:"matchesDefaultBranch"`
+	// MatchUnknown: as on BranchRestriction, including an exemption whose
+	// coverage of the default branch could not be decided.
+	MatchUnknown bool `json:"matchUnknown,omitempty"`
 }
 
 // Hook is a repository hook (pre- or post-receive), enabled or not.

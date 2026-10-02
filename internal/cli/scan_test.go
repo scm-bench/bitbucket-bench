@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,9 +65,9 @@ func writeSnapshotWith(t *testing.T, mutate func(*scm.Snapshot)) string {
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Users: []string{"alice", "bob"}, Count: 2, Complete: true},
 			Users: []scm.User{
-				{Name: "alice", Active: true, HasRepositoryAccess: true, InactiveDays: 1},
+				{Name: "alice", Active: true, Licensed: true, InactiveDays: 1},
 			},
-			Available: map[string]bool{"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true},
+			Available: map[string]bool{"admins": true, "users": true, "userActivity": true, "licensedUsers": true},
 		},
 		Projects: []scm.Project{{
 			Key:  "PRJ",
@@ -324,6 +327,23 @@ func TestScanRejectsSnapshotWithWrongSchemaVersion(t *testing.T) {
 	}
 }
 
+// The refusal is the only thing the reader gets — refusing rather than
+// degrading means there is no partial report to fall back on — so it has to
+// say what to do about it. --last lands here on the first run after an upgrade
+// without having picked the file, and a bare version mismatch strands that
+// person with a path they did not choose.
+func TestSchemaVersionRefusalSaysHowToRecover(t *testing.T) {
+	_, err := parseSnapshot([]byte(`{"schemaVersion":"0","metadata":{"platform":"bitbucket-dc"}}`), "the snapshot")
+	if err == nil {
+		t.Fatal("an incompatible schema version was accepted")
+	}
+	for _, want := range []string{"schema version", "Capture it again with this build"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, err)
+		}
+	}
+}
+
 func TestTableOutputIsHumanReadable(t *testing.T) {
 	fixture := writeSnapshotFixture(t)
 	stdout, _, _ := run(t, "scan", "--snapshot-in", fixture, "-c", configWithFailOn(t, "none"))
@@ -544,9 +564,9 @@ func TestStderrWriterHonoursNoColor(t *testing.T) {
 // MANUAL is excluded from both sides of the score, which is right control by
 // control — an instance should not be marked down for a question its API
 // cannot answer — and perverse in aggregate, because it shrinks the
-// denominator. The fixture below makes the point: with nothing readable, three
-// controls stay decidable, all three pass, and a scan that saw almost nothing
-// reports a perfect 100 and exits 0.
+// denominator. The fixture below makes the point: with nothing readable, one
+// control stays decidable (default access, from the public flag), it passes,
+// and a scan that saw almost nothing reports a perfect 100 and exits 0.
 //
 // Note which threshold catches it. --fail-under cannot: the score is 100.
 // Only --max-manual asks the question that matters here, which is not "is the
@@ -584,7 +604,7 @@ func TestScanThresholds(t *testing.T) {
 		{"blind scan passes by default", []string{"scan", "--snapshot-in", blind}, ExitOK},
 		{"failUnder cannot catch a blind scan", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "failUnder: 100")}, ExitOK},
 		{"maxManual catches it", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 50")}, ExitFindings},
-		{"maxManual generous enough", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 90")}, ExitOK},
+		{"maxManual generous enough", []string{"scan", "--snapshot-in", blind, "-c", configWithScan(t, "maxManual: 95")}, ExitOK},
 
 		{"failUnder out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "failUnder: 101")}, ExitError},
 		{"maxManual out of range", []string{"scan", "--snapshot-in", normal, "-c", configWithScan(t, "maxManual: -2")}, ExitError},
@@ -1014,5 +1034,194 @@ func TestScanDemoAndReplayLeaveNoCache(t *testing.T) {
 
 	if path, err := config.LatestSnapshotCache(); err != nil || path != "" {
 		t.Errorf("cache after demo and replay: path = %q, err = %v; want none", path, err)
+	}
+}
+
+// A scan that evaluated no repository audited nothing the repository controls
+// cover, and a scan that could not list a project's repositories is missing
+// them without a trace in any finding. Both used to exit 0. The report is
+// still written; the exit code is what a pipeline reads.
+func TestScansThatCannotVouchForTheirCoverageExitTwo(t *testing.T) {
+	empty := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Projects = nil })
+	partial := writeSnapshotWith(t, func(s *scm.Snapshot) { s.Metadata.Unlisted = []string{"LOCKED"} })
+	onlyArchived := writeSnapshotWith(t, func(s *scm.Snapshot) {
+		for i := range s.Projects {
+			for j := range s.Projects[i].Repositories {
+				s.Projects[i].Repositories[j].Archived = true
+			}
+		}
+	})
+	skipArchived := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
+	if err := os.WriteFile(skipArchived, []byte("skipArchivedRepositories: true\nscan:\n  failOn: none\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+		msg  string
+	}{
+		{"no repository", []string{"scan", "--snapshot-in", empty, "-c", configWithFailOn(t, "none")}, ExitError, "evaluated no repository"},
+		// Every repository the snapshot holds is skipped by configuration.
+		{"only skipped repositories", []string{"scan", "--snapshot-in", onlyArchived, "-c", skipArchived}, ExitError, "evaluated no repository"},
+		{"unlisted project", []string{"scan", "--snapshot-in", partial, "-c", configWithFailOn(t, "none")}, ExitError, "LOCKED"},
+		{"unlisted project accepted", []string{"scan", "--snapshot-in", partial, "-c", configWithScan(t, "failOn: none", "allowIncomplete: true")}, ExitOK, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			root := NewRootCommand()
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetIn(strings.NewReader(""))
+			root.SetArgs(tc.args)
+			err := root.Execute()
+			if code := ExitCode(err); code != tc.want {
+				t.Errorf("exit code = %d, want %d (err %v)", code, tc.want, err)
+			}
+			if tc.msg != "" && (err == nil || !strings.Contains(err.Error(), tc.msg)) {
+				t.Errorf("error %v does not mention %q", err, tc.msg)
+			}
+			if strings.TrimSpace(stdout.String()) == "" {
+				t.Error("the report must still be written")
+			}
+		})
+	}
+}
+
+// A report or snapshot written over an existing world-readable file used to
+// keep the old mode: O_TRUNC and os.WriteFile apply 0600 only when they create
+// the file. On a shared CI agent that left a map of the instance's weak points
+// readable by everyone.
+func TestOutputsOverwriteExistingFilesAsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	dir := t.TempDir()
+	report := filepath.Join(dir, "report.json")
+	snapshot := filepath.Join(dir, "snapshot.json")
+	for _, path := range []string{report, snapshot} {
+		if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	src := writeSnapshotFixture(t)
+	run(t, "scan", "--snapshot-in", src, "-o", "json", "--output-file", report, "-c", configWithFailOn(t, "none"))
+	if err := writeSnapshot(snapshot, mustReadSnapshot(t, src)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{report, snapshot} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Errorf("%s mode = %o, want 600", filepath.Base(path), mode)
+		}
+		raw, _ := os.ReadFile(path)
+		if string(raw) == "old" {
+			t.Errorf("%s was not rewritten", filepath.Base(path))
+		}
+	}
+	// The temporary file is renamed over the target, never left beside it.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Errorf("directory holds %d entries, want only the two outputs", len(entries))
+	}
+}
+
+func mustReadSnapshot(t *testing.T, path string) *scm.Snapshot {
+	t.Helper()
+	s, err := readSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// configWithExceptions writes a config with failOn high and the given
+// exceptions block.
+func configWithExceptions(t *testing.T, exceptions string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
+	if err := os.WriteFile(path, []byte("scan:\n  failOn: high\n  cache: false\nexceptions:\n"+exceptions), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The fixture's repository fails every HIGH control. Accepting all of them
+// clears the gate; the findings are still in the report, under their own
+// heading, and still in the score.
+func TestExceptionsClearTheGateButNotTheReport(t *testing.T) {
+	snapshot := writeSnapshotFixture(t)
+	// One exception per HIGH control, since control is an exact ID.
+	var accept strings.Builder
+	for _, id := range []string{"CIS-1.1.3", "CIS-1.1.9", "CIS-1.1.15", "CIS-1.1.16"} {
+		fmt.Fprintf(&accept, "  - control: %s\n    resources: [PRJ/*]\n    reason: migration in progress\n    owner: platform\n    expires: 2999-12-31\n", id)
+	}
+
+	stdout, stderr, code := run(t, "scan", "--snapshot-in", snapshot, "-c", configWithExceptions(t, accept.String()))
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want %d with every HIGH failure accepted\n%s", code, ExitOK, stderr)
+	}
+	flat := strings.Join(strings.Fields(stdout), " ") // the report wraps to its width
+	for _, want := range []string{"Accepted by exceptions", "accepted until 2999-12-31: migration in progress (platform)", "accepted by exceptions, counted here and in the score"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("report does not say %q\n%s", want, stdout)
+		}
+	}
+
+	// The same exceptions, lapsed: the run fails again and says why.
+	lapsed := strings.ReplaceAll(accept.String(), "2999-12-31", "2001-01-01")
+	_, stderr, code = run(t, "scan", "--snapshot-in", snapshot, "-c", configWithExceptions(t, lapsed))
+	if code != ExitFindings {
+		t.Errorf("exit code = %d, want %d once the exceptions lapse", code, ExitFindings)
+	}
+	if !strings.Contains(stderr, "lapsed on 2001-01-01") {
+		t.Errorf("stderr does not report the lapse:\n%s", stderr)
+	}
+}
+
+// A typo in the control selection refuses to start before the instance is
+// contacted. It used to be reported only once the whole instance had been
+// fetched: on a large one, every request of a scan that was never going to
+// produce a report.
+func TestScanChecksTheSelectionBeforeContactingTheInstance(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	for name, config := range map[string]string{
+		"include":   "include: [CIS-9.9.9]\n",
+		"exception": "exceptions:\n  - control: CIS-1.1.31\n    resources: [\"*/*\"]\n    reason: typo\n    expires: 2099-01-01\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bitbucket-bench.yaml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			root := NewRootCommand()
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetIn(strings.NewReader(""))
+			root.SetArgs([]string{"scan", "-c", path, "--url", server.URL, "--token", "t"})
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), "list-checks") {
+				t.Fatalf("err = %v, want the selection refused", err)
+			}
+			if n := requests.Load(); n != 0 {
+				t.Errorf("%d request(s) reached the instance before the selection was checked", n)
+			}
+		})
 	}
 }

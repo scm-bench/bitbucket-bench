@@ -9,11 +9,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+// The hooks Bitbucket Data Center bundles, as their full module keys.
+const (
+	// BundledSignatureHook is "Verify Commit Signature" (Bitbucket 8.13+).
+	BundledSignatureHook = "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook"
+	// BundledForcePushHook is "Reject Force Push".
+	BundledForcePushHook = "com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook"
 )
 
 // Config is the full evaluation configuration.
@@ -27,10 +36,20 @@ type Config struct {
 	Scan Scan `yaml:"scan" json:"-"`
 	// Thresholds are the numeric knobs used by the policies.
 	Thresholds Thresholds `yaml:"thresholds" json:"thresholds"`
-	// SignatureHookKeys are lowercase substrings that identify a commit
-	// signature verification hook. Bitbucket has no built-in one, so which
-	// add-on counts is deployment-specific.
+	// SignatureHookKeys are the full keys (plugin-key:module-key) of hooks
+	// that verify commit signatures. Bitbucket 8.13+ bundles one; an older
+	// instance needs a Marketplace add-on, whose key goes here.
+	//
+	// Exact keys rather than substrings. The default used to be the
+	// substrings "signature", "verify-commit", "gpg" and so on, and Bitbucket
+	// bundles a hook named verify-committer-hook — "Verify Committer", which
+	// checks who pushed and verifies no signature at all. Enabling it passed
+	// CIS-1.1.12 on a real Bitbucket 10.4.
 	SignatureHookKeys []string `yaml:"signatureHookKeys" json:"signatureHookKeys"`
+	// ForcePushHookKeys are the full keys of hooks that reject every force
+	// push on every branch: Bitbucket's bundled "Reject Force Push", or an
+	// add-on doing the same. One enabled satisfies CIS-1.1.16 by itself.
+	ForcePushHookKeys []string `yaml:"forcePushHookKeys" json:"forcePushHookKeys"`
 	// NonLinearMergeStrategies are merge strategy IDs that can introduce a
 	// merge commit and therefore break linear history.
 	NonLinearMergeStrategies []string `yaml:"nonLinearMergeStrategies" json:"nonLinearMergeStrategies"`
@@ -43,14 +62,27 @@ type Config struct {
 	// AllowPublicRepositories relaxes the public-access rule, for instances
 	// that intentionally publish code.
 	AllowPublicRepositories bool `yaml:"allowPublicRepositories" json:"allowPublicRepositories"`
-	// SkipArchivedRepositories drops archived repositories from the scan.
+	// SkipArchivedRepositories drops archived repositories from the scan
+	// entirely. Off by default: an archived repository is reported, with every
+	// control about changes NA and its read access still judged, so the report
+	// accounts for every repository the token can see.
 	SkipArchivedRepositories bool `yaml:"skipArchivedRepositories" json:"skipArchivedRepositories"`
 	// PermissionRank lets Rego compare Bitbucket permission levels ordinally.
 	PermissionRank map[string]int `yaml:"permissionRank" json:"permissionRank"`
+	// AllowedBypassPrincipals names accounts that may hold a branch
+	// restriction exemption without counting against maxBypassPrincipals: the
+	// build and release service accounts that genuinely have to push past it.
+	// Without this list the threshold has to be set high enough to cover the
+	// service accounts, which is high enough to hide the people.
+	AllowedBypassPrincipals []string `yaml:"allowedBypassPrincipals" json:"allowedBypassPrincipals"`
 	// Exclude lists check IDs (e.g. "CIS-1.1.8") to leave out of the run.
 	Exclude []string `yaml:"exclude" json:"exclude"`
 	// Include, when non-empty, restricts the run to these check IDs.
 	Include []string `yaml:"include" json:"include"`
+	// Exceptions accept findings an organisation has decided to live with,
+	// for a stated reason and until a stated date. They are applied after
+	// evaluation, so no rule sees them (json:"-").
+	Exceptions []Exception `yaml:"exceptions" json:"-"`
 }
 
 // Scan is the deployment-stable half of a scan's configuration.
@@ -71,7 +103,11 @@ type Scan struct {
 	Timeout Duration `yaml:"timeout"`
 	// MaxDuration abandons the scan after this long; 0 means no limit.
 	MaxDuration Duration `yaml:"maxDuration"`
-	// Insecure skips TLS certificate verification, for private CAs.
+	// CAFile is a PEM bundle of certificate authorities to trust in addition
+	// to the system's, for an instance whose certificate comes from an
+	// internal CA. It is what such an instance needs instead of Insecure.
+	CAFile string `yaml:"caFile"`
+	// Insecure skips TLS certificate verification entirely. Prefer CAFile.
 	Insecure bool `yaml:"insecure"`
 	// AllowPlaintext permits an http:// URL, sending credentials in the
 	// clear.
@@ -84,6 +120,43 @@ type Scan struct {
 	// snapshot is a map of the instance's weak points, which is why this is
 	// a config key at all: false keeps it off disk.
 	Cache bool `yaml:"cache"`
+	// AllowIncomplete accepts a scan that could not list the repositories of
+	// every project. Off by default: those repositories are not in the report
+	// at all, so nothing in it would say they were missed, and a CI gate
+	// would pass on what it never looked at.
+	AllowIncomplete bool `yaml:"allowIncomplete"`
+}
+
+// Exception accepts the findings of one control on matching resources.
+//
+// An accepted finding is still reported, still FAIL, and still counts in the
+// score — the score describes the instance, and the instance has not changed.
+// What it stops doing is failing the run on scan.failOn (or, for a MANUAL
+// finding, counting against scan.maxManual). It lapses on its expiry date and
+// the finding fails the run again; there is no exception without one.
+type Exception struct {
+	// Control is the control ID, e.g. CIS-1.1.13.
+	Control string `yaml:"control"`
+	// Resources are glob patterns over resource names: PROJECT/slug for a
+	// repository, "instance" for an instance-level control. * does not cross
+	// a "/", so PLAT/* is every repository in PLAT.
+	Resources []string `yaml:"resources"`
+	// Reason is why the finding is accepted; it is printed beside it.
+	Reason string `yaml:"reason"`
+	// Owner is who answers for it.
+	Owner string `yaml:"owner"`
+	// Expires is the last day the exception applies, YYYY-MM-DD.
+	Expires string `yaml:"expires"`
+}
+
+// ExpiresAt is the moment the exception stops applying: the end of its
+// expiry day, UTC.
+func (e Exception) ExpiresAt() time.Time {
+	day, err := time.Parse("2006-01-02", e.Expires)
+	if err != nil {
+		return time.Time{}
+	}
+	return day.Add(24 * time.Hour)
 }
 
 // Duration is time.Duration that reads YAML the way people write durations:
@@ -127,6 +200,13 @@ type Thresholds struct {
 	// InactiveUserDays is how long a user may go without authenticating before
 	// their access should be reviewed.
 	InactiveUserDays int `yaml:"inactiveUserDays" json:"inactiveUserDays"`
+	// MaxBypassPrincipals is how many principals may hold an exemption from
+	// every branch restriction protecting the default branch — that is, how
+	// many people the protection does not actually bind. -1 disables the
+	// check, restoring the behaviour of releases before this field existed,
+	// where a restriction counted as protection however many principals could
+	// push straight past it.
+	MaxBypassPrincipals int `yaml:"maxBypassPrincipals" json:"maxBypassPrincipals"`
 }
 
 // Default returns the configuration used when the user supplies none. The
@@ -152,18 +232,22 @@ func Default() Config {
 			StaleBranchDays:     90,
 			MaxStaleBranches:    0,
 			InactiveUserDays:    90,
+			MaxBypassPrincipals: 0,
 		},
 		SignatureHookKeys: []string{
-			"signature",
-			"signed-commit",
-			"gpg",
-			"verify-commit",
-			"commit-signing",
+			BundledSignatureHook,
 		},
-		// "ff" is deliberately absent: it falls back to a merge commit only
-		// when the target has moved, which is the normal cost of an otherwise
-		// linear workflow. "no-ff" and "rebase-no-ff" always create one.
-		NonLinearMergeStrategies: []string{"no-ff", "rebase-no-ff"},
+		ForcePushHookKeys: []string{
+			BundledForcePushHook,
+		},
+		// "no-ff" and "rebase-no-ff" always create a merge commit; "ff"
+		// creates one whenever the target has moved, which on a repository
+		// with two pull requests in flight is most merges. It used to be left
+		// out as "the normal cost of an otherwise linear workflow", but the
+		// control asks for linear history to be required, and a strategy
+		// that produces merge commits as a matter of course does not require
+		// it. Squash, squash-ff-only, ff-only and rebase-ff-only never do.
+		NonLinearMergeStrategies: []string{"no-ff", "ff", "rebase-no-ff"},
 		SecurityPolicyPaths: []string{
 			"SECURITY.md",
 			".github/SECURITY.md",
@@ -174,7 +258,7 @@ func Default() Config {
 		},
 		MaxDefaultPermission:     "REPO_READ",
 		AllowPublicRepositories:  false,
-		SkipArchivedRepositories: true,
+		SkipArchivedRepositories: false,
 		PermissionRank: map[string]int{
 			"":               0,
 			"LICENSED_USER":  1,
@@ -308,6 +392,12 @@ func (c Config) Validate() error {
 	if s.Timeout.Get() < 0 || s.MaxDuration.Get() < 0 {
 		return fmt.Errorf("scan.timeout and scan.maxDuration must not be negative")
 	}
+	// A CA bundle is how an internal CA is trusted without giving up
+	// verification; with insecure on, the bundle would be quietly ignored and
+	// the reader of this file would believe the certificate was checked.
+	if s.CAFile != "" && s.Insecure {
+		return fmt.Errorf("scan.caFile and scan.insecure are mutually exclusive: the CA bundle verifies the instance's certificate, insecure skips verification; drop insecure")
+	}
 
 	// Every threshold is checked, not just the ones that looked risky.
 	//
@@ -336,6 +426,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("thresholds.%s must be >= 0, got %d", f.name, f.value)
 		}
 	}
+	// maxBypassPrincipals is checked apart from the loop above because -1 is
+	// meaningful here — it turns the bypass check off — while every other
+	// negative value inverts a control the same way the loop describes.
+	if t.MaxBypassPrincipals < -1 {
+		return fmt.Errorf("thresholds.maxBypassPrincipals must be >= 0, or -1 to disable, got %d", t.MaxBypassPrincipals)
+	}
 	if t.MinOrgAdmins > 0 && t.MaxOrgAdmins > 0 && t.MinOrgAdmins > t.MaxOrgAdmins {
 		return fmt.Errorf("thresholds.minOrgAdmins (%d) must not exceed maxOrgAdmins (%d)", t.MinOrgAdmins, t.MaxOrgAdmins)
 	}
@@ -345,28 +441,47 @@ func (c Config) Validate() error {
 		}
 	}
 
-	// A blank entry in any of these lists is matched by everything.
-	//
-	// signatureHookKeys is the one that bites: the rule asks whether a hook's
-	// key or name contains any configured substring, and every string contains
-	// "". One stray `- ""` in a YAML file turns CIS-1.1.12 into a control that
-	// reports "signature verification is enforced by <whatever hook exists>" —
-	// a confident PASS for a setting nobody verified, which is the single
-	// failure mode this project is built to avoid. The others are less
-	// dramatic but wrong in the same way, so they are checked together.
+	// A blank entry in any of these lists is matched by everything, or by
+	// nothing anyone meant: either way a verdict follows from a typo.
 	for _, list := range []struct {
 		field string
 		items []string
 	}{
 		{"signatureHookKeys", c.SignatureHookKeys},
+		{"forcePushHookKeys", c.ForcePushHookKeys},
 		{"nonLinearMergeStrategies", c.NonLinearMergeStrategies},
 		{"securityPolicyPaths", c.SecurityPolicyPaths},
+		{"allowedBypassPrincipals", c.AllowedBypassPrincipals},
 		{"exclude", c.Exclude},
 		{"include", c.Include},
 	} {
 		for i, item := range list.items {
 			if strings.TrimSpace(item) == "" {
 				return fmt.Errorf("%s[%d] is empty; remove the entry rather than leaving it blank", list.field, i)
+			}
+		}
+	}
+	for i, ex := range c.Exceptions {
+		if err := ex.validate(); err != nil {
+			return fmt.Errorf("exceptions[%d]: %w", i, err)
+		}
+	}
+
+	// Hook lists hold full module keys. A config written for the old
+	// substring matching ("gpg", "signature") would now match nothing and
+	// quietly fail every repository; saying so at startup is cheaper than a
+	// report full of FAILs nobody can explain.
+	for _, list := range []struct {
+		field string
+		items []string
+	}{
+		{"signatureHookKeys", c.SignatureHookKeys},
+		{"forcePushHookKeys", c.ForcePushHookKeys},
+	} {
+		for i, item := range list.items {
+			if !strings.Contains(item, ":") {
+				return fmt.Errorf("%s[%d] %q is not a hook key; give the full plugin-key:module-key, e.g. %s "+
+					"(the key of every hook is in a captured snapshot's repositories[].hooks[].key)", list.field, i, item, BundledSignatureHook)
 			}
 		}
 	}
@@ -389,4 +504,34 @@ func (c Config) Selects(id string) bool {
 		}
 	}
 	return false
+}
+
+// validate checks an exception has everything it needs to be one. An
+// exception without a reason or an end date is how accepted risk turns into
+// forgotten risk, so neither is optional.
+func (e Exception) validate() error {
+	if strings.TrimSpace(e.Control) == "" {
+		return fmt.Errorf("control is required, e.g. control: CIS-1.1.13")
+	}
+	if len(e.Resources) == 0 {
+		return fmt.Errorf("%s: resources is required: the repositories (PROJECT/slug, globs allowed) or \"instance\" it applies to", e.Control)
+	}
+	for _, pattern := range e.Resources {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("%s: an empty resource pattern; remove it", e.Control)
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("%s: resource pattern %q: %w", e.Control, pattern, err)
+		}
+	}
+	if strings.TrimSpace(e.Reason) == "" {
+		return fmt.Errorf("%s: reason is required: it is printed beside every finding the exception accepts", e.Control)
+	}
+	if strings.TrimSpace(e.Expires) == "" {
+		return fmt.Errorf("%s: expires is required (YYYY-MM-DD): an exception without an end date is a finding nobody will look at again", e.Control)
+	}
+	if e.ExpiresAt().IsZero() {
+		return fmt.Errorf("%s: expires %q is not a date; use YYYY-MM-DD", e.Control, e.Expires)
+	}
+	return nil
 }

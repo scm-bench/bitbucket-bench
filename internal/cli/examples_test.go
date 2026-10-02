@@ -90,7 +90,7 @@ func TestBundledConfigDocumentsEverySupportedField(t *testing.T) {
 	for _, field := range []string{
 		"minApprovers", "minRepositoryAdmins", "minOrgAdmins", "maxOrgAdmins",
 		"staleBranchDays", "maxStaleBranches", "inactiveUserDays",
-		"signatureHookKeys", "nonLinearMergeStrategies", "securityPolicyPaths",
+		"signatureHookKeys", "forcePushHookKeys", "nonLinearMergeStrategies", "securityPolicyPaths",
 		"maxDefaultPermission", "allowPublicRepositories", "skipArchivedRepositories",
 		"permissionRank", "exclude", "include",
 	} {

@@ -2,9 +2,11 @@ package bitbucketdc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,20 +41,35 @@ type Fetcher struct {
 	// starts, and only read afterwards.
 	credentialsVerified bool
 
-	// orgAdmins is the instance-level administrator set, with groups already
-	// expanded. Instance administrators can administer every repository on the
-	// instance, so they belong in each repository's administrator set — a
-	// repository whose only administrators hold SYS_ADMIN is not a repository
-	// with no administrators.
+	// orgAdmins is the set of people holding instance administrator rights,
+	// and orgAdminsKnown whether that set was read. A repository's own
+	// administrators are counted without them: an instance administrator can
+	// administer every repository, so counting them made CIS-1.3.7 pass on
+	// every repository of any instance that satisfies CIS-1.3.3.
 	//
 	// Written once in Fetch after fetchOrganization returns and before any
 	// repository goroutine starts, and only read afterwards, which is the same
 	// arrangement credentialsVerified relies on.
-	orgAdmins scm.EffectivePrincipals
+	orgAdmins      map[string]bool
+	orgAdminsKnown bool
+
+	// licensedActive is how many active accounts hold LICENSED_USER, and
+	// licensedKnown whether that list was read. Every other account is
+	// refused at sign-in ("You do not have permission to access Bitbucket",
+	// measured on 10.4) whatever grants it holds, so this is the population a
+	// blanket grant reaches. Written before the repository goroutines start.
+	licensedActive int
+	licensedKnown  bool
 
 	warnMu   sync.Mutex
 	warnings []string
 	warnSeen map[string]bool
+	// unlisted collects the projects whose repository list could not be read,
+	// under warnMu.
+	unlisted []string
+
+	// repoSlots bounds repository fetches across every project at once.
+	repoSlots chan struct{}
 
 	// progress reports how far along the scan is. It is called from the
 	// repository goroutines, so it must be safe for concurrent use; nil means
@@ -150,9 +167,6 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 		return nil, err
 	}
 	snapshot.Organization = org
-	// Captured before the repository goroutines start, so resolveAdmins can
-	// read it without synchronisation.
-	f.orgAdmins = org.EffectiveAdmins
 
 	projects, err := f.fetchProjects(ctx, opts)
 	if err != nil {
@@ -170,17 +184,16 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 			"check --project/--repository, and whether the token can see the repositories you expected")
 	}
 
-	// Repository access can only be decided once every grant has been seen.
-	f.markRepositoryAccess(ctx, snapshot)
-
 	f.warnMu.Lock()
 	snapshot.Metadata.Warnings = append([]string(nil), f.warnings...)
+	snapshot.Metadata.Unlisted = append([]string(nil), f.unlisted...)
 	f.warnMu.Unlock()
+	sort.Strings(snapshot.Metadata.Unlisted)
 	return snapshot, nil
 }
 
-// verifyCredentials fails the scan before any work is done when the instance
-// rejects the credential outright.
+// verifyCredentials fails the scan before any work is done unless the instance
+// accepted the credential as some user.
 //
 // Without this, a mistyped token produces a complete-looking report: every
 // control reports MANUAL because nothing could be read, the score is 0, and the
@@ -188,22 +201,57 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 // output for an audit tool — it is indistinguishable from a real result unless
 // the reader notices that *everything* is MANUAL.
 //
-// Only a 401 is fatal here. Anything else means the credential was accepted and
-// this particular endpoint was not reachable, which is the ordinary case the
-// rest of the scan is built to degrade through.
+// The question is asked of /users because it answers only an authenticated
+// caller. This used to ask /application-properties, which answers anonymous
+// callers too — and Bitbucket does not reject a bearer token it does not
+// recognise, it serves the request as anonymous. Against Bitbucket 10.4 a
+// revoked or mistyped token passed the preflight with a 200, every admin
+// endpoint's 401 was then filed as "this token lacks admin rights", and on an
+// instance with public projects the scan went on to audit exactly what an
+// anonymous visitor can see, presented as an audit of the instance.
+//
+// Anything but a 2xx is fatal here, for the same reason: nothing has been
+// fetched yet, so failing costs nothing, while carrying on lets every later
+// request fail in a way that reads like a finding.
 func (f *Fetcher) verifyCredentials(ctx context.Context) error {
 	f.logf("verifying credentials")
-	err := f.client.get(ctx, "/api/1.0/application-properties", nil, nil)
-	if IsUnauthorized(err) {
-		return fmt.Errorf("the instance rejected the credentials: %w\n"+
-			"check --token (BITBUCKET_TOKEN), or --username/--password (BITBUCKET_USERNAME/BITBUCKET_PASSWORD)", err)
+	err := f.client.get(ctx, "/api/1.0/users", url.Values{"limit": []string{"1"}}, nil)
+	switch {
+	case err == nil:
+		f.credentialsVerified = true
+		return nil
+	case basicAuthDisabled(err):
+		// The default on Bitbucket 10 for a fresh install, and something
+		// administrators switch on elsewhere. The instance's own message says
+		// what happened but not what to do instead.
+		return fmt.Errorf("this instance does not accept passwords over its REST API (%w)\n"+
+			"create an HTTP access token (Profile -> Manage account -> HTTP access tokens) and pass it with --token (BITBUCKET_TOKEN)", err)
+	case IsUnauthorized(err), IsForbidden(err):
+		return fmt.Errorf("the instance did not accept the credentials: %w\n"+
+			"check --token (BITBUCKET_TOKEN), or --username/--password (BITBUCKET_USERNAME/BITBUCKET_PASSWORD); "+
+			"a token that has expired, been revoked or belongs to another instance is answered this way", err)
+	case IsNotFound(err):
+		return fmt.Errorf("no Bitbucket REST API answered at %s/rest (%w)\n"+
+			"check --url, including the context path if Bitbucket is served under one (https://host/bitbucket)", f.client.BaseURL(), err)
+	default:
+		return fmt.Errorf("could not verify the credentials: %w", err)
 	}
-	// Verified only by an HTTP answer. A transport error or a 5xx proves
-	// nothing about the credential, and marking it verified anyway would send
-	// a genuinely rejected token down the "authorized but forbidden" path
-	// later, past the curated message above.
-	f.credentialsVerified = err == nil || IsUnavailable(err)
-	return nil
+}
+
+// basicAuthDisabled recognises the instance refusing a password outright. It
+// arrives as a 403 with nothing but this sentence to tell it apart from any
+// other refusal.
+func basicAuthDisabled(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	for _, m := range apiErr.Messages {
+		if strings.Contains(strings.ToLower(m), "basic authentication has been disabled") {
+			return true
+		}
+	}
+	return false
 }
 
 // unreadable reports whether err means "this credential could not read that",
@@ -224,60 +272,72 @@ func (f *Fetcher) unreadable(err error) bool {
 	return IsUnavailable(err) || (f.credentialsVerified && IsUnauthorized(err))
 }
 
-// fetchOrganization reads instance-level administrators and the user directory.
-// Both need admin rights; a read-only token without them yields an empty but
-// clearly-marked-unavailable organization rather than an error.
+// fetchOrganization reads who administers the instance, who may use it, and
+// when each account last authenticated.
+//
+// The questions are put to Bitbucket's own permission resolution —
+// /users?permission=… — rather than answered from grant tables. The tables
+// need a global permission to read, and an HTTP access token cannot carry one
+// whoever holds it ("Tokens may not have the following permission: ADMIN", on
+// Bitbucket 10.4), while password authentication is off by default there. So
+// for the credential the README recommends, every instance-level control
+// reported MANUAL. /users?permission=ADMIN answers any authenticated caller,
+// already includes SYS_ADMIN, and expands groups itself.
 func (f *Fetcher) fetchOrganization(ctx context.Context) (scm.Organization, error) {
 	org := scm.Organization{Available: map[string]bool{}}
 
-	f.logf("fetching global permissions")
-	userPerms, err := getPaged[apiUserPermission](ctx, f.client, "/api/1.0/admin/permissions/users", nil)
+	f.logf("resolving instance administrators")
+	admins, err := getPaged[apiUser](ctx, f.client, "/api/1.0/users", url.Values{"permission": []string{"ADMIN"}})
 	switch {
 	case err == nil:
-		org.Available["adminUsers"] = true
-		for _, up := range userPerms {
-			if !isGlobalAdminPermission(up.Permission) {
-				continue
+		org.Available["admins"] = true
+		org.EffectiveAdmins = scm.EffectivePrincipals{Complete: true}
+		for _, u := range admins {
+			// An inactive account cannot sign in, so it administers nothing.
+			if u.Active {
+				org.EffectiveAdmins.Users = append(org.EffectiveAdmins.Users, u.Name)
 			}
-			org.Admins = append(org.Admins, scm.PrincipalPermission{
-				Name:        up.User.Name,
-				DisplayName: up.User.DisplayName,
-				Type:        "user",
-				Permission:  up.Permission,
-				Active:      up.User.Active,
-			})
 		}
+		sort.Strings(org.EffectiveAdmins.Users)
+		org.EffectiveAdmins.Count = len(org.EffectiveAdmins.Users)
 	case f.unreadable(err):
-		org.Available["adminUsers"] = false
-		f.warn("global user permissions are not readable (%v); instance administrator rules will report MANUAL", err)
+		org.Available["admins"] = false
+		f.warn("instance administrators could not be resolved (%v); CIS-1.3.3 will report MANUAL, and repository administrator counts cannot exclude them", err)
 	default:
-		return org, fmt.Errorf("fetch global user permissions: %w", err)
+		org.Available["admins"] = false
+		f.warn("instance administrators could not be resolved: %v", err)
+	}
+	f.orgAdmins = map[string]bool{}
+	for _, name := range org.EffectiveAdmins.Users {
+		f.orgAdmins[name] = true
+	}
+	f.orgAdminsKnown = org.Available["admins"]
+
+	// The grant table as written, groups as groups. Only a password session
+	// of an instance administrator can read it, so it is evidence when
+	// available and nothing depends on it. Not finding it is not worth a
+	// warning: no token can.
+	if grants, ok := f.fetchGlobalAdminGrants(ctx); ok {
+		org.Admins = grants
+		org.Available["adminGrants"] = true
 	}
 
-	groupPerms, err := getPaged[apiGroupPermission](ctx, f.client, "/api/1.0/admin/permissions/groups", nil)
-	switch {
-	case err == nil:
-		org.Available["adminGroups"] = true
-		for _, gp := range groupPerms {
-			if !isGlobalAdminPermission(gp.Permission) {
-				continue
+	f.logf("fetching licensed users")
+	licensed := map[string]bool{}
+	licensedUsers, err := getPaged[apiUser](ctx, f.client, "/api/1.0/users", url.Values{"permission": []string{"LICENSED_USER"}})
+	if err == nil {
+		org.Available["licensedUsers"] = true
+		for _, u := range licensedUsers {
+			licensed[u.Name] = true
+			if u.Active {
+				f.licensedActive++
 			}
-			org.Admins = append(org.Admins, scm.PrincipalPermission{
-				Name:       gp.Group.Name,
-				Type:       "group",
-				Permission: gp.Permission,
-			})
 		}
-	case f.unreadable(err):
-		org.Available["adminGroups"] = false
-		f.warn("global group permissions are not readable (%v)", err)
-	default:
-		return org, fmt.Errorf("fetch global group permissions: %w", err)
+		f.licensedKnown = true
+	} else {
+		org.Available["licensedUsers"] = false
+		f.warn("licensed users could not be listed (%v); the dormant-account rule will report MANUAL", err)
 	}
-
-	// An administrator count only means something once admin groups have been
-	// expanded to the people actually in them.
-	org.EffectiveAdmins = f.expandPrincipals(ctx, org.Admins, org.Available["adminUsers"] && org.Available["adminGroups"])
 
 	f.logf("fetching user directory")
 	users, err := getPaged[apiUser](ctx, f.client, "/api/1.0/admin/users", nil)
@@ -291,19 +351,32 @@ func (f *Fetcher) fetchOrganization(ctx context.Context) (scm.Organization, erro
 				DisplayName:  u.DisplayName,
 				EmailAddress: u.EmailAddress,
 				Active:       u.Active,
+				Licensed:     licensed[u.Name],
 				InactiveDays: -1,
+				AgeDays:      -1,
 			}
 			if u.LastAuthenticationTimestamp != nil && *u.LastAuthenticationTimestamp > 0 {
 				user.LastActivityEpoch = *u.LastAuthenticationTimestamp / 1000
 				user.InactiveDays = f.daysSince(user.LastActivityEpoch)
 				activityKnown = true
 			}
+			if u.CreatedTimestamp != nil && *u.CreatedTimestamp > 0 {
+				user.CreatedEpoch = *u.CreatedTimestamp / 1000
+				user.AgeDays = f.daysSince(user.CreatedEpoch)
+			}
 			org.Users = append(org.Users, user)
 		}
-		// One user with a timestamp is enough to show the field is populated;
-		// none at all means the instance never reports it.
+		// One account with a timestamp shows the instance records them. Then,
+		// and only then, an account without one has never authenticated —
+		// measured on Bitbucket 10.4, where token use updates the time as a
+		// sign-in does and the key is simply left out for an account that has
+		// done neither.
 		org.Available["userActivity"] = activityKnown
-		if !activityKnown && len(users) > 0 {
+		if activityKnown {
+			for i := range org.Users {
+				org.Users[i].NeverSignedIn = org.Users[i].LastActivityEpoch == 0
+			}
+		} else if len(users) > 0 {
 			f.warn("no user reports a last-authentication timestamp; dormant-account rules will report MANUAL")
 		}
 	case f.unreadable(err):
@@ -311,10 +384,42 @@ func (f *Fetcher) fetchOrganization(ctx context.Context) (scm.Organization, erro
 		org.Available["userActivity"] = false
 		f.warn("the user directory is not readable (%v); dormant-account rules will report MANUAL", err)
 	default:
-		return org, fmt.Errorf("fetch users: %w", err)
+		org.Available["users"] = false
+		org.Available["userActivity"] = false
+		f.warn("the user directory could not be read: %v", err)
 	}
 
 	return org, nil
+}
+
+// fetchGlobalAdminGrants reads the global permission table, groups as groups.
+func (f *Fetcher) fetchGlobalAdminGrants(ctx context.Context) ([]scm.PrincipalPermission, bool) {
+	userPerms, err := getPaged[apiUserPermission](ctx, f.client, "/api/1.0/admin/permissions/users", nil)
+	if err != nil {
+		return nil, false
+	}
+	groupPerms, err := getPaged[apiGroupPermission](ctx, f.client, "/api/1.0/admin/permissions/groups", nil)
+	if err != nil {
+		return nil, false
+	}
+	var grants []scm.PrincipalPermission
+	for _, up := range userPerms {
+		if isGlobalAdminPermission(up.Permission) {
+			grants = append(grants, scm.PrincipalPermission{
+				Name:        up.User.Name,
+				DisplayName: up.User.DisplayName,
+				Type:        "user",
+				Permission:  up.Permission,
+				Active:      up.User.Active,
+			})
+		}
+	}
+	for _, gp := range groupPerms {
+		if isGlobalAdminPermission(gp.Permission) {
+			grants = append(grants, scm.PrincipalPermission{Name: gp.Group.Name, Type: "group", Permission: gp.Permission})
+		}
+	}
+	return grants, true
 }
 
 // expandPrincipals resolves a grant list to the set of users it reaches,
@@ -411,144 +516,110 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 		apiProjects = all
 	}
 
-	projects := make([]scm.Project, 0, len(apiProjects))
+	// Projects are fetched concurrently, every repository of every project
+	// drawing on one shared bound. One project at a time ran an instance of a
+	// thousand small projects one or two requests wide however high
+	// scan.concurrency was set: the bound only ever applied inside a project.
+	f.repoSlots = make(chan struct{}, f.concurrency)
+	projects := make([]scm.Project, len(apiProjects))
+	projectSlots := make(chan struct{}, f.concurrency)
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
 	for i, ap := range apiProjects {
-		project := scm.Project{
-			Key:    ap.Key,
-			Name:   ap.Name,
-			Type:   ap.Type,
-			Public: ap.Public,
-		}
-		perms, permsRead := f.fetchProjectPermissions(ctx, ap.Key)
-		project.Permissions = perms
-		parent := projectContext{perms: perms, permsRead: permsRead}
+		wg.Add(1)
+		go func(i int, ap apiProject) {
+			defer wg.Done()
+			select {
+			case projectSlots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-projectSlots }()
 
-		repos, err := f.fetchRepositories(ctx, ap, parent, want, scanPosition{project: i + 1, projects: len(apiProjects)})
-		if err != nil {
-			return nil, err
+			repos, err := f.fetchRepositories(ctx, ap, want, scanPosition{project: i + 1, projects: len(apiProjects)})
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				errMu.Unlock()
+				return
+			}
+			projects[i] = scm.Project{
+				Key:          ap.Key,
+				Name:         ap.Name,
+				Type:         ap.Type,
+				Public:       ap.Public,
+				Repositories: repos,
+			}
+		}(i, ap)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	found := map[string]bool{}
+	for _, p := range projects {
+		for _, repo := range p.Repositories {
+			found[strings.ToLower(repo.FullName)] = true
 		}
-		project.Repositories = repos
-		projects = append(projects, project)
+	}
+
+	// A --repository that names nothing used to scan zero repositories, warn,
+	// and exit 0: a CI gate on one repository went green the day it was
+	// renamed. A target that does not exist is a typo in the invocation.
+	var missing []string
+	for lower, spelled := range want.repositories {
+		if !found[lower] && !f.unlistedProject(strings.SplitN(lower, "/", 2)[0]) {
+			missing = append(missing, spelled)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("--repository %s: no such repository, or this token cannot see it", strings.Join(missing, ", "))
 	}
 	return projects, nil
 }
 
-// projectContext is what a repository needs to know about the project above
-// it: the grant table, and whether that table could be read in full. The two
-// travel together because using one without the other is the bug this type
-// exists to prevent.
-type projectContext struct {
-	perms scm.Permissions
-	// permsRead is false when a project grant table came back unreadable, in
-	// which case every repository below it has an administrator set that is a
-	// lower bound rather than a count.
-	permsRead bool
-}
-
-// fetchProjectPermissions reads the project grant table and the default
-// permission handed to every licensed user.
-//
-// The second return value reports whether the grant tables were read in full.
-// It is not decoration: a project administrator's grants apply to every
-// repository in the project, so a table that could not be read leaves each of
-// those repositories with an administrator set that is a lower bound. Without
-// this the tables came back empty and indistinguishable from a project that
-// genuinely grants nothing, and the repositories underneath reported a
-// confident FAIL built on a count nobody had been able to take.
-func (f *Fetcher) fetchProjectPermissions(ctx context.Context, key string) (scm.Permissions, bool) {
-	perms := scm.Permissions{}
-	available := true
-	base := "/api/1.0/projects/" + url.PathEscape(key)
-
-	if users, err := getPaged[apiUserPermission](ctx, f.client, base+"/permissions/users", nil); err == nil {
-		for _, up := range users {
-			perms.Users = append(perms.Users, scm.PrincipalPermission{
-				Name:        up.User.Name,
-				DisplayName: up.User.DisplayName,
-				Type:        "user",
-				Permission:  up.Permission,
-				Active:      up.User.Active,
-			})
-		}
-	} else if f.unreadable(err) {
-		available = false
-		f.warn("project %s user permissions are not readable (%v)", key, err)
-	} else {
-		available = false
-		f.warn("project %s user permissions failed: %v", key, err)
-	}
-
-	if groups, err := getPaged[apiGroupPermission](ctx, f.client, base+"/permissions/groups", nil); err == nil {
-		for _, gp := range groups {
-			perms.Groups = append(perms.Groups, scm.PrincipalPermission{
-				Name:       gp.Group.Name,
-				Type:       "group",
-				Permission: gp.Permission,
-			})
-		}
-	} else if f.unreadable(err) {
-		available = false
-		f.warn("project %s group permissions are not readable (%v)", key, err)
-	} else {
-		// Without this branch anything that is not a plain "not readable" —
-		// a 401, a transport failure, a malformed response — vanishes, and the
-		// permission table silently looks like it has no groups in it.
-		available = false
-		f.warn("project %s group permissions failed: %v", key, err)
-	}
-
-	perms.DefaultPermission, perms.DefaultPermissionKnown = f.fetchDefaultPermission(ctx, key)
-	return perms, available
-}
-
-// fetchDefaultPermission probes which blanket permission, if any, the project
-// grants to every licensed user. The API answers one permission at a time, so
-// this walks from the most permissive down and reports the first hit.
-// It returns the permission and whether every probe actually answered: a
-// partial probe cannot distinguish "nothing is granted" from "we could not
-// look", and the policy needs to know which it is.
-func (f *Fetcher) fetchDefaultPermission(ctx context.Context, key string) (string, bool) {
-	base := "/api/1.0/projects/" + url.PathEscape(key) + "/permissions/"
-	known := true
-	warned := false
-	for _, perm := range []string{"PROJECT_ADMIN", "PROJECT_WRITE", "PROJECT_READ"} {
-		var resp struct {
-			Permitted bool `json:"permitted"`
-		}
-		if err := f.client.get(ctx, base+perm+"/all", nil, &resp); err != nil {
-			known = false
-			// One warning per project, not one per probe: all three ask the
-			// same underlying question, and the cause is the same each time.
-			if !warned {
-				warned = true
-				if f.unreadable(err) {
-					f.warn("project %s default permission is not readable (%v); CIS-1.3.8 will report MANUAL for this project", key, err)
-				} else {
-					f.warn("project %s default permission probe failed: %v", key, err)
-				}
-			}
-			continue
-		}
-		if resp.Permitted {
-			// known, not true: the walk goes from most permissive down, so a
-			// hit here is only the whole answer if every probe above it
-			// answered. If the PROJECT_ADMIN probe failed and PROJECT_WRITE
-			// says yes, the real default could still be PROJECT_ADMIN — and
-			// reporting PROJECT_WRITE as certain understates the grant with
-			// exactly the confidence it has not earned.
-			return perm, known
+// unlistedProject reports whether a project's repositories could not be
+// listed, so a missing --repository inside it is a gap, not a typo.
+func (f *Fetcher) unlistedProject(key string) bool {
+	f.warnMu.Lock()
+	defer f.warnMu.Unlock()
+	for _, k := range f.unlisted {
+		if strings.EqualFold(k, key) {
+			return true
 		}
 	}
-	return "", known
+	return false
 }
 
 // fetchRepositories lists and then fully populates the repositories of one
 // project, bounded by the configured concurrency.
-func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, parent projectContext, want targets, pos scanPosition) ([]scm.Repository, error) {
+func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, want targets, pos scanPosition) ([]scm.Repository, error) {
 	f.logf("listing repositories in %s", project.Key)
 	apiRepos, err := getPaged[apiRepository](ctx, f.client, "/api/1.0/projects/"+url.PathEscape(project.Key)+"/repos", nil)
 	if err != nil {
-		return nil, fmt.Errorf("list repositories in %s: %w", project.Key, err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// One project that would not list its repositories used to abort the
+		// whole scan with nothing written. Its repositories are now missing
+		// from the snapshot — which no rule can report as MANUAL, since they
+		// are not there to evaluate — so the gap is recorded by name and the
+		// scan exits 2 unless scan.allowIncomplete accepts it.
+		f.warnMu.Lock()
+		f.unlisted = append(f.unlisted, project.Key)
+		f.warnMu.Unlock()
+		f.warn("the repositories of project %s could not be listed (%v); none of them is in this report", project.Key, err)
+		return nil, nil
 	}
 
 	selected := make([]apiRepository, 0, len(apiRepos))
@@ -564,7 +635,10 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, par
 	}
 
 	out := make([]scm.Repository, len(selected))
-	sem := make(chan struct{}, f.concurrency)
+	sem := f.repoSlots
+	if sem == nil {
+		sem = make(chan struct{}, f.concurrency)
+	}
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex
@@ -581,7 +655,7 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, par
 			}
 			defer func() { <-sem }()
 
-			repo, err := f.fetchRepository(ctx, project, r, parent)
+			repo, err := f.fetchRepository(ctx, project, r)
 			if err != nil {
 				errMu.Lock()
 				if firstErr == nil {
@@ -608,7 +682,7 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, par
 // fetchRepository populates every setting a policy might read for one
 // repository. Sub-fetch failures are recorded, not propagated: one repository
 // with a missing add-on should not abort the scan.
-func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r apiRepository, parent projectContext) (scm.Repository, error) {
+func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r apiRepository) (scm.Repository, error) {
 	full := project.Key + "/" + r.Slug
 	f.logf("scanning %s", full)
 
@@ -633,8 +707,21 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	}
 	base := "/api/1.0/projects/" + url.PathEscape(project.Key) + "/repos/" + url.PathEscape(r.Slug)
 
-	// The default branch anchors nearly every other check, so resolve it first.
-	repo.DefaultBranch, repo.DefaultBranchDisplay, repo.Empty = f.fetchDefaultBranch(ctx, base, &repo)
+	repo.Permissions.PublicAccess = repo.Public
+	f.fetchBaseAccess(ctx, project.Key, r.Slug, &repo)
+
+	if r.Archived {
+		// An archived repository takes no pushes and no pull requests, so every
+		// control about how a change arrives is not applicable and none of its
+		// settings are fetched. Who can read the code still matters: that is the
+		// public flag and the base access just resolved.
+		return repo, ctx.Err()
+	}
+
+	// The branch list anchors nearly every other check: it settles whether the
+	// repository is empty and which existing branch is the default.
+	branches := f.listBranches(ctx, base, &repo)
+	f.resolveDefaultBranch(ctx, base, branches, &repo)
 
 	model := f.fetchBranchModel(ctx, project.Key, r.Slug)
 
@@ -642,13 +729,8 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	f.fetchBranchRestrictions(ctx, project.Key, r.Slug, model, &repo)
 	f.fetchRequiredBuilds(ctx, project.Key, r.Slug, model, &repo)
 	f.fetchHooks(ctx, base, &repo)
-	f.fetchBranches(ctx, base, &repo)
 	f.fetchSecurityPolicy(ctx, base, &repo)
-	f.fetchRepositoryPermissions(ctx, base, parent, &repo)
-
-	repo.Permissions.PublicAccess = repo.Public
-	repo.Permissions.DefaultPermission = parent.perms.DefaultPermission
-	repo.Permissions.DefaultPermissionKnown = parent.perms.DefaultPermissionKnown
+	f.fetchRepositoryAdmins(ctx, project.Key, r.Slug, &repo)
 
 	if err := ctx.Err(); err != nil {
 		return repo, err
@@ -656,48 +738,71 @@ func (f *Fetcher) fetchRepository(ctx context.Context, project apiProject, r api
 	return repo, nil
 }
 
-// fetchDefaultBranch tries the modern endpoint, then the legacy one.
-func (f *Fetcher) fetchDefaultBranch(ctx context.Context, base string, repo *scm.Repository) (ref, display string, empty bool) {
+// resolveDefaultBranch settles which existing branch is the default.
+//
+// The branch list decides, through isDefault, because it describes what exists.
+// /default-branch only says what is configured, and on Bitbucket 10.4 that is
+// refs/heads/master for a repository whose one branch is main — the state any
+// repository ends up in when git's default moved to main and the instance's did
+// not. Believing it sent every default-branch rule at a branch that is not
+// there: the security-policy probe looked on master, found nothing, and failed
+// CIS-1.2.1 for a repository with SECURITY.md at its root; and an empty
+// repository, which /default-branch answers just the same, was taken for one
+// with commits, so its branch rules failed instead of reporting NA.
+//
+// The configured name is asked for only when no listed branch is the default,
+// to say which branch is missing.
+func (f *Fetcher) resolveDefaultBranch(ctx context.Context, base string, branches []apiBranch, repo *scm.Repository) {
+	if !repo.Available["branches"] {
+		repo.Available["defaultBranch"] = false
+		repo.Errors = append(repo.Errors, "default branch unknown: the branch list could not be read")
+		return
+	}
+	for _, b := range branches {
+		if b.IsDefault {
+			repo.DefaultBranch = b.ID
+			repo.DefaultBranchDisplay = fallbackDisplay(apiRef{ID: b.ID, DisplayID: b.DisplayID})
+			repo.Available["defaultBranch"] = true
+			return
+		}
+	}
+
+	configured, known := f.configuredDefaultBranch(ctx, base)
+	if repo.Empty {
+		// Nothing has been pushed yet. The configured name is all there is,
+		// and the branch rules report NA without needing it.
+		repo.DefaultBranch = configured.ID
+		repo.DefaultBranchDisplay = fallbackDisplay(configured)
+		repo.Available["defaultBranch"] = true
+		return
+	}
+
+	// Branches exist and none of them is the default. Leaving DefaultBranch
+	// empty is deliberate: a rule handed the configured name would judge the
+	// protection of a branch nobody can push to or merge into.
+	repo.Available["defaultBranch"] = false
+	if known && configured.ID != "" {
+		repo.Errors = append(repo.Errors, fmt.Sprintf(
+			"the configured default branch %s does not exist in the repository; set an existing one at Repository settings -> Repository details",
+			fallbackDisplay(configured)))
+		return
+	}
+	repo.Errors = append(repo.Errors, "no branch is marked as the default and the configured default branch could not be read")
+}
+
+// configuredDefaultBranch reads the default branch a repository is configured
+// with, whether or not it exists: /default-branch (Bitbucket 7.5+), then the
+// legacy /branches/default, which answers 204 for an empty repository and 404
+// when the configured branch does not exist.
+func (f *Fetcher) configuredDefaultBranch(ctx context.Context, base string) (apiRef, bool) {
 	for _, path := range []string{base + "/default-branch", base + "/branches/default"} {
 		var out apiRef
 		err := f.client.get(ctx, path, nil, &out)
 		if err == nil && out.ID != "" {
-			repo.Available["defaultBranch"] = true
-			return out.ID, fallbackDisplay(out), false
-		}
-		if err != nil && IsNotFound(err) {
-			// A 404 here is ambiguous: the endpoint may be absent on this
-			// version, or the repository may simply be empty. Keep trying.
-			continue
-		}
-		if err != nil && !f.unreadable(err) {
-			repo.Errors = append(repo.Errors, fmt.Sprintf("default branch: %v", err))
-			repo.Available["defaultBranch"] = false
-			return "", "", false
+			return out, true
 		}
 	}
-
-	// Fall back to the branch listing, which also settles whether the
-	// repository is empty.
-	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", nil)
-	if err != nil {
-		repo.Available["defaultBranch"] = false
-		repo.Errors = append(repo.Errors, fmt.Sprintf("default branch: %v", err))
-		return "", "", false
-	}
-	if len(branches) == 0 {
-		repo.Available["defaultBranch"] = true
-		return "", "", true
-	}
-	for _, b := range branches {
-		if b.IsDefault {
-			repo.Available["defaultBranch"] = true
-			return b.ID, b.DisplayID, false
-		}
-	}
-	repo.Available["defaultBranch"] = false
-	repo.Errors = append(repo.Errors, "default branch could not be determined")
-	return "", "", false
+	return apiRef{}, false
 }
 
 func fallbackDisplay(ref apiRef) string {
@@ -731,12 +836,16 @@ func (f *Fetcher) fetchPullRequestSettings(ctx context.Context, base string, rep
 		return
 	}
 	repo.Available["pullRequestSettings"] = true
+	// Recorded rather than inferred: an absent key and a false one lead to the
+	// same verdict, but not to the same fix — one needs a checkbox ticked, the
+	// other an app installed first — and the report has to say which.
+	repo.Available["unapproveOnUpdate"] = settings.UnapproveOnUpdate != nil
 	repo.PullRequestSettings = scm.PullRequestSettings{
 		RequiredApprovers:        settings.RequiredApprovers.Int(),
 		RequiredAllApprovers:     settings.RequiredAllApprovers.Bool(),
 		RequiredAllTasksComplete: settings.RequiredAllTasksComplete.Bool(),
 		RequiredSuccessfulBuilds: settings.RequiredSuccessfulBuilds.Int(),
-		UnapproveOnUpdate:        settings.UnapproveOnUpdate.Bool(),
+		UnapproveOnUpdate:        settings.UnapproveOnUpdate != nil && settings.UnapproveOnUpdate.Bool(),
 		DefaultStrategy:          settings.MergeConfig.DefaultStrategy.ID,
 	}
 	for _, s := range settings.MergeConfig.Strategies {
@@ -765,22 +874,55 @@ func (f *Fetcher) fetchBranchRestrictions(ctx context.Context, projectKey, slug 
 	}
 	repo.Available["branchRestrictions"] = true
 	for _, r := range restrictions {
+		matches, known := matchesDefaultBranch(r.Matcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
 		br := scm.BranchRestriction{
 			ID:                   r.ID,
-			Type:                 strings.ToLower(strings.TrimSpace(r.Type.ID)),
+			Type:                 normalizeRestrictionType(r.Type.ID),
 			MatcherID:            r.Matcher.ID,
 			MatcherType:          strings.ToUpper(strings.TrimSpace(r.Matcher.Type.ID)),
 			MatcherText:          r.Matcher.DisplayID,
 			Scope:                r.Scope.Type,
-			MatchesDefaultBranch: matchesDefaultBranch(r.Matcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model),
+			MatchesDefaultBranch: matches,
+			MatchUnknown:         !known && repo.Available["defaultBranch"],
 			ExemptAccessKeys:     len(r.AccessKeys),
 		}
 		for _, u := range r.Users {
 			br.ExemptUsers = append(br.ExemptUsers, u.Name)
 		}
 		br.ExemptGroups = append(br.ExemptGroups, r.Groups...)
+		for _, k := range r.AccessKeys {
+			br.ExemptAccessKeyIDs = append(br.ExemptAccessKeyIDs, k.id())
+		}
+		// Expanding here rather than in the rule is the usual split: group
+		// membership is an API call, and a policy may not make one. The
+		// instance-wide group cache means the exemption groups cost nothing
+		// beyond the ones no permission table already expanded.
+		br.ExemptPrincipals = f.expandPrincipals(ctx, exemptGrants(br), true)
 		repo.BranchRestrictions = append(repo.BranchRestrictions, br)
 	}
+}
+
+// normalizeRestrictionType maps a restriction type to the hyphenated lower-case
+// form Bitbucket 8+ uses ("pull-request-only"). Older documentation shows the
+// enum spelling ("PULL_REQUEST_ONLY"), which lower-casing alone would leave as
+// "pull_request_only" and no rule would recognise.
+func normalizeRestrictionType(t string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(t)), "_", "-")
+}
+
+// exemptGrants renders a restriction's exempt users and groups as the grant
+// list expandPrincipals consumes. The permission field is left empty: what
+// matters here is which principals an entry names and whether it is a group,
+// not what level of access it carries.
+func exemptGrants(br scm.BranchRestriction) []scm.PrincipalPermission {
+	grants := make([]scm.PrincipalPermission, 0, len(br.ExemptUsers)+len(br.ExemptGroups))
+	for _, u := range br.ExemptUsers {
+		grants = append(grants, scm.PrincipalPermission{Name: u, Type: "user"})
+	}
+	for _, g := range br.ExemptGroups {
+		grants = append(grants, scm.PrincipalPermission{Name: g, Type: "group"})
+	}
+	return grants
 }
 
 func (f *Fetcher) fetchRequiredBuilds(ctx context.Context, projectKey, slug string, model branchModel, repo *scm.Repository) {
@@ -811,21 +953,30 @@ func (f *Fetcher) fetchRequiredBuilds(ctx context.Context, projectKey, slug stri
 	}
 	repo.Available["requiredBuilds"] = true
 	for _, c := range conditions {
+		matches, known := matchesDefaultBranch(c.RefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
 		rb := scm.RequiredBuild{
 			ID:                   c.ID,
 			BuildParentKeys:      c.BuildParentKeys,
 			MatcherID:            c.RefMatcher.ID,
 			MatcherType:          strings.ToUpper(strings.TrimSpace(c.RefMatcher.Type.ID)),
 			MatcherText:          c.RefMatcher.DisplayID,
-			MatchesDefaultBranch: matchesDefaultBranch(c.RefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model),
+			MatchesDefaultBranch: matches,
 		}
 		if c.ExemptRefMatcher != nil {
 			rb.ExemptMatcherID = c.ExemptRefMatcher.ID
-			// An exemption covering the default branch cancels the condition.
-			if matchesDefaultBranch(*c.ExemptRefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model) {
-				rb.MatchesDefaultBranch = false
+			exempt, exemptKnown := matchesDefaultBranch(*c.ExemptRefMatcher, repo.DefaultBranch, repo.DefaultBranchDisplay, model)
+			switch {
+			case exempt:
+				// An exemption covering the default branch cancels the condition.
+				matches = false
+			case !exemptKnown:
+				// It may cancel it: the condition cannot count as gating the
+				// default branch until somebody can tell.
+				known = false
 			}
+			rb.MatchesDefaultBranch = matches && known
 		}
+		rb.MatchUnknown = !known && repo.Available["defaultBranch"]
 		repo.RequiredBuilds = append(repo.RequiredBuilds, rb)
 	}
 }
@@ -855,15 +1006,27 @@ func (f *Fetcher) fetchHooks(ctx context.Context, base string, repo *scm.Reposit
 // stale-branch rule reports MANUAL instead.
 const maxBranchesForCommitLookup = 200
 
-func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repository) {
-	query := url.Values{"details": []string{"true"}}
-	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", query)
+// listBranches reads every branch with the age of its tip commit, and decides
+// whether the repository is empty: no branch at all.
+//
+// details=true is what carries the tip commit's time. Bitbucket 10.4 refuses
+// it — 404 NoDefaultBranchException — for a repository whose configured
+// default branch does not exist, because the ahead/behind metadata is computed
+// against it. The plain listing still answers, and the per-commit lookup below
+// supplies the times.
+func (f *Fetcher) listBranches(ctx context.Context, base string, repo *scm.Repository) []apiBranch {
+	branches, err := getPaged[apiBranch](ctx, f.client, base+"/branches", url.Values{"details": []string{"true"}})
+	if err != nil && IsNotFound(err) {
+		branches, err = getPaged[apiBranch](ctx, f.client, base+"/branches", nil)
+	}
 	if err != nil {
 		repo.Available["branches"] = false
+		repo.Available["branchAges"] = false
 		repo.Errors = append(repo.Errors, fmt.Sprintf("branches: %v", err))
-		return
+		return nil
 	}
 	repo.Available["branches"] = true
+	repo.Empty = len(branches) == 0
 
 	agesComplete := true
 	for _, b := range branches {
@@ -876,8 +1039,7 @@ func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repo
 			AgeDays:           -1,
 		}
 		if branch.LatestCommitEpoch == 0 && len(branches) <= maxBranchesForCommitLookup && b.LatestCommit != "" {
-			// details=true did not carry commit metadata on this version;
-			// ask for the commit directly.
+			// The listing carried no commit metadata; ask for the commit.
 			branch.LatestCommitEpoch = f.fetchCommitEpoch(ctx, base, b.LatestCommit)
 		}
 		if branch.LatestCommitEpoch > 0 {
@@ -887,13 +1049,11 @@ func (f *Fetcher) fetchBranches(ctx context.Context, base string, repo *scm.Repo
 		}
 		repo.Branches = append(repo.Branches, branch)
 	}
-	if len(branches) == 0 {
-		agesComplete = true
-	}
 	repo.Available["branchAges"] = agesComplete
 	if !agesComplete {
 		repo.Errors = append(repo.Errors, "commit timestamps unavailable for some branches; stale-branch rule reports MANUAL")
 	}
+	return branches
 }
 
 func (f *Fetcher) fetchCommitEpoch(ctx context.Context, base, commitID string) int64 {
@@ -949,7 +1109,12 @@ func (f *Fetcher) fetchSecurityPolicy(ctx context.Context, base string, repo *sc
 			break
 		}
 		if resp.isFile() {
+			// One policy is the answer; the paths are in priority order, so
+			// the first found is the one reported. Probing the rest cost five
+			// requests per repository that already had one — on a large
+			// instance, a quarter of everything the scan sent.
 			repo.Files.SecurityPolicyPaths = append(repo.Files.SecurityPolicyPaths, path)
+			break
 		}
 	}
 	repo.Available["files"] = available
@@ -964,134 +1129,96 @@ func escapePath(p string) string {
 	return strings.Join(segments, "/")
 }
 
-// fetchRepositoryPermissions reads the repository grant table and resolves the
-// effective administrator set, unioning repository and project grants and
-// expanding groups.
-func (f *Fetcher) fetchRepositoryPermissions(ctx context.Context, base string, parent projectContext, repo *scm.Repository) {
-	// The project half counts: a project administrator administers every
-	// repository in the project, so an unread project table leaves this
-	// repository's answer incomplete just as surely as an unread repository one.
-	available := parent.permsRead
-
-	if users, err := getPaged[apiUserPermission](ctx, f.client, base+"/permissions/users", nil); err == nil {
-		for _, up := range users {
-			repo.Permissions.Users = append(repo.Permissions.Users, scm.PrincipalPermission{
-				Name:        up.User.Name,
-				DisplayName: up.User.DisplayName,
-				Type:        "user",
-				Permission:  up.Permission,
-				Active:      up.User.Active,
-			})
-		}
-	} else {
-		available = false
-		repo.Errors = append(repo.Errors, fmt.Sprintf("repository user permissions: %v", err))
+// fetchBaseAccess finds the highest permission every licensed user holds on
+// the repository — its base permission, which is what CIS-1.3.8 judges.
+//
+// It used to be the project's default permission, probed through
+// /projects/{key}/permissions/{perm}/all. That needs a project-admin token, so
+// the read-only token the README recommends answered 401 and the control was
+// MANUAL everywhere; and it never saw a grant to a group that holds everyone,
+// which hands out access exactly as a default permission does.
+//
+// Bitbucket answers instead. /users with permission.1=LICENSED_USER and
+// permission.2=<repository permission> lists the licensed users holding it, a
+// subset of the licensed users; asking for the entry at the position of the
+// last licensed user says whether the subset is all of them, in one request.
+// The AND with LICENSED_USER is load-bearing: a permission list on its own
+// also holds unlicensed accounts with a direct grant (measured on 10.4), and
+// counting those would let a list missing real users look complete.
+//
+// The levels are walked upward and stop at the first one not everybody
+// holds, so the snapshot records the exact base permission whatever ceiling a
+// later evaluation applies: one request for a repository nobody has blanket
+// access to, two when everybody can read it.
+func (f *Fetcher) fetchBaseAccess(ctx context.Context, projectKey, slug string, repo *scm.Repository) {
+	if !f.licensedKnown || f.licensedActive == 0 {
+		repo.Permissions.DefaultPermissionKnown = false
+		repo.Errors = append(repo.Errors, "licensed users unknown, so whether every one of them can reach this repository is unknown")
+		return
 	}
-
-	if groups, err := getPaged[apiGroupPermission](ctx, f.client, base+"/permissions/groups", nil); err == nil {
-		for _, gp := range groups {
-			repo.Permissions.Groups = append(repo.Permissions.Groups, scm.PrincipalPermission{
-				Name:       gp.Group.Name,
-				Type:       "group",
-				Permission: gp.Permission,
-			})
+	highest := ""
+	for _, perm := range []string{"REPO_READ", "REPO_WRITE", "REPO_ADMIN"} {
+		query := url.Values{
+			"permission.1":                []string{"LICENSED_USER"},
+			"permission.2":                []string{perm},
+			"permission.2.projectKey":     []string{projectKey},
+			"permission.2.repositorySlug": []string{slug},
+			// Counted against active licensed users: if Bitbucket listed an
+			// inactive account here too, the subset could only reach the
+			// count early — reporting a base permission that is broader than
+			// the real one, never narrower.
+			"start": []string{strconv.Itoa(f.licensedActive - 1)},
+			"limit": []string{"1"},
 		}
-	} else {
-		available = false
-		repo.Errors = append(repo.Errors, fmt.Sprintf("repository group permissions: %v", err))
+		var p page
+		if err := f.client.get(ctx, "/api/1.0/users", query, &p); err != nil {
+			repo.Permissions.DefaultPermissionKnown = false
+			repo.Errors = append(repo.Errors, fmt.Sprintf("base access (%s): %v", perm, err))
+			return
+		}
+		if len(p.Values) == 0 {
+			break
+		}
+		highest = perm
 	}
-
-	repo.Available["permissions"] = available
-	repo.Admins = f.resolveAdmins(ctx, repo.Permissions, parent.perms, available)
-	repo.Available["admins"] = repo.Admins.Complete
+	repo.Permissions.DefaultPermission = highest
+	repo.Permissions.DefaultPermissionKnown = true
 }
 
-// resolveAdmins unions repository REPO_ADMIN, project PROJECT_ADMIN and
-// instance ADMIN/SYS_ADMIN grants, expanding every admin group to its members.
+// fetchRepositoryAdmins resolves who administers this repository, as
+// Bitbucket itself decides it — repository, project and global grants, groups
+// expanded — and keeps the people the repository has of its own: instance
+// administrators administer every repository, so counting them made
+// CIS-1.3.7 pass everywhere on any instance that satisfies CIS-1.3.3.
 //
-// The instance grants are the ones that used to be missing, and their absence
-// produced a confident wrong answer rather than a missing one: a repository
-// administered only by the instance's administrators — ordinary for a small
-// project — counted zero administrators, and CIS-1.3.7 reported "Only 0
-// administrator(s) can manage this repository". isAdminPermission has always
-// accepted ADMIN and SYS_ADMIN, values that can only come from the global
-// permission table, so the intent was there; the grants were not.
-//
-// Completeness now also depends on the instance grants being readable. That is
-// not a regression in coverage: CIS-1.3.7 decides PASS from a lower bound
-// before it consults completeness, so a repository that already has enough
-// administrators still passes. What changes is the case that was wrong — too
-// few administrators, instance grants unreadable — which becomes MANUAL
-// instead of a FAIL nobody could act on.
-func (f *Fetcher) resolveAdmins(ctx context.Context, repoPerms, projectPerms scm.Permissions, permsAvailable bool) scm.EffectivePrincipals {
-	admins := scm.EffectivePrincipals{Complete: permsAvailable && f.orgAdmins.Complete}
-	seen := map[string]bool{}
-	groupsSeen := map[string]bool{}
-
-	addUser := func(name string) {
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-		admins.Users = append(admins.Users, name)
+// The answer is complete only when the instance administrators are known too,
+// since without them the set may still hold some, and a count that may be
+// inflated proves neither a pass nor a fail.
+func (f *Fetcher) fetchRepositoryAdmins(ctx context.Context, projectKey, slug string, repo *scm.Repository) {
+	query := url.Values{
+		"permission.1":                []string{"REPO_ADMIN"},
+		"permission.1.projectKey":     []string{projectKey},
+		"permission.1.repositorySlug": []string{slug},
 	}
-	addGroup := func(name string) {
-		if name == "" || groupsSeen[name] {
-			return
-		}
-		groupsSeen[name] = true
-		admins.Groups = append(admins.Groups, name)
-		members, ok := f.groupMembers(ctx, name)
-		if !ok {
-			// The group holds admin rights but we cannot see who is in it, so
-			// the count below is a lower bound.
-			admins.Complete = false
-			return
-		}
-		for _, m := range members {
-			addUser(m)
+	users, err := getPaged[apiUser](ctx, f.client, "/api/1.0/users", query)
+	if err != nil {
+		repo.Available["admins"] = false
+		repo.Errors = append(repo.Errors, fmt.Sprintf("repository administrators: %v", err))
+		return
+	}
+	admins := scm.EffectivePrincipals{Complete: f.orgAdminsKnown}
+	for _, u := range users {
+		if u.Active && !f.orgAdmins[u.Name] {
+			admins.Users = append(admins.Users, u.Name)
 		}
 	}
-
-	for _, table := range []scm.Permissions{repoPerms, projectPerms} {
-		for _, u := range table.Users {
-			if isAdminPermission(u.Permission) {
-				addUser(u.Name)
-			}
-		}
-		for _, g := range table.Groups {
-			if isAdminPermission(g.Permission) {
-				addGroup(g.Name)
-			}
-		}
-	}
-
-	// Instance administrators, already expanded by fetchOrganization. The users
-	// go in directly rather than through addGroup: expandPrincipals resolved
-	// the groups once for the whole instance, and re-expanding them per
-	// repository would repeat that work for every repository on the instance.
-	for _, name := range f.orgAdmins.Users {
-		addUser(name)
-	}
-	for _, name := range f.orgAdmins.Groups {
-		if !groupsSeen[name] {
-			groupsSeen[name] = true
-			admins.Groups = append(admins.Groups, name)
-		}
-	}
-
 	sort.Strings(admins.Users)
-	sort.Strings(admins.Groups)
 	admins.Count = len(admins.Users)
-	return admins
-}
-
-func isAdminPermission(p string) bool {
-	switch strings.ToUpper(strings.TrimSpace(p)) {
-	case "REPO_ADMIN", "PROJECT_ADMIN", "ADMIN", "SYS_ADMIN":
-		return true
+	repo.Admins = admins
+	repo.Available["admins"] = admins.Complete
+	if !admins.Complete {
+		repo.Errors = append(repo.Errors, "instance administrators unknown, so they could not be told apart from this repository's own")
 	}
-	return false
 }
 
 // groupMembers expands a group, memoising both successes and failures.
@@ -1114,7 +1241,7 @@ func (f *Fetcher) groupMembers(ctx context.Context, group string) ([]string, boo
 	defer f.groupMu.Unlock()
 	if err != nil {
 		f.groupFail[group] = true
-		f.warn("group %q could not be expanded (%v); administrator counts are lower bounds", group, err)
+		f.warn("group %q could not be expanded (%v); counts derived from it are lower bounds", group, err)
 		return nil, false
 	}
 	members := make([]string, 0, len(users))
@@ -1125,89 +1252,6 @@ func (f *Fetcher) groupMembers(ctx context.Context, group string) ([]string, boo
 	}
 	f.groupCache[group] = members
 	return members, true
-}
-
-// markRepositoryAccess flags which directory users can actually reach code,
-// which the dormant-account rule needs to avoid reporting service accounts
-// that hold no grants at all.
-func (f *Fetcher) markRepositoryAccess(ctx context.Context, snapshot *scm.Snapshot) {
-	withAccess := map[string]bool{}
-	everyoneHasAccess := false
-
-	// complete records whether every source of access was actually read: the
-	// admin set, each grant table, each group expansion, each default-
-	// permission probe. hasRepositoryAccess is a bare boolean — false means
-	// both "holds no grant" and "holds a grant this scan could not see" — so
-	// the completeness has to travel beside the map, or a dormant user whose
-	// only grant sat in an unreadable table would silently drop out of
-	// CIS-1.3.1's population and turn missing data into a PASS.
-	complete := snapshot.Organization.EffectiveAdmins.Complete
-
-	// EffectiveAdmins rather than Admins: the latter is the grant table as
-	// written, where an entry may be a group, and filtering it to Type ==
-	// "user" dropped everyone who holds instance administrator rights through
-	// one — which is how most instances grant them.
-	//
-	// The people dropped were not a marginal set. An instance administrator can
-	// read every repository on the instance, so they are the account with the
-	// most access on it; leaving them out of withAccess meant CIS-1.3.1 skipped
-	// them, and a dormant instance administrator is the single dormant account
-	// most worth finding. fetchOrganization has already expanded the groups, so
-	// the answer is sitting here ready to use.
-	for _, name := range snapshot.Organization.EffectiveAdmins.Users {
-		withAccess[name] = true
-	}
-
-	collect := func(perms scm.Permissions, tableRead bool) {
-		if !tableRead {
-			complete = false
-		}
-		for _, u := range perms.Users {
-			withAccess[u.Name] = true
-		}
-		for _, g := range perms.Groups {
-			// Every granted group is expanded, not just the admin ones: a user
-			// whose only access comes through a read-only group still has
-			// access to code, and missing them would quietly excuse a dormant
-			// account from review. Expansion is memoised, so repeated groups
-			// cost nothing.
-			members, ok := f.groupMembers(ctx, g.Name)
-			if !ok {
-				complete = false
-				continue
-			}
-			for _, m := range members {
-				withAccess[m] = true
-			}
-		}
-		if perms.DefaultPermission != "" {
-			everyoneHasAccess = true
-		}
-		if !perms.DefaultPermissionKnown {
-			complete = false
-		}
-	}
-
-	for _, p := range snapshot.Projects {
-		// The project table's own readability is carried by the repositories
-		// below it: an unreadable project table starts every one of their
-		// "permissions" availabilities false. A project with no repositories
-		// grants access to no code, so it cannot hide anyone.
-		collect(p.Permissions, true)
-		for _, r := range p.Repositories {
-			collect(r.Permissions, r.Available["permissions"])
-		}
-	}
-
-	snapshot.Organization.Available["repositoryAccess"] = complete
-	if !complete {
-		f.warn("some grant tables or group expansions were unreadable, so the set of users with repository access is incomplete; the dormant-account rule will report MANUAL rather than credit the gap")
-	}
-
-	for i := range snapshot.Organization.Users {
-		u := &snapshot.Organization.Users[i]
-		u.HasRepositoryAccess = (everyoneHasAccess && u.Active) || withAccess[u.Name]
-	}
 }
 
 func countRepositories(projects []scm.Project) int {
@@ -1248,8 +1292,9 @@ type targets struct {
 	// wholeProjects holds the lowercased keys named by --project, which select
 	// every repository beneath them.
 	wholeProjects map[string]bool
-	// repositories holds lowercased "project/slug" entries from --repository.
-	repositories map[string]bool
+	// repositories holds lowercased "project/slug" entries from --repository,
+	// mapped to the spelling the user gave, for error messages.
+	repositories map[string]string
 }
 
 // selects reports whether a repository is in scope.
@@ -1262,7 +1307,8 @@ func (t targets) selects(projectKey, slug string) bool {
 	if t.wholeProjects[strings.ToLower(projectKey)] {
 		return true
 	}
-	return t.repositories[strings.ToLower(projectKey+"/"+slug)]
+	_, ok := t.repositories[strings.ToLower(projectKey+"/"+slug)]
+	return ok
 }
 
 // keys returns the project keys to fetch, in a stable order.
@@ -1287,7 +1333,7 @@ func parseTargets(opts FetchOptions) (targets, error) {
 	t := targets{
 		projects:      map[string]string{},
 		wholeProjects: map[string]bool{},
-		repositories:  map[string]bool{},
+		repositories:  map[string]string{},
 	}
 	addProject := func(key string) {
 		lower := strings.ToLower(key)
@@ -1317,7 +1363,7 @@ func parseTargets(opts FetchOptions) (targets, error) {
 		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(slug) == "" {
 			return targets{}, fmt.Errorf("--repository %q must be PROJECT/slug", r)
 		}
-		t.repositories[strings.ToLower(r)] = true
+		t.repositories[strings.ToLower(r)] = r
 		// Naming a repository implies scanning its project.
 		addProject(key)
 	}

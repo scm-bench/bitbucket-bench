@@ -154,8 +154,11 @@ type apiPullRequestSettings struct {
 	RequiredAllApprovers     flexBool `json:"requiredAllApprovers"`
 	RequiredAllTasksComplete flexBool `json:"requiredAllTasksComplete"`
 	RequiredSuccessfulBuilds flexInt  `json:"requiredSuccessfulBuilds"`
-	UnapproveOnUpdate        flexBool `json:"unapproveOnUpdate"`
-	MergeConfig              struct {
+	// UnapproveOnUpdate is a pointer because its absence means something:
+	// the setting belongs to Atlassian's separately installed Auto Unapprove
+	// app, and Bitbucket 10.4 without the app never reports the key at all.
+	UnapproveOnUpdate *flexBool `json:"unapproveOnUpdate"`
+	MergeConfig       struct {
 		DefaultStrategy flexID `json:"defaultStrategy"`
 		Strategies      []struct {
 			ID      string `json:"id"`
@@ -186,10 +189,32 @@ type apiRestriction struct {
 		Name        string `json:"name"`
 		DisplayName string `json:"displayName"`
 	} `json:"users"`
-	Groups     []string `json:"groups"`
-	AccessKeys []struct {
-		ID int `json:"id"`
-	} `json:"accessKeys"`
+	Groups []string `json:"groups"`
+	// AccessKeys nests each key's identity under "key", as Bitbucket 10.4
+	// returns it: [{"key":{"id":1,"label":"deploy-one","text":"ssh-ed25519
+	// ..."}}]. Reading a top-level id instead made every key 0, so two
+	// different keys exempted from two restrictions looked like one key
+	// exempt from both — a bypass that did not exist.
+	AccessKeys []apiAccessKeyGrant `json:"accessKeys"`
+}
+
+// apiAccessKeyGrant is one access key a branch restriction exempts.
+type apiAccessKeyGrant struct {
+	Key struct {
+		ID    int    `json:"id"`
+		Label string `json:"label"`
+	} `json:"key"`
+	// ID is the shape some older documentation shows; read only when the
+	// nested one is absent.
+	ID int `json:"id"`
+}
+
+// id returns the key's identity from whichever shape carried it.
+func (g apiAccessKeyGrant) id() int {
+	if g.Key.ID != 0 {
+		return g.Key.ID
+	}
+	return g.ID
 }
 
 // apiRequiredBuild is an entry from the required-builds API.
@@ -267,9 +292,12 @@ type apiUser struct {
 	EmailAddress string `json:"emailAddress"`
 	Active       bool   `json:"active"`
 	Type         string `json:"type"`
-	// LastAuthenticationTimestamp is milliseconds since epoch and is only
-	// present on instances that expose it to admins.
+	// LastAuthenticationTimestamp is milliseconds since epoch. Bitbucket 10.4
+	// omits the key — rather than sending null — for an account that has never
+	// authenticated, by password, token or session alike.
 	LastAuthenticationTimestamp *int64 `json:"lastAuthenticationTimestamp"`
+	// CreatedTimestamp is milliseconds since epoch, when reported.
+	CreatedTimestamp *int64 `json:"createdTimestamp"`
 }
 
 // apiUserPermission pairs a user with a granted permission.

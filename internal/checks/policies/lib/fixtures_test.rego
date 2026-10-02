@@ -18,13 +18,16 @@ config := {
 		"staleBranchDays": 90,
 		"maxStaleBranches": 0,
 		"inactiveUserDays": 90,
+		"maxBypassPrincipals": 0,
 	},
-	"signatureHookKeys": ["signature", "signed-commit", "gpg", "verify-commit", "commit-signing"],
-	"nonLinearMergeStrategies": ["no-ff", "rebase-no-ff"],
+	"signatureHookKeys": ["com.atlassian.bitbucket.server.bitbucket-bundled-hooks:verify-commit-signature-hook"],
+	"forcePushHookKeys": ["com.atlassian.bitbucket.server.bitbucket-bundled-hooks:force-push-hook"],
+	"nonLinearMergeStrategies": ["no-ff", "ff", "rebase-no-ff"],
 	"securityPolicyPaths": ["SECURITY.md", ".github/SECURITY.md"],
+	"allowedBypassPrincipals": [],
 	"maxDefaultPermission": "REPO_READ",
 	"allowPublicRepositories": false,
-	"skipArchivedRepositories": true,
+	"skipArchivedRepositories": false,
 	"permissionRank": {
 		"": 0,
 		"LICENSED_USER": 1,
@@ -47,6 +50,7 @@ config := {
 every_available := {
 	"defaultBranch": true,
 	"pullRequestSettings": true,
+	"unapproveOnUpdate": true,
 	"mergeStrategies": true,
 	"branchRestrictions": true,
 	"requiredBuilds": true,
@@ -78,3 +82,45 @@ repo_input(fields) := input_for(repo(fields))
 
 # without marks one availability key as failed, leaving the rest readable.
 without(key) := object.union(every_available, {key: false})
+
+# input_with_config is input_for with config keys overridden, for the tests
+# that are about a threshold rather than about a repository.
+input_with_config(resource, overrides) := {
+	"resource": resource,
+	"config": object.union(config, overrides),
+}
+
+# repo_input_with_config is repo_input's equivalent.
+repo_input_with_config(fields, overrides) := input_with_config(repo(fields), overrides)
+
+# restriction builds a branch restriction that covers the default branch.
+restriction(kind, extra) := object.union(
+	{"type": kind, "matchesDefaultBranch": true},
+	extra,
+)
+
+# exempt renders what the fetcher leaves behind for a restriction that exempts
+# the given users: both the raw grant and the resolved set. Writing the two
+# together is deliberate — a fixture carrying one without the other describes
+# a snapshot the fetcher cannot produce.
+exempt(users) := {
+	"exemptUsers": users,
+	"exemptPrincipals": {"users": users, "count": count(users), "complete": true},
+}
+
+# exempt_unresolved is a restriction exempting a group the scan could not
+# expand. The members are unknown, so the resolved set is a lower bound and
+# every count derived from it is too.
+exempt_unresolved(group) := {
+	"exemptGroups": [group],
+	"exemptPrincipals": {"users": [], "groups": [group], "count": 0, "complete": false},
+}
+
+# archived_input is an archived repository as the fetcher leaves it: the
+# public flag and the project's default permission, and no setting read at all,
+# since an archived repository takes no change for those settings to govern.
+archived_input := input_for({
+	"fullName": "PRJ/old",
+	"archived": true,
+	"available": {},
+})

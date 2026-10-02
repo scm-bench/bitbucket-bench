@@ -2,10 +2,13 @@ package bitbucketdc
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -340,3 +343,121 @@ func TestNewClientSurvivesAReplacedDefaultTransport(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// writeCA saves a test server's certificate as a PEM bundle, which is what an
+// enterprise hands its tools for an internal CA.
+func writeCA(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	block := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(path, block, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// An instance behind an internal CA is verified with the CA's bundle, not by
+// switching verification off: with scan.caFile the handshake succeeds, and
+// without it the same server is refused.
+func TestCAFileTrustsAnInternalCA(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"version":"10.4.1"}`)
+	}))
+	defer server.Close()
+
+	trusting, err := NewClient(Options{BaseURL: server.URL, Token: "t", CAFile: writeCA(t, server), Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := trusting.get(context.Background(), "/api/1.0/application-properties", nil, nil); err != nil {
+		t.Errorf("with the CA bundle the request failed: %v", err)
+	}
+
+	untrusting, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second, MaxRetries: 1})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := untrusting.get(context.Background(), "/api/1.0/application-properties", nil, nil); err == nil {
+		t.Error("without the CA bundle an unknown CA must be refused")
+	}
+}
+
+// A bundle that is missing or holds no certificate is a configuration error at
+// startup, not a handshake failure after the first request.
+func TestUnusableCAFileIsRefusedUpFront(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty.pem")
+	if err := os.WriteFile(empty, []byte("not a certificate\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{empty, filepath.Join(t.TempDir(), "missing.pem")} {
+		if _, err := NewClient(Options{BaseURL: "https://bitbucket.example.com", Token: "t", CAFile: path}); err == nil || !strings.Contains(err.Error(), "scan.caFile") {
+			t.Errorf("CAFile %s: err = %v, want a scan.caFile error", path, err)
+		}
+	}
+}
+
+// Go forwards the Authorization header across a redirect to the same host,
+// including one from https down to http — the token on the wire in the clear,
+// after the cleartext check refused exactly that. And a redirect to another
+// host turns the scan into a JSON decode of somebody's sign-in page. Only
+// same-origin redirects are followed.
+func TestRedirectsMayNotLeaveTheInstance(t *testing.T) {
+	var sawToken bool
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawToken = r.Header.Get("Authorization") != ""
+		fmt.Fprint(w, `{}`)
+	}))
+	defer plain.Close()
+
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/1.0/elsewhere":
+			http.Redirect(w, r, plain.URL+"/rest/api/1.0/x", http.StatusFound)
+		case "/rest/api/1.0/moved":
+			http.Redirect(w, r, "/rest/api/1.0/here", http.StatusMovedPermanently)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	defer secure.Close()
+
+	client, err := NewClient(Options{BaseURL: secure.URL, Token: "secret", CAFile: writeCA(t, secure), Timeout: 5 * time.Second, MaxRetries: 1})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.get(context.Background(), "/api/1.0/moved", nil, nil); err != nil {
+		t.Errorf("a same-origin redirect should be followed: %v", err)
+	}
+	err = client.get(context.Background(), "/api/1.0/elsewhere", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing to follow a redirect") {
+		t.Errorf("err = %v, want the off-instance redirect refused", err)
+	}
+	if sawToken {
+		t.Error("the token reached the other server")
+	}
+}
+
+// A certificate nobody vouches for will not be vouched for on the next try
+// either: one attempt, not four with backoff in between.
+func TestCertificateErrorsAreNotRetried(t *testing.T) {
+	var hits atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Options{BaseURL: server.URL, Token: "t", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	started := time.Now()
+	if err := client.get(context.Background(), "/api/1.0/users", nil, nil); err == nil {
+		t.Fatal("an unknown CA must be refused")
+	}
+	if took := time.Since(started); took > 900*time.Millisecond {
+		t.Errorf("refusing an unknown CA took %s; it should not back off and retry", took)
+	}
+}

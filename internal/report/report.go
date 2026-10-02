@@ -1,5 +1,5 @@
-// Package report renders an evaluation as a human table, machine JSON, or
-// SARIF for CI ingestion.
+// Package report renders an evaluation as a human table, machine JSON, SARIF
+// for code scanning, or JUnit XML for the test-results view CI systems draw.
 package report
 
 import (
@@ -15,6 +15,7 @@ const (
 	FormatTable = "table"
 	FormatJSON  = "json"
 	FormatSARIF = "sarif"
+	FormatJUnit = "junit"
 )
 
 // Options controls rendering.
@@ -62,6 +63,10 @@ type Options struct {
 	Notice string
 }
 
+// noRepositoryEvaluated is what the machine-read formats say about a scan
+// whose repository controls audited nothing; the CLI exits 2 on the same fact.
+const noRepositoryEvaluated = "the scan evaluated no repository, so the repository controls audited nothing"
+
 // DefaultMaxResources is how many resources get a table. Zero means all of
 // them, and that is the default because each table is now a resource's whole
 // verdict rather than a list that could be trimmed: capping it by default would
@@ -69,7 +74,7 @@ type Options struct {
 const DefaultMaxResources = 0
 
 // Formats lists the supported output formats, for flag help and validation.
-func Formats() []string { return []string{FormatTable, FormatJSON, FormatSARIF} }
+func Formats() []string { return []string{FormatTable, FormatJSON, FormatSARIF, FormatJUnit} }
 
 // Write renders the report in the requested format.
 func Write(w io.Writer, rep *engine.Report, opts Options) error {
@@ -80,6 +85,8 @@ func Write(w io.Writer, rep *engine.Report, opts Options) error {
 		return writeJSON(w, rep)
 	case FormatSARIF:
 		return writeSARIF(w, rep, opts)
+	case FormatJUnit:
+		return writeJUnit(w, rep, opts)
 	default:
 		return fmt.Errorf("unknown output format %q; want one of %s", opts.Format, strings.Join(Formats(), ", "))
 	}

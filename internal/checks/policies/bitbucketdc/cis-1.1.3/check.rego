@@ -8,7 +8,9 @@ required := lib.pr_setting("requiredApprovers", 0)
 
 minimum := object.get(lib.cfg, ["thresholds", "minApprovers"], 2)
 
-result := {
+result := lib.archived_na if {
+	lib.archived_repository
+} else := {
 	"status": "MANUAL",
 	"details": "Pull request merge checks could not be read, so the required approval count is unknown.",
 } if {

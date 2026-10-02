@@ -116,3 +116,20 @@ func TestSortFindingsOrdersBenchmarkNumbersNumerically(t *testing.T) {
 		}
 	}
 }
+
+// One LOW failure among 503 HIGH passes is 1509 of 1510: a failing finding,
+// which a rounded score printed as 100 — and which scan.failUnder: 100 then
+// let through. The score is floored.
+func TestAFailingFindingNeverScoresOneHundred(t *testing.T) {
+	findings := []Finding{finding("LOW", StatusFail)}
+	for i := 0; i < 503; i++ {
+		findings = append(findings, finding("HIGH", StatusPass))
+	}
+	score := Compute(findings)
+	if score.EarnedWeight != 1509 || score.TotalWeight != 1510 {
+		t.Fatalf("weights = %d/%d, want 1509/1510", score.EarnedWeight, score.TotalWeight)
+	}
+	if score.Value != 99 {
+		t.Errorf("score = %d, want 99", score.Value)
+	}
+}

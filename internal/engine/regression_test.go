@@ -40,7 +40,7 @@ func TestZeroValuedSnapshotProducesAVerdictForEveryControl(t *testing.T) {
 		Organization: scm.Organization{
 			EffectiveAdmins: scm.EffectivePrincipals{Complete: true},
 			Available: map[string]bool{
-				"adminUsers": true, "adminGroups": true, "users": true, "userActivity": true, "repositoryAccess": true,
+				"admins": true, "users": true, "userActivity": true, "licensedUsers": true,
 			},
 		},
 		Projects: []scm.Project{{
@@ -122,7 +122,7 @@ func TestUnresolvedDefaultBranchDoesNotFailSecurityPolicy(t *testing.T) {
 func TestUsersWithUnknownActivityReportManualNotPass(t *testing.T) {
 	org := healthyOrg()
 	org.Users = append(org.Users, scm.User{
-		Name: "ghost", Active: true, HasRepositoryAccess: true, InactiveDays: -1,
+		Name: "ghost", Active: true, Licensed: true, InactiveDays: -1,
 	})
 
 	got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
@@ -136,8 +136,8 @@ func TestUsersWithUnknownActivityReportManualNotPass(t *testing.T) {
 func TestConfirmedDormantUserOutranksUnknownActivity(t *testing.T) {
 	org := healthyOrg()
 	org.Users = append(org.Users,
-		scm.User{Name: "ghost", Active: true, HasRepositoryAccess: true, InactiveDays: -1},
-		scm.User{Name: "departed", Active: true, HasRepositoryAccess: true, InactiveDays: 400},
+		scm.User{Name: "ghost", Active: true, Licensed: true, InactiveDays: -1},
+		scm.User{Name: "departed", Active: true, Licensed: true, InactiveDays: 400},
 	)
 
 	got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))
@@ -151,7 +151,7 @@ func TestConfirmedDormantUserOutranksUnknownActivity(t *testing.T) {
 func TestUnknownActivityWithoutAccessIsIgnored(t *testing.T) {
 	org := healthyOrg()
 	org.Users = append(org.Users, scm.User{
-		Name: "build-bot", Active: true, HasRepositoryAccess: false, InactiveDays: -1,
+		Name: "build-bot", Active: true, Licensed: false, InactiveDays: -1,
 	})
 
 	got := evaluate(t, snapshotWith([]scm.Repository{hardenedRepo()}, org))

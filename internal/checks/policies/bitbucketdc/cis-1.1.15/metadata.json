@@ -4,12 +4,14 @@
   "package": "scmbench.rules.cis_1_1_15",
   "scope": "repository",
   "severity": "HIGH",
-  "platforms": ["bitbucket-dc"],
+  "platforms": [
+    "bitbucket-dc"
+  ],
   "automated": true,
   "title": "Ensure pushing or merging of new code is restricted to trusted users",
-  "description": "Every approval rule configured on pull requests is worth nothing if the same people can push straight to the branch instead. This is the restriction that makes the rest of the review controls binding.",
-  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent changes without a pull request\". Grant exemptions only to build service accounts that genuinely need them, since each exemption reopens the bypass. Configure it at Project settings -> Branch permissions to cover every repository in the project.",
-  "fixSummary": "Enable \"Prevent changes without a pull request\" at Repository settings -> Branch permissions.",
+  "description": "Every approval rule configured on pull requests is worth nothing if the same people can push straight to the branch instead. This is the restriction that makes the rest of the review controls binding — and an exemption from it is a way back to pushing directly, so who holds one decides the verdict as much as whether the restriction exists.",
+  "remediation": "Repository settings -> Branch permissions -> Add restriction: select the default branch and enable \"Prevent changes without a pull request\". Then review the restriction's exempt users and groups: each one can push straight past it, and a group grows without anybody revisiting the exemption. Name the build service accounts that genuinely need one in allowedBypassPrincipals, and set thresholds.maxBypassPrincipals to how many other principals may hold one (-1 turns the check off). Configure it at Project settings -> Branch permissions to cover every repository in the project.",
+  "fixSummary": "Require a pull request at Repository settings -> Branch permissions; check who is exempt.",
   "references": [
     "https://www.cisecurity.org/benchmark/software-supply-chain-security",
     "https://confluence.atlassian.com/bitbucketserver/using-branch-permissions-776639807.html"

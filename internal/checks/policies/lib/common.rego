@@ -41,10 +41,66 @@ empty_repository if {
 	object.get(resource, "empty", false) == true
 }
 
+# archived_repository is true for a repository that accepts no pushes and no
+# pull requests.
+archived_repository if {
+	object.get(resource, "archived", false) == true
+}
+
+# archived_na is the shared outcome for every control about how a change
+# arrives. It comes first in a rule's chain, ahead of MANUAL: nothing the scan
+# failed to read could make a control about changes apply to a repository that
+# takes none, which is also why the fetcher reads none of its settings.
+archived_na := {
+	"status": "NA",
+	"details": "Repository is archived: it accepts no pushes and no pull requests, so there is no change to control.",
+} if {
+	archived_repository
+}
+
 # has_default_branch is false for empty repositories and for any repository
 # whose default branch could not be resolved.
 has_default_branch if {
 	object.get(resource, "defaultBranch", "") != ""
+}
+
+# default_branch_known is true when the default branch was resolved to a
+# branch that exists. A repository can point its default at a branch nobody
+# pushed — the fetcher leaves defaultBranch empty then and marks it unavailable.
+default_branch_known if {
+	available("defaultBranch")
+	has_default_branch
+}
+
+# default_branch_unknown is the outcome for a branch rule that found
+# restrictions but cannot tell whether any of them covers the default branch.
+default_branch_unknown := {
+	"status": "MANUAL",
+	"details": "The default branch could not be resolved (see this repository's scan errors), so whether a restriction covers it is unknown.",
+}
+
+# restrictions_of returns every restriction of the given types, whichever
+# branch it covers. A rule needs it to tell "nothing restricts any branch",
+# which is a FAIL whatever the default branch is, from "a restriction exists and
+# may or may not cover the default branch".
+restrictions_of(kinds) := [r |
+	some r in list("branchRestrictions")
+	r.type in kinds
+]
+
+# unresolved returns the restrictions of the given types whose coverage of the
+# default branch the fetcher could not decide — a model matcher with the
+# branch model unread. Such a restriction may protect the branch, or not.
+unresolved(kinds) := [r |
+	some r in restrictions_of(kinds)
+	object.get(r, "matchUnknown", false) == true
+]
+
+# match_unknown is the outcome when no restriction is known to cover the
+# default branch and at least one might.
+match_unknown := {
+	"status": "MANUAL",
+	"details": sprintf("A restriction may cover %s, but whether it does could not be decided: its branch-model matcher could not be resolved.", [default_branch_name]),
 }
 
 # default_branch_name is the short branch name, for use in messages.
@@ -106,6 +162,131 @@ exemption_note(rs) := sprintf(" (bypass allowed for: %s; %s)", [concat(", ", exe
 } else := ""
 
 keys_clause(rs) := sprintf("%d access key(s)", [exempt_access_keys(rs)])
+
+# max_bypass is how many principals may hold an exemption from every
+# restriction protecting the default branch — how many people the protection
+# does not actually bind. -1 turns the check off.
+max_bypass := n if {
+	n := object.get(cfg, ["thresholds", "maxBypassPrincipals"], 0)
+	is_number(n)
+} else := 0
+
+# allowed_bypass names the service accounts an exemption is expected on, so
+# they do not count against the threshold.
+allowed_bypass := {p | some p in as_list(object.get(cfg, "allowedBypassPrincipals", []))}
+
+# exempt_users_of is one restriction's exempt principals, groups already
+# expanded to people by the fetcher.
+exempt_users_of(r) := {u | some u in as_list(object.get(r, ["exemptPrincipals", "users"], []))}
+
+exempt_keys_of(r) := {k | some k in as_list(object.get(r, "exemptAccessKeyIds", []))}
+
+# bypass_principals is who can get past EVERY restriction in rs — the
+# intersection of the exempt sets, not their union.
+#
+# The intersection is the whole point, and it is what makes a read-only
+# restriction read correctly. Protection on a branch is the union of the
+# restrictions covering it, so a principal can only actually delete, force
+# push or push directly when no restriction stops them: somebody exempt from
+# "Prevent all changes" but still subject to "Prevent deletion" cannot delete
+# the branch, and naming them as a hole would be wrong. Exempting the release
+# managers who may write to an otherwise frozen branch is how that restriction
+# is meant to be used — it becomes a bypass only when nothing else covers them.
+bypass_principals(rs) := principals if {
+	count(rs) > 0
+	principals := intersection({s |
+		some r in rs
+		s := exempt_users_of(r)
+	}) - allowed_bypass
+} else := set()
+
+# bypass_access_keys counts the keys that get past every restriction, by the
+# same intersection rule. Two restrictions exempting one key each is not one
+# key exempt from both, which is why the identities are carried rather than
+# only the totals.
+bypass_access_keys(rs) := count(intersection({s |
+	some r in rs
+	s := exempt_keys_of(r)
+})) if {
+	count(rs) > 0
+} else := 0
+
+# bypass_count totals the principals and keys the protection does not bind.
+bypass_count(rs) := count(bypass_principals(rs)) + bypass_access_keys(rs)
+
+# no_exemptions is true for a restriction that names nobody at all.
+no_exemptions(r) if {
+	count(as_list(object.get(r, "exemptUsers", []))) == 0
+	count(as_list(object.get(r, "exemptGroups", []))) == 0
+	object.get(r, "exemptAccessKeys", 0) == 0
+}
+
+# keys_identified checks a restriction against itself: exemptAccessKeys is a
+# total and exemptAccessKeyIds are the keys behind it, and a fetcher writes
+# both or neither. A file where they disagree cannot have its keys intersected
+# across restrictions, and a snapshot is JSON somebody can edit — so this is
+# MANUAL rather than a count quietly taken from the half that parsed.
+keys_identified(r) if {
+	object.get(r, "exemptAccessKeys", 0) == count(exempt_keys_of(r))
+}
+
+restriction_resolved(r) if {
+	object.get(r, ["exemptPrincipals", "complete"], false) == true
+	keys_identified(r)
+}
+
+# bypass_complete reports that the intersection is exact rather than a lower
+# bound.
+#
+# One restriction naming nobody settles it on its own: intersecting with an
+# empty set is empty whatever the other sets hold, so a group that could not be
+# expanded elsewhere cannot add anyone. Failing that, every restriction has to
+# be fully resolved, because a member the scan could not see might be in all of
+# them.
+bypass_complete(rs) if {
+	some r in rs
+	no_exemptions(r)
+}
+
+bypass_complete(rs) if {
+	every r in rs {
+		restriction_resolved(r)
+	}
+}
+
+# bypass_exceeded is true when more principals can bypass the protection than
+# the configuration allows.
+bypass_exceeded(rs) if {
+	max_bypass >= 0
+	bypass_count(rs) > max_bypass
+}
+
+# bypass_undecidable is true when the bypass set has not crossed the threshold
+# but is only a lower bound, so this scan cannot tell whether it would. By the
+# rule the whole tool follows, that is MANUAL rather than a PASS — a group the
+# token could not expand is not evidence that nobody is in it.
+bypass_undecidable(rs) if {
+	max_bypass >= 0
+	not bypass_exceeded(rs)
+	not bypass_complete(rs)
+}
+
+bypass_principal_list(rs) := [p | some p in bypass_principals(rs)]
+
+# bypass_detail names who can bypass, for a failing verdict.
+bypass_detail(rs) := sprintf("%s and %d access key(s)", [joined(bypass_principal_list(rs), 4), bypass_access_keys(rs)]) if {
+	count(bypass_principals(rs)) > 0
+	bypass_access_keys(rs) > 0
+} else := joined(bypass_principal_list(rs), 4) if {
+	count(bypass_principals(rs)) > 0
+} else := sprintf("%d access key(s)", [bypass_access_keys(rs)])
+
+# bypass_evidence states the count and the threshold it was judged against, so
+# the verdict can be checked rather than taken on faith.
+bypass_evidence(rs) := [
+	sprintf("exempt from every restriction covering %s: %s", [default_branch_name, bypass_detail(rs)]),
+	sprintf("%d in total; thresholds.maxBypassPrincipals is %d", [bypass_count(rs), max_bypass]),
+]
 
 # merge_strategies is the configured merge strategy list.
 merge_strategies := list(["pullRequestSettings", "mergeStrategies"])

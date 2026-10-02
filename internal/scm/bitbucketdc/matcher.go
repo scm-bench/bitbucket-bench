@@ -33,31 +33,41 @@ type branchModel struct {
 }
 
 // matchesDefaultBranch reports whether a ref matcher selects the repository's
-// default branch.
+// default branch, and whether that could be decided at all.
 //
 // This resolution lives in Go rather than in Rego on purpose: glob semantics
 // and branch-model indirection are fiddly, version-dependent, and have nothing
-// to do with policy. Rules read the resulting boolean.
-func matchesDefaultBranch(m apiMatcher, defaultRef, defaultDisplay string, model branchModel) bool {
+// to do with policy. Rules read the resulting booleans.
+//
+// known is false when the answer depends on something the scan could not
+// read — a model matcher with the branch model unavailable, or a matcher type
+// this code does not recognise. It used to guess instead: a "development
+// branch" restriction was assumed to cover the default branch whenever the
+// model was unread, which passed CIS-1.1.15 for a gitflow repository whose
+// development branch is develop, with not a word of warning.
+func matchesDefaultBranch(m apiMatcher, defaultRef, defaultDisplay string, model branchModel) (matches, known bool) {
 	if defaultRef == "" && defaultDisplay == "" {
-		return false
+		return false, false
+	}
+	if defaultRef == "" {
+		defaultRef = "refs/heads/" + defaultDisplay
 	}
 	typeID := strings.ToUpper(strings.TrimSpace(m.Type.ID))
 	// Some versions omit the matcher type on the "all branches" entry.
 	if m.ID == anyRefMatcherID || typeID == matcherAnyRef {
-		return true
+		return true, true
 	}
 
 	switch typeID {
 	case matcherBranch:
-		return sameRef(m.ID, defaultRef, defaultDisplay) || sameRef(m.DisplayID, defaultRef, defaultDisplay)
+		return sameRef(m.ID, defaultRef, defaultDisplay) || sameRef(m.DisplayID, defaultRef, defaultDisplay), true
 
 	case matcherPattern:
 		pattern := m.ID
 		if pattern == "" {
 			pattern = m.DisplayID
 		}
-		return antMatch(pattern, defaultRef) || antMatch(pattern, defaultDisplay)
+		return antMatch(pattern, defaultRef), true
 
 	case matcherModelBranch:
 		return modelBranchMatches(m.ID, defaultRef, defaultDisplay, model)
@@ -66,59 +76,54 @@ func matchesDefaultBranch(m apiMatcher, defaultRef, defaultDisplay string, model
 		return modelCategoryMatches(m.ID, defaultDisplay, model)
 
 	default:
-		// Unknown matcher type: fall back to the comparisons that are always
-		// safe. Guessing "matches" here would invent protection that may not
-		// exist, so an unrecognised matcher only counts on an exact hit.
-		return sameRef(m.ID, defaultRef, defaultDisplay) || antMatch(m.ID, defaultDisplay)
+		// Unknown matcher type: an exact hit is still a hit, but anything else
+		// is a question about semantics this code does not know.
+		if sameRef(m.ID, defaultRef, defaultDisplay) {
+			return true, true
+		}
+		return false, false
 	}
 }
 
-// modelBranchMatches resolves a "development"/"production" model branch.
-func modelBranchMatches(id, defaultRef, defaultDisplay string, model branchModel) bool {
+// modelBranchMatches resolves a "development"/"production" model branch. Only
+// the model says which branch either one is.
+func modelBranchMatches(id, defaultRef, defaultDisplay string, model branchModel) (matches, known bool) {
+	if !model.resolved {
+		return false, false
+	}
+	var branch *apiRef
 	switch strings.ToLower(strings.TrimSpace(id)) {
 	case "development":
-		if model.resolved && model.Development != nil {
-			return sameRef(model.Development.ID, defaultRef, defaultDisplay)
-		}
-		// Bitbucket's development branch defaults to the repository default
-		// branch, so without the model that is the correct assumption.
-		return true
+		branch = model.Development
 	case "production":
-		if model.resolved && model.Production != nil {
-			return sameRef(model.Production.ID, defaultRef, defaultDisplay)
-		}
-		// The production branch is unset unless configured; assuming it covers
-		// the default branch would manufacture protection.
-		return false
+		branch = model.Production
 	default:
-		return false
+		return false, false
 	}
+	// An unset model branch selects nothing: Bitbucket leaves production out
+	// of the model until someone configures it.
+	if branch == nil {
+		return false, true
+	}
+	return sameRef(branch.ID, defaultRef, defaultDisplay), true
 }
 
 // modelCategoryMatches resolves a branch-type category ("feature", "release",
 // ...) to its prefix and tests the default branch against it.
-func modelCategoryMatches(id, defaultDisplay string, model branchModel) bool {
-	if defaultDisplay == "" {
-		return false
+func modelCategoryMatches(id, defaultDisplay string, model branchModel) (matches, known bool) {
+	if !model.resolved {
+		// The stock prefixes are only defaults; a repository can rename them.
+		return false, false
 	}
 	want := strings.ToUpper(strings.TrimSpace(id))
-	if model.resolved {
-		for _, t := range model.Types {
-			if strings.EqualFold(t.ID, want) && t.Prefix != "" {
-				return strings.HasPrefix(defaultDisplay, t.Prefix)
-			}
+	for _, t := range model.Types {
+		if strings.EqualFold(t.ID, want) && t.Prefix != "" {
+			return strings.HasPrefix(defaultDisplay, t.Prefix), true
 		}
-		return false
 	}
-	// Fall back to Bitbucket's stock prefixes.
-	defaults := map[string]string{
-		"FEATURE": "feature/",
-		"BUGFIX":  "bugfix/",
-		"HOTFIX":  "hotfix/",
-		"RELEASE": "release/",
-	}
-	prefix, ok := defaults[want]
-	return ok && strings.HasPrefix(defaultDisplay, prefix)
+	// A category the model does not list, or one switched off: it selects
+	// nothing.
+	return false, true
 }
 
 // sameRef compares a matcher value against the default branch in both its full
@@ -142,34 +147,45 @@ func normalizeRef(ref string) string {
 	return strings.TrimPrefix(strings.TrimSpace(ref), "refs/heads/")
 }
 
-// antMatch implements the Ant-style glob Bitbucket uses for PATTERN matchers:
+// antMatch implements Bitbucket's branch-permission pattern rules, as
+// documented at confluence.atlassian.com/bitbucketserver/branch-permission-patterns-776639814.html:
 //
-//	?  one character, not a separator
-//	*  zero or more characters, not a separator
-//	** zero or more characters, separators included
+//	?   one character, not a separator
+//	*   zero or more characters, not a separator
+//	**  zero or more path segments
 //
-// A pattern without a "refs/" prefix is also tried against the short branch
-// name, which is how the UI presents it.
-func antMatch(pattern, name string) bool {
+// A pattern ending in "/" has "**" appended, and a pattern "only needs to
+// match a suffix of the fully qualified branch or tag name" — on a segment
+// boundary. So "main" matches refs/heads/main, "PROJECT-*" matches
+// refs/heads/stable/PROJECT-new, and "heads/**/master" matches
+// refs/heads/master.
+//
+// The suffix rule is the part that used to be missing: only the full ref and
+// the short branch name were tried, so a pattern like "heads/**/main" never
+// matched, and a required-build exemption written that way left the default
+// branch counted as gated when it was exempt.
+func antMatch(pattern, ref string) bool {
 	pattern = strings.TrimSpace(pattern)
-	name = strings.TrimSpace(name)
-	if pattern == "" || name == "" {
+	ref = strings.TrimSpace(ref)
+	if pattern == "" || ref == "" {
 		return false
 	}
-	if pattern == name {
-		return true
+	if strings.HasSuffix(pattern, "/") {
+		pattern += "**"
 	}
-	if globMatch(pattern, name) {
-		return true
+	if !strings.HasPrefix(ref, "refs/") {
+		ref = "refs/heads/" + ref
 	}
-	// Compare on equal footing when only one side carries the refs/heads prefix.
-	if strings.HasPrefix(name, "refs/heads/") && !strings.HasPrefix(pattern, "refs/") {
-		return globMatch(pattern, normalizeRef(name))
+	for i := 0; ; {
+		if globMatch(pattern, ref[i:]) {
+			return true
+		}
+		next := strings.IndexByte(ref[i:], '/')
+		if next < 0 {
+			return false
+		}
+		i += next + 1
 	}
-	if strings.HasPrefix(pattern, "refs/heads/") && !strings.HasPrefix(name, "refs/") {
-		return globMatch(normalizeRef(pattern), name)
-	}
-	return false
 }
 
 // globMatch runs the Ant glob with backtracking. Patterns here are short and
