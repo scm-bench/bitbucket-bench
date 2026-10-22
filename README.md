@@ -498,7 +498,7 @@ CIS-1.1.6 MANUAL (3 repositories): Bitbucket Data Center has no native code-owne
 
 ... one line per control that needs a person, and per distinct reason ...
 
-13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
+13 controls could not be read (Unread) on PLAT/vendor-mirror: CIS-1.1.3, CIS-1.1.9, CIS-1.1.15, CIS-1.1.16, CIS-1.1.4, CIS-1.1.12 and 7 more; see Scan warnings below.
 
 Scan warnings
 
