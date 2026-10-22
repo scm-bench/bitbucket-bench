@@ -1140,7 +1140,7 @@ that is not read-only.
 
 | Bitbucket Data Center | Result |
 |---|---|
-| 10.5.0 | every verdict as expected, for all three tokens |
+| 10.5.0, 10.5.1 | every verdict as expected, for all three tokens |
 | 10.4.1, 10.4.3 | every verdict as expected, for all three tokens |
 | 9.4.24 (LTS) | every verdict as expected, for all three tokens |
 | 8.19.29 (LTS) | every verdict as expected, for all three tokens |
