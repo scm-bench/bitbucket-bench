@@ -5,7 +5,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path"
 	"sort"
@@ -112,11 +111,18 @@ type Engine struct {
 	selected []checks.Check
 	// now decides which exceptions have lapsed; a field so tests can fix it.
 	now func() time.Time
+	// encode converts a resource to OPA's value form; a field so tests can
+	// make it fail and see that the run stops rather than judging half an input.
+	encode func(any) (ast.Value, error)
 }
+
+// loadBundle is checks.Load; a variable so a test can stand in a bundle that
+// fails to load or holds a broken policy.
+var loadBundle = checks.Load
 
 // New compiles the embedded policies for the given platform and configuration.
 func New(ctx context.Context, cfg config.Config, platform string) (*Engine, error) {
-	bundle, err := checks.Load()
+	bundle, err := loadBundle()
 	if err != nil {
 		return nil, fmt.Errorf("load policy bundle: %w", err)
 	}
@@ -145,6 +151,7 @@ func New(ctx context.Context, cfg config.Config, platform string) (*Engine, erro
 		cfg:      cfg,
 		bundle:   bundle,
 		prepared: make(map[string]rego.PreparedEvalQuery),
+		encode:   toValue,
 	}
 
 	for _, check := range bundle.Checks {
@@ -218,15 +225,15 @@ func validateSelection(cfg config.Config, bundle *checks.Bundle) error {
 // inputs fourteen times over. Repositories are also visited one at a time, so
 // only one repository's input is alive at once rather than all of them.
 func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report, error) {
-	cfgValue, err := toValue(e.cfg)
+	cfgValue, err := e.encode(e.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
-	metaValue, err := toValue(snapshot.Metadata)
+	metaValue, err := e.encode(snapshot.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("encode snapshot metadata: %w", err)
 	}
-	orgValue, err := toValue(snapshot.Organization)
+	orgValue, err := e.encode(snapshot.Organization)
 	if err != nil {
 		return nil, fmt.Errorf("encode organization: %w", err)
 	}
@@ -254,7 +261,7 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 		// about the project should not be able to walk into sibling repos.
 		bare := project
 		bare.Repositories = nil
-		projValue, encErr := toValue(bare)
+		projValue, encErr := e.encode(bare)
 		if encErr != nil {
 			return nil, fmt.Errorf("encode project %s: %w", project.Key, encErr)
 		}
@@ -274,7 +281,7 @@ func (e *Engine) Evaluate(ctx context.Context, snapshot *scm.Snapshot) (*Report,
 			if len(repoChecks) == 0 {
 				continue
 			}
-			repoValue, repoErr := toValue(repo)
+			repoValue, repoErr := e.encode(repo)
 			if repoErr != nil {
 				return nil, fmt.Errorf("encode repository %s: %w", repo.FullName, repoErr)
 			}
@@ -433,28 +440,11 @@ func decodeResult(value any) (policyResult, error) {
 	return policyResult{Status: status, Details: details, Evidence: evidence}, nil
 }
 
-// toJSONValue converts a Go value into the plain maps and slices OPA expects,
-// honouring the json tags that define the snapshot's contract with the rules.
-func toJSONValue(v any) (any, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// toValue converts v to the value OPA evaluates, through its JSON form so a
-// rule sees exactly the field names and shapes the snapshot file has.
+// toValue converts v to the value OPA evaluates. InterfaceToValue round-trips
+// a struct through encoding/json itself (numbers kept exact via json.Number),
+// so a rule sees exactly the field names and shapes the snapshot file has.
 func toValue(v any) (ast.Value, error) {
-	generic, err := toJSONValue(v)
-	if err != nil {
-		return nil, err
-	}
-	return ast.InterfaceToValue(generic)
+	return ast.InterfaceToValue(v)
 }
 
 // inputValue assembles an evaluation input from already-converted parts, so

@@ -162,11 +162,7 @@ func (f *Fetcher) Fetch(ctx context.Context, opts FetchOptions) (*scm.Snapshot, 
 		},
 	}
 
-	org, err := f.fetchOrganization(ctx)
-	if err != nil {
-		return nil, err
-	}
-	snapshot.Organization = org
+	snapshot.Organization = f.fetchOrganization(ctx)
 
 	projects, err := f.fetchProjects(ctx, opts)
 	if err != nil {
@@ -283,7 +279,7 @@ func (f *Fetcher) unreadable(err error) bool {
 // for the credential the README recommends, every instance-level control
 // reported MANUAL. /users?permission=ADMIN answers any authenticated caller,
 // already includes SYS_ADMIN, and expands groups itself.
-func (f *Fetcher) fetchOrganization(ctx context.Context) (scm.Organization, error) {
+func (f *Fetcher) fetchOrganization(ctx context.Context) scm.Organization {
 	org := scm.Organization{Available: map[string]bool{}}
 
 	f.logf("resolving instance administrators")
@@ -389,7 +385,7 @@ func (f *Fetcher) fetchOrganization(ctx context.Context) (scm.Organization, erro
 		f.warn("the user directory could not be read: %v", err)
 	}
 
-	return org, nil
+	return org
 }
 
 // fetchGlobalAdminGrants reads the global permission table, groups as groups.
@@ -528,6 +524,15 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 		errMu    sync.Mutex
 		firstErr error
 	)
+	// A project that never started because the scan was cancelled is a
+	// failure like any other: its slot in projects is empty.
+	fail := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+	}
 	for i, ap := range apiProjects {
 		wg.Add(1)
 		go func(i int, ap apiProject) {
@@ -535,17 +540,14 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 			select {
 			case projectSlots <- struct{}{}:
 			case <-ctx.Done():
+				fail(ctx.Err())
 				return
 			}
 			defer func() { <-projectSlots }()
 
 			repos, err := f.fetchRepositories(ctx, ap, want, scanPosition{project: i + 1, projects: len(apiProjects)})
 			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				errMu.Unlock()
+				fail(err)
 				return
 			}
 			projects[i] = scm.Project{
@@ -560,9 +562,6 @@ func (f *Fetcher) fetchProjects(ctx context.Context, opts FetchOptions) ([]scm.P
 	wg.Wait()
 	if firstErr != nil {
 		return nil, firstErr
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
 	}
 
 	found := map[string]bool{}
@@ -635,14 +634,18 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, wan
 	}
 
 	out := make([]scm.Repository, len(selected))
-	sem := f.repoSlots
-	if sem == nil {
-		sem = make(chan struct{}, f.concurrency)
-	}
+	sem := f.repoSlots // shared across projects; set by fetchProjects
 	var wg sync.WaitGroup
 	var firstErr error
 	var errMu sync.Mutex
 	var completed atomic.Int64
+	fail := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+	}
 
 	for i, r := range selected {
 		wg.Add(1)
@@ -651,17 +654,14 @@ func (f *Fetcher) fetchRepositories(ctx context.Context, project apiProject, wan
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
+				fail(ctx.Err())
 				return
 			}
 			defer func() { <-sem }()
 
 			repo, err := f.fetchRepository(ctx, project, r)
 			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				errMu.Unlock()
+				fail(err)
 				return
 			}
 			out[i] = repo

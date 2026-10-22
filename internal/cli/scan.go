@@ -220,9 +220,6 @@ func movedFlagError(cmd *cobra.Command, err error) error {
 
 func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	resolveCredentials(cmd, opts)
 
@@ -273,11 +270,7 @@ func runScan(cmd *cobra.Command, opts *scanOptions) error {
 	// scan whose exit code makes no sense.
 	configPath := opts.configPath
 	if configPath == "" {
-		discovered, err := config.Discover()
-		if err != nil {
-			return err
-		}
-		if discovered != "" {
+		if discovered := config.Discover(); discovered != "" {
 			configPath = discovered
 			stderr := cmd.ErrOrStderr()
 			console.Writer{W: stderr, P: console.Painter{Enabled: useProgressColor(opts, stderr)}}.
@@ -776,24 +769,24 @@ func writePrivateFile(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	tmp, err := createTemp(dir, "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name()) // a no-op once the rename has happened
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
+	// Each step runs whatever the one before it did, so the file is closed
+	// on every path; the first failure is the one reported.
+	chmodErr := tmp.Chmod(0o600)
+	_, writeErr := tmp.Write(data)
+	if err := errors.Join(chmodErr, writeErr, tmp.Close()); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// createTemp is os.CreateTemp; a variable so a test can hand the writer a
+// temporary file that refuses writes, which no real directory does on demand.
+var createTemp = os.CreateTemp
 
 // useColor enables ANSI only for an actual terminal, honouring NO_COLOR.
 // useProgressColor decides colour for the trace. It goes to stderr, so it

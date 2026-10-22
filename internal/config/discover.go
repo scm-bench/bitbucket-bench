@@ -23,23 +23,23 @@ const userConfigFile = "config.yaml"
 //
 // An explicit --config always wins over this; the caller enforces that by
 // not calling Discover when one was given.
-func Discover() (string, error) {
+func Discover() string {
 	for _, name := range discoverNames {
 		if _, err := os.Stat(name); err == nil {
-			return name, nil
+			return name
 		}
 	}
 	dir, err := userConfigDir()
 	if err != nil {
 		// No user config directory means nothing to discover there, not a
 		// broken scan.
-		return "", nil
+		return ""
 	}
 	path := filepath.Join(dir, userConfigFile)
 	if _, err := os.Stat(path); err == nil {
-		return path, nil
+		return path
 	}
-	return "", nil
+	return ""
 }
 
 // userConfigDir is where per-user bitbucket-bench files live, shared with the
