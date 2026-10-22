@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -416,6 +417,9 @@ func TestScanProgressModes(t *testing.T) {
 }
 
 func TestScanLastReportsAnUnreadableCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows answers a path under a file with \"path not found\", which reads as an empty cache")
+	}
 	dir := t.TempDir()
 	t.Setenv("BITBUCKET_BENCH_CONFIG_DIR", dir)
 	if err := os.WriteFile(filepath.Join(dir, "cache"), []byte("x"), 0o600); err != nil {
