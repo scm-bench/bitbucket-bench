@@ -419,7 +419,7 @@ CIS-1.1.6 MANUAL (3 repositories): Bitbucket Data Center has no native code-owne
 
 ... 每条需要人来判断的规则各一行，不同原因各占一行 ...
 
-13 controls could not be read (Unread) on PLAT/vendor-mirror; see Scan warnings below.
+13 controls could not be read (Unread) on PLAT/vendor-mirror: CIS-1.1.3, CIS-1.1.9, CIS-1.1.15, CIS-1.1.16, CIS-1.1.4, CIS-1.1.12 and 7 more; see Scan warnings below.
 
 Scan warnings
 
@@ -957,7 +957,7 @@ Bitbucket 一致。[`hack/e2e`](hack/e2e) 补上了这道缺口：它用 Atlassi
 
 | Bitbucket Data Center | 结果 |
 |---|---|
-| 10.5.0 | 三个 token 下的所有判定都符合预期 |
+| 10.5.0, 10.5.1 | 三个 token 下的所有判定都符合预期 |
 | 10.4.1、10.4.3 | 三个 token 下的所有判定都符合预期 |
 | 9.4.24（LTS） | 三个 token 下的所有判定都符合预期 |
 | 8.19.29（LTS） | 三个 token 下的所有判定都符合预期 |

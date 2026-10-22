@@ -9,9 +9,9 @@ import (
 
 // tlsInsecureConfig is isolated in its own file so the one place that disables
 // certificate verification is easy to find and audit. It is only reachable via
-// the explicit --insecure flag.
+// the explicit scan.insecure setting.
 func tlsInsecureConfig() *tls.Config {
-	return &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via --insecure
+	return &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via scan.insecure
 }
 
 // tlsWithCAFile trusts the certificate authorities in a PEM bundle on top of
