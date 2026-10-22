@@ -727,8 +727,10 @@ func TestPlaintextURLIsRefused(t *testing.T) {
 	} {
 		if _, err := NewClient(Options{BaseURL: in, Token: "x"}); err == nil {
 			t.Errorf("NewClient(%q) succeeded; cleartext credentials must be refused", in)
-		} else if !strings.Contains(err.Error(), "--allow-plaintext") {
-			t.Errorf("NewClient(%q) error = %v; it should name the flag that overrides it", in, err)
+		} else if !strings.Contains(err.Error(), "--set scan.allowPlaintext=true") {
+			// Not --allow-plaintext: that flag moved to the config file, and
+			// following advice that names it fails with "unknown flag".
+			t.Errorf("NewClient(%q) error = %v; it should name the override that works", in, err)
 		}
 	}
 }

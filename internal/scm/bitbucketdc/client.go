@@ -226,11 +226,11 @@ func NewClient(opts Options) (*Client, error) {
 	if opts.Insecure {
 		transport.TLSClientConfig = tlsInsecureConfig()
 		warnings = append(warnings, fmt.Sprintf(
-			"TLS certificate verification was disabled (--insecure) for %s; this scan could have been intercepted", u.Host))
+			"TLS certificate verification was disabled (scan.insecure) for %s; this scan could have been intercepted", u.Host))
 	}
 	if u.Scheme == "http" && !isLoopback(u) {
 		warnings = append(warnings, fmt.Sprintf(
-			"credentials were sent in cleartext over http:// to %s (--allow-plaintext)", u.Host))
+			"credentials were sent in cleartext over http:// to %s (scan.allowPlaintext)", u.Host))
 	}
 	if urlHadCredentials {
 		// Said out loud rather than dropped in silence: someone who put a
@@ -315,7 +315,7 @@ func checkTransport(u *url.URL, allowPlaintext bool) error {
 	// calling this, but an error message about protecting a credential is the
 	// last place that should depend on someone upstream having remembered to.
 	return fmt.Errorf("refusing to send credentials in cleartext to %s\n"+
-		"use https://, or pass --allow-plaintext if this network is genuinely trusted", u.Redacted())
+		"use https://, or override once with --set scan.allowPlaintext=true if this network is genuinely trusted", u.Redacted())
 }
 
 // redactURL renders a URL for an error message with any password removed.
