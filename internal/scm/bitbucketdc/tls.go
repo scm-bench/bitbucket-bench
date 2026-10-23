@@ -23,7 +23,7 @@ func tlsWithCAFile(path string) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan.caFile: %w", err)
 	}
-	pool, err := x509.SystemCertPool()
+	pool, err := systemCertPool()
 	if err != nil || pool == nil {
 		// Windows before Go 1.18 and some minimal containers have no
 		// enumerable system pool; the bundle alone is then what is trusted.
@@ -34,3 +34,7 @@ func tlsWithCAFile(path string) (*tls.Config, error) {
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
+
+// systemCertPool is a variable so a test can stand in a platform with no
+// enumerable system pool.
+var systemCertPool = x509.SystemCertPool
