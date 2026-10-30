@@ -39,7 +39,7 @@ bitbucket-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略
 ---
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/scm-bench/bitbucket-bench/main/docs/demo.gif" alt="bitbucket-bench scan --demo：每条发现附带修复所需的设置路径，最后是得分" width="800">
+  <img src="docs/demo.gif" alt="bitbucket-bench scan --demo：每条发现附带修复所需的设置路径，最后是得分" width="800">
 </p>
 
 自己试一下，不需要实例，也不需要 token —— `--demo` 会评估二进制里自带的示例：

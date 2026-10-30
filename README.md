@@ -43,7 +43,7 @@ the reference implementation of the family's
 ---
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/scm-bench/bitbucket-bench/main/docs/demo.gif" alt="bitbucket-bench scan --demo: findings with the settings path to fix each one, then the score" width="800">
+  <img src="docs/demo.gif" alt="bitbucket-bench scan --demo: findings with the settings path to fix each one, then the score" width="800">
 </p>
 
 Try it yourself, with no instance and no token — `--demo` evaluates a sample built into the binary:
