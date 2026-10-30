@@ -38,6 +38,20 @@ bitbucket-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略
 
 ---
 
+<p align="center">
+  <img src="docs/demo.gif" alt="bitbucket-bench scan --demo：每条发现附带修复所需的设置路径，最后是得分" width="800">
+</p>
+
+自己试一下，不需要实例，也不需要 token —— `--demo` 会评估二进制里自带的示例：
+
+```bash
+docker run --rm -t ghcr.io/scm-bench/bitbucket-bench:latest scan --demo
+```
+
+<sub>动画由 [`hack/demo.tape`](hack/demo.tape) 用 [vhs](https://github.com/charmbracelet/vhs) 录制。</sub>
+
+---
+
 ## 唯一需要先了解的设计决定
 
 **无法判定的规则输出 `MANUAL`，绝不输出 `PASS` 或 `FAIL`。**

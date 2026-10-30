@@ -42,6 +42,20 @@ the reference implementation of the family's
 
 ---
 
+<p align="center">
+  <img src="docs/demo.gif" alt="bitbucket-bench scan --demo: findings with the settings path to fix each one, then the score" width="800">
+</p>
+
+Try it yourself, with no instance and no token — `--demo` evaluates a sample built into the binary:
+
+```bash
+docker run --rm -t ghcr.io/scm-bench/bitbucket-bench:latest scan --demo
+```
+
+<sub>The recording is made by [`hack/demo.tape`](hack/demo.tape) with [vhs](https://github.com/charmbracelet/vhs).</sub>
+
+---
+
 ## The one design decision worth knowing
 
 **A control that could not be evaluated reports `MANUAL`, never `PASS` or `FAIL`.**
