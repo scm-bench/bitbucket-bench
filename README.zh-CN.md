@@ -38,30 +38,17 @@ bitbucket-bench 以**只读**方式抓取实例快照，用 Rego 编写的策略
 
 ---
 
-## 30 秒试用
+<p align="center">
+  <img src="https://raw.githubusercontent.com/scm-bench/bitbucket-bench/main/docs/demo.gif" alt="bitbucket-bench scan --demo：每条发现附带修复所需的设置路径，最后是得分" width="800">
+</p>
 
-不需要实例，不需要 token，也不用任何配置：二进制里自带一个示例实例，
-`--demo` 直接评估它。
+自己试一下，不需要实例，也不需要 token —— `--demo` 会评估二进制里自带的示例：
 
 ```bash
 docker run --rm -t ghcr.io/scm-bench/bitbucket-bench:latest scan --demo
 ```
 
-或者，装了 Go 的话：
-
-```bash
-go install github.com/scm-bench/bitbucket-bench/cmd/bitbucket-bench@latest
-bitbucket-bench scan --demo
-```
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/scm-bench/bitbucket-bench/main/docs/demo.svg" alt="bitbucket-bench scan --demo：每条发现附带修复所需的设置路径，最后是得分" width="760">
-</p>
-
-报告会标明这是示例数据。它以退出码 1 结束，因为示例里有 HIGH 级别的失败项——
-真实扫描同一个实例也会这样退出。准备好扫描自己的实例时，见[快速开始](#快速开始)。
-
-<sub>截图由 [`hack/demo-screenshot.sh`](hack/demo-screenshot.sh) 生成。</sub>
+<sub>动画由 [`hack/demo.tape`](hack/demo.tape) 用 [vhs](https://github.com/charmbracelet/vhs) 录制。</sub>
 
 ---
 
